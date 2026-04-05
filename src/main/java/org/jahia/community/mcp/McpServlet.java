@@ -174,9 +174,6 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
                 String auth = (String) ctx.get(AUTH_HEADER_KEY);
                 if (auth != null && !auth.isEmpty()) {
-                    if (auth.startsWith("McpToken ")) {
-                        auth = "APIToken " + auth.substring("McpToken ".length());
-                    }
                     requestBuilder.header("Authorization", auth);
                 }
 

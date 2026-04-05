@@ -9,7 +9,7 @@ The servlet registers itself at `/modules/mcp` and implements the stateless MCP 
 ```
 MCP Client (Claude Code)
     │  POST /modules/mcp
-    │  Authorization: McpToken <token>
+    │  Authorization: APIToken <token>
     ▼
 McpServlet  ──── forwards ────►  /modules/graphql
                                   Authorization: APIToken <token>
@@ -50,7 +50,7 @@ Add the following to `~/.claude/settings.json`:
       "type": "http",
       "url": "http://localhost:8080/modules/mcp",
       "headers": {
-        "authorization": "McpToken <your-token>"
+        "authorization": "APIToken <your-token>"
       }
     }
   }
