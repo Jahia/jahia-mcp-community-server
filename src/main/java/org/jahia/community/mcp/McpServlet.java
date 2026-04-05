@@ -10,56 +10,53 @@ import io.modelcontextprotocol.server.McpStatelessServerHandler;
 import io.modelcontextprotocol.server.McpStatelessSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
-import org.jahia.services.content.JCRTemplate;
-import org.jahia.services.securityfilter.PermissionService;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Deactivate;
-import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
-import javax.jcr.query.Query;
 import javax.servlet.Servlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.Map;
 import java.util.stream.Collectors;
 
-@Component(service = {HttpServlet.class, Servlet.class}, property = {"alias=/mcp"})
+@Component(service = {HttpServlet.class, Servlet.class},
+        property = {"alias=/mcp"},
+        configurationPid = "org.jahia.community.mcp.McpServlet")
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpServlet.class);
     private static final String CONTENT_TYPE_JSON = "application/json;charset=UTF-8";
 
+    @interface Config {
+        String graphql_endpoint() default "http://localhost:8080/modules/graphql";
+        String graphql_apiToken() default "";
+    }
+
     private final McpJsonMapper jsonMapper = new JacksonMcpJsonMapper(new ObjectMapper());
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private McpStatelessServerHandler mcpHandler;
     private McpStatelessSyncServer mcpServer;
-    private PermissionService permissionService;
-
-    private static String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
-
-    @Reference
-    public void setPermissionService(PermissionService service) {
-        this.permissionService = service;
-    }
-
-    // -------------------------------------------------------------------------
-    // McpStatelessServerTransport
-    // -------------------------------------------------------------------------
+    private HttpClient httpClient;
+    private String graphqlEndpoint;
+    private String apiToken;
 
     @Activate
-    public void activate() {
+    public void activate(Config config) {
+        this.graphqlEndpoint = config.graphql_endpoint();
+        this.apiToken = config.graphql_apiToken();
+        this.httpClient = HttpClient.newHttpClient();
+
         Thread currentThread = Thread.currentThread();
         ClassLoader originalCL = currentThread.getContextClassLoader();
         currentThread.setContextClassLoader(McpServlet.class.getClassLoader());
@@ -67,12 +64,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             mcpServer = McpServer.sync(this)
                     .serverInfo("jahia-mcp", "1.0.0")
                     .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
-                    .tools(searchNodesTool(), getNodeTool(), listChildrenTool())
+                    .tools(executeGraphQLTool())
                     .build();
         } finally {
             currentThread.setContextClassLoader(originalCL);
         }
-        LOGGER.info("Jahia MCP server activated at /modules/mcp");
+        LOGGER.info("Jahia MCP server activated at /modules/mcp (GraphQL endpoint: {})", graphqlEndpoint);
     }
 
     @Deactivate
@@ -83,7 +80,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     // -------------------------------------------------------------------------
-    // HTTP dispatch
+    // McpStatelessServerTransport
     // -------------------------------------------------------------------------
 
     @Override
@@ -97,7 +94,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     // -------------------------------------------------------------------------
-    // Tool definitions
+    // HTTP dispatch
     // -------------------------------------------------------------------------
 
     @Override
@@ -138,200 +135,73 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
     }
 
+    // -------------------------------------------------------------------------
+    // Tool definitions
+    // -------------------------------------------------------------------------
+
     /**
-     * Tool: searchNodes
-     * Executes a JCR SQL2 query and returns paths + primary types of matches.
+     * Tool: executeGraphQL
+     * Executes any GraphQL operation against the Jahia graphql-dxm-provider endpoint.
+     * This gives access to all operations: jcr { nodeByPath, nodeById, nodesByQuery,
+     * nodesByCriteria, ... }, mutations, admin queries, and any other operation
+     * registered by graphql-dxm-provider or its extensions.
      */
-    private McpStatelessServerFeatures.SyncToolSpecification searchNodesTool() {
+    private McpStatelessServerFeatures.SyncToolSpecification executeGraphQLTool() {
         String schema = "{"
                 + "\"type\":\"object\","
                 + "\"properties\":{"
-                + "  \"query\":{\"type\":\"string\",\"description\":\"JCR SQL2 query string\"},"
-                + "  \"limit\":{\"type\":\"integer\",\"description\":\"Maximum number of results (default 20, max 100)\"}"
+                + "  \"query\":{\"type\":\"string\",\"description\":\"GraphQL query or mutation string\"},"
+                + "  \"variables\":{\"type\":\"object\",\"description\":\"Optional variables map for the GraphQL operation\"}"
                 + "},"
                 + "\"required\":[\"query\"]"
                 + "}";
 
         McpSchema.Tool tool = McpSchema.Tool.builder()
-                .name("searchNodes")
-                .description("Execute a JCR SQL2 query against Jahia and return matching node paths and primary types. "
-                        + "Example: SELECT * FROM [jnt:page] WHERE ISDESCENDANTNODE('/sites/mySite')")
+                .name("executeGraphQL")
+                .description("Execute any GraphQL operation against Jahia's graphql-dxm-provider. "
+                        + "Supports all JCR queries (jcr { nodeByPath, nodeById, nodesById, nodesByPath, "
+                        + "nodesByQuery, nodesByCriteria }), JCR mutations, admin queries, and all other "
+                        + "operations registered by graphql-dxm-provider or its extensions.")
                 .inputSchema(jsonMapper, schema)
                 .build();
 
         return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
             String query = (String) req.arguments().get("query");
-            int limit = req.arguments().containsKey("limit")
-                    ? Math.min(((Number) req.arguments().get("limit")).intValue(), 100)
-                    : 20;
+            Object variables = req.arguments().get("variables");
 
             try {
-                String result = JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
-                    var qm = session.getWorkspace().getQueryManager();
-                    var q = qm.createQuery(query, Query.JCR_SQL2);
-                    q.setLimit(limit);
+                Map<String, Object> body = variables != null
+                        ? Map.of("query", query, "variables", variables)
+                        : Map.of("query", query);
+                String requestBody = objectMapper.writeValueAsString(body);
 
-                    StringBuilder sb = new StringBuilder("[");
-                    var nodes = q.execute().getNodes();
-                    while (nodes.hasNext()) {
-                        var node = nodes.nextNode();
-                        sb.append("{\"path\":\"").append(escapeJson(node.getPath()))
-                                .append("\",\"type\":\"").append(node.getPrimaryNodeType().getName())
-                                .append("\"},");
-                    }
-                    if (sb.length() > 1 && sb.charAt(sb.length() - 1) == ',') {
-                        sb.deleteCharAt(sb.length() - 1);
-                    }
-                    return sb.append("]").toString();
-                });
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(graphqlEndpoint))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody));
+
+                if (apiToken != null && !apiToken.isEmpty()) {
+                    requestBuilder.header("Authorization", "APIToken " + apiToken);
+                }
+
+                HttpResponse<String> response = httpClient.send(
+                        requestBuilder.build(),
+                        HttpResponse.BodyHandlers.ofString());
+
+                boolean isError = response.statusCode() >= 400;
+                if (isError) {
+                    LOGGER.warn("GraphQL endpoint returned HTTP {}", response.statusCode());
+                }
+
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent(result)
-                        .isError(false)
-                        .build();
-            } catch (Exception e) {
-                LOGGER.error("searchNodes failed for query: {}", query, e);
-                return McpSchema.CallToolResult.builder()
-                        .addTextContent("Erreur : " + e.getMessage())
-                        .isError(true)
-                        .build();
-            }
-        });
-    }
-
-    // -------------------------------------------------------------------------
-    // Utility
-    // -------------------------------------------------------------------------
-
-    /**
-     * Tool: getNode
-     * Returns a node's primary type, scalar properties, and direct child node names.
-     */
-    private McpStatelessServerFeatures.SyncToolSpecification getNodeTool() {
-        String schema = "{"
-                + "\"type\":\"object\","
-                + "\"properties\":{"
-                + "  \"path\":{\"type\":\"string\",\"description\":\"Absolute JCR node path, e.g. /sites/mySite/home\"}"
-                + "},"
-                + "\"required\":[\"path\"]"
-                + "}";
-
-        McpSchema.Tool tool = McpSchema.Tool.builder()
-                .name("getNode")
-                .description("Get a Jahia JCR node by absolute path, returning its type, "
-                        + "scalar properties, and direct child node names.")
-                .inputSchema(jsonMapper, schema)
-                .build();
-
-        return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
-            String path = (String) req.arguments().get("path");
-
-            try {
-                String result = JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
-                    var node = session.getNode(path);
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("{\"path\":\"").append(escapeJson(path)).append("\"")
-                            .append(",\"type\":\"").append(node.getPrimaryNodeType().getName()).append("\"")
-                            .append(",\"properties\":{");
-
-                    var props = node.getProperties();
-                    boolean firstProp = true;
-                    while (props.hasNext()) {
-                        var p = props.nextProperty();
-                        if (p.getDefinition().isMultiple()) {
-                            continue; // skip multi-value for brevity
-                        }
-                        try {
-                            if (!firstProp) sb.append(",");
-                            sb.append("\"").append(escapeJson(p.getName())).append("\":\"")
-                                    .append(escapeJson(p.getString())).append("\"");
-                            firstProp = false;
-                        } catch (Exception ignored) {
-                            // skip unreadable properties
-                        }
-                    }
-
-                    sb.append("},\"children\":[");
-                    var children = node.getNodes();
-                    boolean firstChild = true;
-                    while (children.hasNext()) {
-                        var child = children.nextNode();
-                        if (!firstChild) sb.append(",");
-                        sb.append("{\"name\":\"").append(escapeJson(child.getName()))
-                                .append("\",\"type\":\"").append(child.getPrimaryNodeType().getName())
-                                .append("\"}");
-                        firstChild = false;
-                    }
-                    sb.append("]}");
-                    return sb.toString();
-                });
-                return McpSchema.CallToolResult.builder()
-                        .addTextContent(result)
-                        .isError(false)
+                        .addTextContent(response.body())
+                        .isError(isError)
                         .build();
 
             } catch (Exception e) {
-                LOGGER.error("getNode failed for path: {}", path, e);
+                LOGGER.error("executeGraphQL failed for query: {}", query, e);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("Erreur : " + e.getMessage())
-                        .isError(true)
-                        .build();
-            }
-        });
-    }
-
-    /**
-     * Tool: listChildren
-     * Lists direct children of a node, with optional filtering by node type.
-     */
-    private McpStatelessServerFeatures.SyncToolSpecification listChildrenTool() {
-        String schema = "{"
-                + "\"type\":\"object\","
-                + "\"properties\":{"
-                + "  \"path\":{\"type\":\"string\",\"description\":\"Absolute JCR node path\"},"
-                + "  \"nodeType\":{\"type\":\"string\",\"description\":\"Filter by node type, e.g. jnt:page (optional)\"}"
-                + "},"
-                + "\"required\":[\"path\"]"
-                + "}";
-
-        McpSchema.Tool tool = McpSchema.Tool.builder()
-                .name("listChildren")
-                .description("List direct child nodes of a given JCR path, "
-                        + "optionally filtered by node type.")
-                .inputSchema(jsonMapper, schema)
-                .build();
-
-        return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
-            String path = (String) req.arguments().get("path");
-            String nodeType = (String) req.arguments().getOrDefault("nodeType", null);
-
-            try {
-                String result = JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
-                    var node = session.getNode(path);
-                    StringBuilder sb = new StringBuilder("[");
-                    var children = node.getNodes();
-                    boolean first = true;
-                    while (children.hasNext()) {
-                        var child = children.nextNode();
-                        if (nodeType != null && !child.isNodeType(nodeType)) {
-                            continue;
-                        }
-                        if (!first) sb.append(",");
-                        sb.append("{\"name\":\"").append(escapeJson(child.getName()))
-                                .append("\",\"path\":\"").append(escapeJson(child.getPath()))
-                                .append("\",\"type\":\"").append(child.getPrimaryNodeType().getName())
-                                .append("\"}");
-                        first = false;
-                    }
-                    return sb.append("]").toString();
-                });
-                return McpSchema.CallToolResult.builder()
-                        .addTextContent(result)
-                        .isError(false)
-                        .build();
-            } catch (Exception e) {
-                LOGGER.error("listChildren failed for path: {}", path, e);
-                return McpSchema.CallToolResult.builder()
-                        .addTextContent("Erreur : " + e.getMessage())
+                        .addTextContent("Error: " + e.getMessage())
                         .isError(true)
                         .build();
             }
