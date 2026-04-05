@@ -1,13 +1,13 @@
 package org.jahia.community.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures;
 import io.modelcontextprotocol.server.McpStatelessServerHandler;
 import io.modelcontextprotocol.server.McpStatelessSyncServer;
-import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
 import org.jahia.services.content.JCRTemplate;
@@ -26,19 +26,8 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * MCP (Model Context Protocol) servlet for Jahia.
- *
- * Registers at /modules/mcp and exposes Jahia JCR operations as MCP tools
- * so that Claude (or any MCP client) can query and navigate content.
- *
- * HttpServletStatelessServerTransport uses jakarta.servlet and has a private
- * constructor, so this servlet implements McpStatelessServerTransport directly
- * and extends javax.servlet.HttpServlet for Jahia OSGi compatibility.
- */
 @Component(service = {HttpServlet.class, Servlet.class}, property = {"alias=/mcp"})
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
 
@@ -51,18 +40,38 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private McpStatelessSyncServer mcpServer;
     private PermissionService permissionService;
 
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
     @Reference
     public void setPermissionService(PermissionService service) {
         this.permissionService = service;
     }
 
+    // -------------------------------------------------------------------------
+    // McpStatelessServerTransport
+    // -------------------------------------------------------------------------
+
     @Activate
     public void activate() {
-        mcpServer = McpServer.sync(this)
-                .serverInfo("jahia-mcp", "1.0.0")
-                .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
-                .tools(searchNodesTool(), getNodeTool(), listChildrenTool())
-                .build();
+        Thread currentThread = Thread.currentThread();
+        ClassLoader originalCL = currentThread.getContextClassLoader();
+        currentThread.setContextClassLoader(McpServlet.class.getClassLoader());
+        try {
+            mcpServer = McpServer.sync(this)
+                    .serverInfo("jahia-mcp", "1.0.0")
+                    .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
+                    .tools(searchNodesTool(), getNodeTool(), listChildrenTool())
+                    .build();
+        } finally {
+            currentThread.setContextClassLoader(originalCL);
+        }
         LOGGER.info("Jahia MCP server activated at /modules/mcp");
     }
 
@@ -74,7 +83,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     // -------------------------------------------------------------------------
-    // McpStatelessServerTransport
+    // HTTP dispatch
     // -------------------------------------------------------------------------
 
     @Override
@@ -88,7 +97,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     // -------------------------------------------------------------------------
-    // HTTP dispatch
+    // Tool definitions
     // -------------------------------------------------------------------------
 
     @Override
@@ -129,10 +138,6 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
     }
 
-    // -------------------------------------------------------------------------
-    // Tool definitions
-    // -------------------------------------------------------------------------
-
     /**
      * Tool: searchNodes
      * Executes a JCR SQL2 query and returns paths + primary types of matches.
@@ -171,22 +176,31 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                     while (nodes.hasNext()) {
                         var node = nodes.nextNode();
                         sb.append("{\"path\":\"").append(escapeJson(node.getPath()))
-                          .append("\",\"type\":\"").append(node.getPrimaryNodeType().getName())
-                          .append("\"},");
+                                .append("\",\"type\":\"").append(node.getPrimaryNodeType().getName())
+                                .append("\"},");
                     }
                     if (sb.length() > 1 && sb.charAt(sb.length() - 1) == ',') {
                         sb.deleteCharAt(sb.length() - 1);
                     }
                     return sb.append("]").toString();
                 });
-                return new McpSchema.CallToolResult(List.of(new McpSchema.TextContent(result)), false);
-
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent(result)
+                        .isError(false)
+                        .build();
             } catch (Exception e) {
                 LOGGER.error("searchNodes failed for query: {}", query, e);
-                return new McpSchema.CallToolResult("Error: " + e.getMessage(), true);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("Erreur : " + e.getMessage())
+                        .isError(true)
+                        .build();
             }
         });
     }
+
+    // -------------------------------------------------------------------------
+    // Utility
+    // -------------------------------------------------------------------------
 
     /**
      * Tool: getNode
@@ -216,8 +230,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                     var node = session.getNode(path);
                     StringBuilder sb = new StringBuilder();
                     sb.append("{\"path\":\"").append(escapeJson(path)).append("\"")
-                      .append(",\"type\":\"").append(node.getPrimaryNodeType().getName()).append("\"")
-                      .append(",\"properties\":{");
+                            .append(",\"type\":\"").append(node.getPrimaryNodeType().getName()).append("\"")
+                            .append(",\"properties\":{");
 
                     var props = node.getProperties();
                     boolean firstProp = true;
@@ -229,7 +243,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         try {
                             if (!firstProp) sb.append(",");
                             sb.append("\"").append(escapeJson(p.getName())).append("\":\"")
-                              .append(escapeJson(p.getString())).append("\"");
+                                    .append(escapeJson(p.getString())).append("\"");
                             firstProp = false;
                         } catch (Exception ignored) {
                             // skip unreadable properties
@@ -243,18 +257,24 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         var child = children.nextNode();
                         if (!firstChild) sb.append(",");
                         sb.append("{\"name\":\"").append(escapeJson(child.getName()))
-                          .append("\",\"type\":\"").append(child.getPrimaryNodeType().getName())
-                          .append("\"}");
+                                .append("\",\"type\":\"").append(child.getPrimaryNodeType().getName())
+                                .append("\"}");
                         firstChild = false;
                     }
                     sb.append("]}");
                     return sb.toString();
                 });
-                return new McpSchema.CallToolResult(List.of(new McpSchema.TextContent(result)), false);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent(result)
+                        .isError(false)
+                        .build();
 
             } catch (Exception e) {
                 LOGGER.error("getNode failed for path: {}", path, e);
-                return new McpSchema.CallToolResult("Error: " + e.getMessage(), true);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("Erreur : " + e.getMessage())
+                        .isError(true)
+                        .build();
             }
         });
     }
@@ -297,32 +317,24 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         }
                         if (!first) sb.append(",");
                         sb.append("{\"name\":\"").append(escapeJson(child.getName()))
-                          .append("\",\"path\":\"").append(escapeJson(child.getPath()))
-                          .append("\",\"type\":\"").append(child.getPrimaryNodeType().getName())
-                          .append("\"}");
+                                .append("\",\"path\":\"").append(escapeJson(child.getPath()))
+                                .append("\",\"type\":\"").append(child.getPrimaryNodeType().getName())
+                                .append("\"}");
                         first = false;
                     }
                     return sb.append("]").toString();
                 });
-                return new McpSchema.CallToolResult(List.of(new McpSchema.TextContent(result)), false);
-
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent(result)
+                        .isError(false)
+                        .build();
             } catch (Exception e) {
                 LOGGER.error("listChildren failed for path: {}", path, e);
-                return new McpSchema.CallToolResult("Error: " + e.getMessage(), true);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("Erreur : " + e.getMessage())
+                        .isError(true)
+                        .build();
             }
         });
-    }
-
-    // -------------------------------------------------------------------------
-    // Utility
-    // -------------------------------------------------------------------------
-
-    private static String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
     }
 }

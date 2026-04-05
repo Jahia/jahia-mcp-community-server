@@ -25,20 +25,18 @@
         <!-- MCP SDK 0.17.0 is compiled with Java 17 (class version 61.0) -->
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"
+        </require-capability>
+        <!--        <import-package>org.apache.naming.java</import-package>-->
     </properties>
     <dependencies>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
-            <version>1.1.1</version>
-        </dependency>
-        <!-- Explicit deps so these JARs are direct dependencies and can be embedded in the bundle.
-             mcp-core contains all server/spec/common MCP classes.
-             mcp-json and mcp-json-jackson2 provide the JSON mapper. -->
+        <!-- mcp-core contains all server/spec/common MCP classes.
+             mcp-json and mcp-json-jackson2 provide the JSON mapper.
+             Embed-Transitive=true embeds their full dependency tree. -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp-core</artifactId>
-            <version>0.17.0</version>
+            <version>1.1.1</version>
         </dependency>
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
@@ -74,29 +72,10 @@
                 <extensions>true</extensions>
                 <configuration>
                     <instructions>
-                        <!--
-                          Embed the MCP SDK JARs directly into this bundle since they are
-                          not deployed as separate OSGi bundles in Jahia's container.
-                          reactor-core, jackson-databind, and slf4j are already provided
-                          by Jahia's OSGi runtime, so they remain as imports.
-                        -->
-                        <Embed-Dependency>
-                            mcp-core,
-                            mcp-json,
-                            mcp-json-jackson2
-                        </Embed-Dependency>
-                        <Embed-Transitive>false</Embed-Transitive>
-                        <Import-Package>
-                            org.jahia.*,
-                            javax.jcr.*,
-                            javax.servlet.*,
-                            com.fasterxml.jackson.databind.*,
-                            com.fasterxml.jackson.core.*,
-                            com.fasterxml.jackson.annotation.*,
-                            reactor.core.publisher.*,
-                            org.slf4j.*,
-                            *;resolution:=optional
-                        </Import-Package>
+                        <_dsannotations>org.jahia.community.mcp.*</_dsannotations>
+                        <Embed-Transitive>true</Embed-Transitive>
+                        <Import-Package>!org.apache.naming.java,!org.apache.catalina.*,!org.apache.tomcat.util.net.openssl.panama,*</Import-Package>
+                        <_contract>!JakartaServlet,!ReactiveStreams</_contract>
                     </instructions>
                 </configuration>
             </plugin>
