@@ -36,25 +36,17 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpServlet.class);
     private static final String CONTENT_TYPE_JSON = "application/json;charset=UTF-8";
-
-    @interface Config {
-        String graphql_endpoint() default "http://localhost:8080/modules/graphql";
-        String graphql_apiToken() default "";
-    }
-
+    private static final String AUTH_HEADER_KEY = "authorization";
     private final McpJsonMapper jsonMapper = new JacksonMcpJsonMapper(new ObjectMapper());
     private final ObjectMapper objectMapper = new ObjectMapper();
-
     private McpStatelessServerHandler mcpHandler;
     private McpStatelessSyncServer mcpServer;
     private HttpClient httpClient;
     private String graphqlEndpoint;
-    private String apiToken;
 
     @Activate
     public void activate(Config config) {
         this.graphqlEndpoint = config.graphql_endpoint();
-        this.apiToken = config.graphql_apiToken();
         this.httpClient = HttpClient.newHttpClient();
 
         Thread currentThread = Thread.currentThread();
@@ -79,23 +71,19 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
     }
 
-    // -------------------------------------------------------------------------
-    // McpStatelessServerTransport
-    // -------------------------------------------------------------------------
-
     @Override
     public void setMcpHandler(McpStatelessServerHandler handler) {
         this.mcpHandler = handler;
     }
 
+    // -------------------------------------------------------------------------
+    // McpStatelessServerTransport
+    // -------------------------------------------------------------------------
+
     @Override
     public Mono<Void> closeGracefully() {
         return Mono.empty();
     }
-
-    // -------------------------------------------------------------------------
-    // HTTP dispatch
-    // -------------------------------------------------------------------------
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
@@ -107,19 +95,23 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         String body = req.getReader().lines().collect(Collectors.joining());
         LOGGER.debug("MCP request: {}", body);
 
+        String authHeader = req.getHeader("Authorization");
+        McpTransportContext transportContext = authHeader != null
+                ? McpTransportContext.create(Map.of(AUTH_HEADER_KEY, authHeader))
+                : McpTransportContext.EMPTY;
         try {
             McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(jsonMapper, body);
 
             if (message instanceof McpSchema.JSONRPCRequest) {
                 McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
                 McpSchema.JSONRPCResponse response =
-                        mcpHandler.handleRequest(McpTransportContext.EMPTY, request).block();
+                        mcpHandler.handleRequest(transportContext, request).block();
                 resp.setContentType(CONTENT_TYPE_JSON);
                 resp.getWriter().write(jsonMapper.writeValueAsString(response));
 
             } else if (message instanceof McpSchema.JSONRPCNotification) {
                 McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
-                mcpHandler.handleNotification(McpTransportContext.EMPTY, notification).block();
+                mcpHandler.handleNotification(transportContext, notification).block();
                 resp.setStatus(HttpServletResponse.SC_ACCEPTED);
             }
 
@@ -129,15 +121,15 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
     }
 
+    // -------------------------------------------------------------------------
+    // HTTP dispatch
+    // -------------------------------------------------------------------------
+
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         resp.setContentType(CONTENT_TYPE_JSON);
         resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
     }
-
-    // -------------------------------------------------------------------------
-    // Tool definitions
-    // -------------------------------------------------------------------------
 
     /**
      * Tool: executeGraphQL
@@ -180,8 +172,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(requestBody));
 
-                if (apiToken != null && !apiToken.isEmpty()) {
-                    requestBuilder.header("Authorization", "APIToken " + apiToken);
+                String auth = (String) ctx.get(AUTH_HEADER_KEY);
+                if (auth != null && !auth.isEmpty()) {
+                    if (auth.startsWith("McpToken ")) {
+                        auth = "APIToken " + auth.substring("McpToken ".length());
+                    }
+                    requestBuilder.header("Authorization", auth);
                 }
 
                 HttpResponse<String> response = httpClient.send(
@@ -206,5 +202,13 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         .build();
             }
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Tool definitions
+    // -------------------------------------------------------------------------
+
+    @interface Config {
+        String graphql_endpoint() default "http://localhost:8080/modules/graphql";
     }
 }

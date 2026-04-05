@@ -22,17 +22,13 @@
     </scm>
 
     <properties>
-        <!-- MCP SDK 0.17.0 is compiled with Java 17 (class version 61.0) -->
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
-        <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"
+        <require-capability>
+            osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"
         </require-capability>
-        <!--        <import-package>org.apache.naming.java</import-package>-->
     </properties>
     <dependencies>
-        <!-- mcp-core contains all server/spec/common MCP classes.
-             mcp-json and mcp-json-jackson2 provide the JSON mapper.
-             Embed-Transitive=true embeds their full dependency tree. -->
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp-core</artifactId>
@@ -74,7 +70,9 @@
                     <instructions>
                         <_dsannotations>org.jahia.community.mcp.*</_dsannotations>
                         <Embed-Transitive>true</Embed-Transitive>
-                        <Import-Package>!org.apache.naming.java,!org.apache.catalina.*,!org.apache.tomcat.util.net.openssl.panama,*</Import-Package>
+                        <Import-Package>
+                            !org.apache.naming.java,!org.apache.catalina.*,!org.apache.tomcat.util.net.openssl.panama,*
+                        </Import-Package>
                         <_contract>!JakartaServlet,!ReactiveStreams</_contract>
                     </instructions>
                 </configuration>
