@@ -10,13 +10,16 @@ import io.modelcontextprotocol.server.McpStatelessServerHandler;
 import io.modelcontextprotocol.server.McpStatelessSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
+import org.jahia.services.securityfilter.PermissionService;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Deactivate;
+import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
+import javax.jcr.RepositoryException;
 import javax.servlet.Servlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -30,7 +33,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component(service = {HttpServlet.class, Servlet.class},
-        property = {"alias=/mcp"},
+        property = {"alias=/mcp", "allow-api-token=true"},
         configurationPid = "org.jahia.community.mcp")
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
 
@@ -43,6 +46,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private McpStatelessSyncServer mcpServer;
     private HttpClient httpClient;
     private String graphqlEndpoint;
+    private PermissionService permissionService;
 
     @Activate
     public void activate(Config config) {
@@ -85,6 +89,11 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         return Mono.empty();
     }
 
+    @Reference
+    public void setPermissionService(PermissionService permissionService) {
+        this.permissionService = permissionService;
+    }
+
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         if (mcpHandler == null) {
@@ -92,32 +101,39 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             return;
         }
 
-        String body = req.getReader().lines().collect(Collectors.joining());
-        LOGGER.debug("MCP request: {}", body);
-
-        String authHeader = req.getHeader("Authorization");
-        McpTransportContext transportContext = authHeader != null
-                ? McpTransportContext.create(Map.of(AUTH_HEADER_KEY, authHeader))
-                : McpTransportContext.EMPTY;
         try {
-            McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(jsonMapper, body);
+            if (permissionService.hasPermission("mcp")) {
 
-            if (message instanceof McpSchema.JSONRPCRequest) {
-                McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
-                McpSchema.JSONRPCResponse response =
-                        mcpHandler.handleRequest(transportContext, request).block();
-                resp.setContentType(CONTENT_TYPE_JSON);
-                resp.getWriter().write(jsonMapper.writeValueAsString(response));
+                String body = req.getReader().lines().collect(Collectors.joining());
+                LOGGER.debug("MCP request: {}", body);
 
-            } else if (message instanceof McpSchema.JSONRPCNotification) {
-                McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
-                mcpHandler.handleNotification(transportContext, notification).block();
-                resp.setStatus(HttpServletResponse.SC_ACCEPTED);
+                String authHeader = req.getHeader("Authorization");
+                McpTransportContext transportContext = authHeader != null
+                        ? McpTransportContext.create(Map.of(AUTH_HEADER_KEY, authHeader))
+                        : McpTransportContext.EMPTY;
+                try {
+                    McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(jsonMapper, body);
+
+                    if (message instanceof McpSchema.JSONRPCRequest) {
+                        McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
+                        McpSchema.JSONRPCResponse response =
+                                mcpHandler.handleRequest(transportContext, request).block();
+                        resp.setContentType(CONTENT_TYPE_JSON);
+                        resp.getWriter().write(jsonMapper.writeValueAsString(response));
+
+                    } else if (message instanceof McpSchema.JSONRPCNotification) {
+                        McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
+                        mcpHandler.handleNotification(transportContext, notification).block();
+                        resp.setStatus(HttpServletResponse.SC_ACCEPTED);
+                    }
+
+                } catch (Exception ex) {
+                    LOGGER.error("Error processing MCP request", ex);
+                    resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, ex.getMessage());
+                }
             }
-
-        } catch (Exception e) {
-            LOGGER.error("Error processing MCP request", e);
-            resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, e.getMessage());
+        } catch (RepositoryException ex) {
+            throw new RuntimeException(ex);
         }
     }
 
@@ -127,8 +143,14 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        resp.setContentType(CONTENT_TYPE_JSON);
-        resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
+        try {
+            if (permissionService.hasPermission("mcp")) {
+                resp.setContentType(CONTENT_TYPE_JSON);
+                resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
+            }
+        } catch (RepositoryException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /**

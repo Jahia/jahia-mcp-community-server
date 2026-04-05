@@ -1,0 +1,10 @@
+mcp:
+  description: Can access MCP servlet
+  metadata:
+    visible: true
+  auto_apply:
+    - always: true
+  constraints:
+    - privileged_user: true
+  grants:
+    - api: mcp
