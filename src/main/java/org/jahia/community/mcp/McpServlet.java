@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 
 @Component(service = {HttpServlet.class, Servlet.class},
         property = {"alias=/mcp"},
-        configurationPid = "org.jahia.community.mcp.McpServlet")
+        configurationPid = "org.jahia.community.mcp")
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpServlet.class);
