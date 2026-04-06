@@ -25,7 +25,7 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <require-capability>
-            osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"
+            osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)",osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
         </require-capability>
     </properties>
     <dependencies>
