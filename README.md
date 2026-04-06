@@ -1,5 +1,7 @@
 # Jahia MCP Community Server
 
+**GitHub:** https://github.com/Jahia/jahia-mcp-community-server
+
 An OSGi bundle that exposes Jahia's GraphQL API as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI assistants such as Claude to query and mutate Jahia content directly.
 
 ## How it works
@@ -84,3 +86,13 @@ Supported operations include all `jcr` queries (`nodeByPath`, `nodeById`, `nodes
 The servlet reads the `Authorization` header from the incoming MCP request and passes it through to the internal GraphQL servlet. It also forwards the current Jahia user from the JCR session, so all existing JCR access controls are enforced.
 
 No credentials are stored in the bundle itself — the caller is always responsible for supplying a valid API token.
+
+Access to the `/modules/mcp` endpoint requires the usage of a personal API token **AND** the `mcp` permission, which is granted to users with the `admin` role (configured in `META-INF/configurations/org.jahia.bundles.api.authorization-mcp.yml`).
+
+## Health check
+
+A `GET /modules/mcp` request returns a JSON status response if the caller has the `mcp` permission:
+
+```json
+{"status":"Jahia MCP server running","version":"1.0.0"}
+```
