@@ -10,16 +10,11 @@
         <version>8.2.2.1</version>
     </parent>
     <groupId>org.jahia.community</groupId>
-    <artifactId>jahia-mcp-servlet</artifactId>
-    <name>Jahia MCP Servlet</name>
+    <artifactId>jahia-mcp-community-servlet</artifactId>
+    <name>Jahia MCP Community Servlet</name>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
-    <description>This is the custom module (Jahia MCP Servlet) for running on a Jahia server.</description>
-
-    <scm>
-        <connection>scm:dummy:uri</connection>
-        <developerConnection>scm:dummy:uri</developerConnection>
-    </scm>
+    <description>An OSGi bundle that exposes Jahia's GraphQL API as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI assistants such as Claude to query and mutate/query Jahia content directly.</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
