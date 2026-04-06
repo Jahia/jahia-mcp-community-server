@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-                      http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0                       http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <artifactId>jahia-modules</artifactId>
@@ -12,7 +9,7 @@
     <groupId>org.jahia.community</groupId>
     <artifactId>jahia-mcp-community-server</artifactId>
     <name>Jahia MCP Community Server</name>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <packaging>bundle</packaging>
     <description>An OSGi bundle that exposes Jahia's GraphQL API as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI assistants such as Claude to query and mutate/query Jahia content directly.</description>
 
@@ -20,7 +17,7 @@
         <connection>scm:git:git@github.com:Jahia/jahia-mcp-community-server.git</connection>
         <developerConnection>scm:git:git@github.com:Jahia/jahia-mcp-community-server.git</developerConnection>
         <url>https://github.com/Jahia/jahia-mcp-community-server</url>
-        <tag>HEAD</tag>
+        <tag>1_0_0</tag>
     </scm>
 
     <properties>
