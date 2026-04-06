@@ -1,43 +1,30 @@
-# Jahia MCP Servlet
+# Jahia MCP Community Server
 
 An OSGi bundle that exposes Jahia's GraphQL API as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI assistants such as Claude to query and mutate Jahia content directly.
 
 ## How it works
 
-The servlet registers itself at `/modules/mcp` and implements the stateless MCP protocol over HTTP. When an MCP client calls the `executeGraphQL` tool, the servlet forwards the GraphQL request - along with the caller's `Authorization` header - to Jahia's internal GraphQL endpoint (`/modules/graphql`).
+The servlet registers itself at `/modules/mcp` and implements the stateless MCP protocol over HTTP. When an MCP client calls the `executeGraphQL` tool, the servlet dispatches the GraphQL request **in-process** via an OSGi service reference to `OsgiGraphQLHttpServlet` — no additional HTTP hop is involved.
 
 ```
 MCP Client (Claude Code)
     │  POST /modules/mcp
     │  Authorization: APIToken <token>
     ▼
-McpServlet  ──── forwards ────►  /modules/graphql
-                                  Authorization: APIToken <token>
+McpServlet  ──── OSGi service call ────►  OsgiGraphQLHttpServlet
+                                           (graphql-dxm-provider)
 ```
+
+The caller's `Authorization` header and the current Jahia user are forwarded to the GraphQL servlet so that all JCR permission checks apply normally.
 
 ## Requirements
 
 - Jahia 8.2+ with `graphql-dxm-provider` deployed
 - Java 17
-- A Jahia personal API token with sufficient JCR permissions
 
 ## Installation
 
 Deploy the bundle jar via the Jahia Module Manager.
-
-## Configuration
-
-The bundle is configured via the OSGi PID `org.jahia.community.mcp`:
-
-| Property | Default | Description |
-|---|---|---|
-| `graphql.endpoint` | `http://localhost:8080/modules/graphql` | Internal GraphQL endpoint the servlet proxies to |
-
-To override, create or edit `$JAHIA_HOME/digital-factory-data/karaf/etc/org.jahia.community.mcp.cfg`:
-
-```properties
-graphql.endpoint=http://localhost:8080/modules/graphql
-```
 
 ## MCP client setup (Claude Code)
 
@@ -72,11 +59,11 @@ Executes any GraphQL query or mutation against Jahia's `graphql-dxm-provider`.
 | `query` | string | yes | GraphQL query or mutation |
 | `variables` | object | no | Variables map for the operation |
 
-**Example - list root nodes:**
+**Example — list root nodes:**
 
 ```graphql
 query {
-  jcr(workspace: EDIT) {
+  jcr {
     nodeByPath(path: "/") {
       children {
         nodes {
@@ -94,6 +81,6 @@ Supported operations include all `jcr` queries (`nodeByPath`, `nodeById`, `nodes
 
 ## Authentication
 
-The servlet reads the `Authorization` header from the incoming MCP request and forwards it as-is to the GraphQL endpoint. If the header uses the `CmpToken ` prefix (legacy), it is automatically rewritten to `APIToken `.
+The servlet reads the `Authorization` header from the incoming MCP request and passes it through to the internal GraphQL servlet. It also forwards the current Jahia user from the JCR session, so all existing JCR access controls are enforced.
 
-No token is stored in the bundle itself - the caller is always responsible for supplying valid credentials.
+No credentials are stored in the bundle itself — the caller is always responsible for supplying a valid API token.
