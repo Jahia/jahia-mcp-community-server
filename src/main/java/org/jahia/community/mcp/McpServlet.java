@@ -10,7 +10,10 @@ import io.modelcontextprotocol.server.McpStatelessServerHandler;
 import io.modelcontextprotocol.server.McpStatelessSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
+import org.jahia.bin.filters.jcr.JcrSessionFilter;
+import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.securityfilter.PermissionService;
+import org.jahia.services.usermanager.JahiaUser;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Deactivate;
@@ -20,39 +23,52 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
 import javax.jcr.RepositoryException;
-import javax.servlet.Servlet;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import javax.servlet.*;
+import javax.servlet.http.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component(service = {HttpServlet.class, Servlet.class},
-        property = {"alias=/mcp", "allow-api-token=true"},
-        configurationPid = "org.jahia.community.mcp")
+        property = {"alias=/mcp", "allow-api-token=true"})
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpServlet.class);
     private static final String CONTENT_TYPE_JSON = "application/json;charset=UTF-8";
     private static final String AUTH_HEADER_KEY = "authorization";
+    private static final String JAHIA_USER_KEY = "jahia.user";
+    // Dummy no-op request used as the required non-null delegate for HttpServletRequestWrapper
+    private static final HttpServletRequest DUMMY_REQUEST = (HttpServletRequest) java.lang.reflect.Proxy.newProxyInstance(
+            McpServlet.class.getClassLoader(),
+            new Class[]{HttpServletRequest.class},
+            (proxy, method, args) -> {
+                if (method.getReturnType() == boolean.class) return false;
+                if (method.getReturnType() == int.class) return 0;
+                if (method.getReturnType() == long.class) return 0L;
+                return null;
+            });
+    // Dummy no-op response used as the required non-null delegate for HttpServletResponseWrapper
+    private static final HttpServletResponse DUMMY_RESPONSE = (HttpServletResponse) java.lang.reflect.Proxy.newProxyInstance(
+            McpServlet.class.getClassLoader(),
+            new Class[]{HttpServletResponse.class},
+            (proxy, method, args) -> {
+                if (method.getReturnType() == boolean.class) return false;
+                if (method.getReturnType() == int.class) return 0;
+                if (method.getReturnType() == long.class) return 0L;
+                return null;
+            });
     private final McpJsonMapper jsonMapper = new JacksonMcpJsonMapper(new ObjectMapper());
     private final ObjectMapper objectMapper = new ObjectMapper();
     private McpStatelessServerHandler mcpHandler;
     private McpStatelessSyncServer mcpServer;
-    private HttpClient httpClient;
-    private String graphqlEndpoint;
     private PermissionService permissionService;
+    private HttpServlet gql;
 
     @Activate
-    public void activate(Config config) {
-        this.graphqlEndpoint = config.graphql_endpoint();
-        this.httpClient = HttpClient.newHttpClient();
-
+    public void activate() {
         Thread currentThread = Thread.currentThread();
         ClassLoader originalCL = currentThread.getContextClassLoader();
         currentThread.setContextClassLoader(McpServlet.class.getClassLoader());
@@ -65,8 +81,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         } finally {
             currentThread.setContextClassLoader(originalCL);
         }
-        LOGGER.info("Jahia MCP server activated at /modules/mcp (GraphQL endpoint: {})", graphqlEndpoint);
+        LOGGER.info("Jahia MCP server activated at /modules/mcp (using internal GraphQL servlet)");
     }
+
+    // -------------------------------------------------------------------------
+    // McpStatelessServerTransport
+    // -------------------------------------------------------------------------
 
     @Deactivate
     public void deactivate() {
@@ -80,10 +100,6 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         this.mcpHandler = handler;
     }
 
-    // -------------------------------------------------------------------------
-    // McpStatelessServerTransport
-    // -------------------------------------------------------------------------
-
     @Override
     public Mono<Void> closeGracefully() {
         return Mono.empty();
@@ -92,6 +108,15 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     @Reference
     public void setPermissionService(PermissionService permissionService) {
         this.permissionService = permissionService;
+    }
+
+    // -------------------------------------------------------------------------
+    // HTTP dispatch
+    // -------------------------------------------------------------------------
+
+    @Reference(service = HttpServlet.class, target = "(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)")
+    public void setGql(HttpServlet gql) {
+        this.gql = gql;
     }
 
     @Override
@@ -108,9 +133,13 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 LOGGER.debug("MCP request: {}", body);
 
                 String authHeader = req.getHeader("Authorization");
-                McpTransportContext transportContext = authHeader != null
-                        ? McpTransportContext.create(Map.of(AUTH_HEADER_KEY, authHeader))
-                        : McpTransportContext.EMPTY;
+                JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
+                Map<String, Object> ctxMap = new java.util.HashMap<>();
+                if (authHeader != null) ctxMap.put(AUTH_HEADER_KEY, authHeader);
+                if (currentUser != null) ctxMap.put(JAHIA_USER_KEY, currentUser);
+                McpTransportContext transportContext = ctxMap.isEmpty()
+                        ? McpTransportContext.EMPTY
+                        : McpTransportContext.create(ctxMap);
                 try {
                     McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(jsonMapper, body);
 
@@ -138,7 +167,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     // -------------------------------------------------------------------------
-    // HTTP dispatch
+    // Tool definitions
     // -------------------------------------------------------------------------
 
     @Override
@@ -189,27 +218,27 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         : Map.of("query", query);
                 String requestBody = objectMapper.writeValueAsString(body);
 
-                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                        .uri(URI.create(graphqlEndpoint))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(requestBody));
-
                 String auth = (String) ctx.get(AUTH_HEADER_KEY);
-                if (auth != null && !auth.isEmpty()) {
-                    requestBuilder.header("Authorization", auth);
+                JahiaUser user = (JahiaUser) ctx.get(JAHIA_USER_KEY);
+                final HttpServletRequest requestWrapper = new McpHttpServletRequestWrapper(requestBody, auth);
+                StringWriter writer = new StringWriter();
+                final McpHttpServletResponseWrapper responseWrapper = new McpHttpServletResponseWrapper(DUMMY_RESPONSE, writer);
+                JCRSessionFactory.getInstance().setCurrentUser(user);
+                try {
+                    gql.service(requestWrapper, responseWrapper);
+                } finally {
+                    JcrSessionFilter.endRequest();
                 }
 
-                HttpResponse<String> response = httpClient.send(
-                        requestBuilder.build(),
-                        HttpResponse.BodyHandlers.ofString());
+                boolean isError = responseWrapper.getStatus() >= 400;
+                String result = writer.getBuffer().toString();
 
-                boolean isError = response.statusCode() >= 400;
                 if (isError) {
-                    LOGGER.warn("GraphQL endpoint returned HTTP {}", response.statusCode());
+                    LOGGER.warn("GraphQL endpoint returned HTTP {}", responseWrapper.getStatus());
                 }
 
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent(response.body())
+                        .addTextContent(result)
                         .isError(isError)
                         .build();
 
@@ -223,11 +252,128 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         });
     }
 
-    // -------------------------------------------------------------------------
-    // Tool definitions
-    // -------------------------------------------------------------------------
+    private static class McpHttpServletRequestWrapper extends HttpServletRequestWrapper {
+        private final byte[] body;
+        private final String auth;
 
-    @interface Config {
-        String graphql_endpoint() default "http://localhost:8080/modules/graphql";
+        public McpHttpServletRequestWrapper(String body, String auth) {
+            super(DUMMY_REQUEST);
+            this.body = body.getBytes(StandardCharsets.UTF_8);
+            this.auth = auth;
+        }
+
+        @Override
+        public String getMethod() {
+            return "POST";
+        }
+
+        @Override
+        public String getContentType() {
+            return "application/json";
+        }
+
+        @Override
+        public int getContentLength() {
+            return body.length;
+        }
+
+        @Override
+        public String getHeader(String name) {
+            if ("Content-Type".equalsIgnoreCase(name)) return "application/json";
+            if ("Authorization".equalsIgnoreCase(name)) return auth;
+            return null;
+        }
+
+        @Override
+        public Enumeration<String> getHeaderNames() {
+            return auth != null
+                    ? Collections.enumeration(java.util.Arrays.asList("Content-Type", "Authorization"))
+                    : Collections.enumeration(Collections.singletonList("Content-Type"));
+        }
+
+        @Override
+        public ServletInputStream getInputStream() {
+            ByteArrayInputStream bais = new ByteArrayInputStream(body);
+            return new ServletInputStream() {
+                @Override
+                public int read() {
+                    return bais.read();
+                }
+
+                @Override
+                public boolean isFinished() {
+                    return bais.available() == 0;
+                }
+
+                @Override
+                public boolean isReady() {
+                    return true;
+                }
+
+                @Override
+                public void setReadListener(ReadListener l) {
+                }
+            };
+        }
+
+        @Override
+        public BufferedReader getReader() {
+            return new BufferedReader(new InputStreamReader(new ByteArrayInputStream(body), StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public boolean isAsyncSupported() {
+            return false;
+        }
+
+        @Override
+        public javax.servlet.AsyncContext startAsync() {
+            throw new IllegalStateException("Async not supported");
+        }
+
+        @Override
+        public javax.servlet.AsyncContext startAsync(javax.servlet.ServletRequest servletRequest, javax.servlet.ServletResponse servletResponse) {
+            throw new IllegalStateException("Async not supported");
+        }
     }
+
+    private static class McpHttpServletResponseWrapper extends HttpServletResponseWrapper {
+        private final StringWriter writer;
+
+        public McpHttpServletResponseWrapper(HttpServletResponse resp, StringWriter writer) {
+            super(resp);
+            this.writer = writer;
+        }
+
+        @Override
+        public ServletOutputStream getOutputStream() {
+            return new ServletOutputStream() {
+                @Override
+                public void write(int b) {
+                    writer.write((char) b);
+                }
+
+                @Override
+                public boolean isReady() {
+                    return true;
+                }
+
+                @Override
+                public void setWriteListener(WriteListener writeListener) {
+                    // ignore callback notifications
+                }
+            };
+        }
+
+        @Override
+        public PrintWriter getWriter() {
+            return new PrintWriter(writer);
+        }
+
+        @Override
+        public void setContentLength(int len) {
+            // ignore content length
+        }
+    }
+
 }
