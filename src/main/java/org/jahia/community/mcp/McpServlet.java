@@ -10,6 +10,7 @@ import io.modelcontextprotocol.server.McpStatelessServerHandler;
 import io.modelcontextprotocol.server.McpStatelessSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
+import org.apache.hc.core5.http.HttpHeaders;
 import org.jahia.bin.filters.jcr.JcrSessionFilter;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.securityfilter.PermissionService;
@@ -20,6 +21,7 @@ import org.osgi.service.component.annotations.Deactivate;
 import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import reactor.core.publisher.Mono;
 
 import javax.jcr.RepositoryException;
@@ -37,9 +39,13 @@ import java.util.stream.Collectors;
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpServlet.class);
+    private static final String ASYNC_NOT_SUPPORTED = "Async not supported";
     private static final String CONTENT_TYPE_JSON = "application/json;charset=UTF-8";
     private static final String AUTH_HEADER_KEY = "authorization";
     private static final String JAHIA_USER_KEY = "jahia.user";
+    private static final String MCP_ENDPOINT = "mcp";
+    private static final String QUERY_ARG = "query";
+    private static final String VARIABLES_ARG = "variables";
     // Dummy no-op request used as the required non-null delegate for HttpServletRequestWrapper
     private static final HttpServletRequest DUMMY_REQUEST = (HttpServletRequest) java.lang.reflect.Proxy.newProxyInstance(
             McpServlet.class.getClassLoader(),
@@ -81,12 +87,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         } finally {
             currentThread.setContextClassLoader(originalCL);
         }
-        LOGGER.info("Jahia MCP server activated at /modules/mcp (using internal GraphQL servlet)");
+        LOGGER.info("Jahia MCP community server activated at /modules/mcp (using internal GraphQL servlet)");
     }
-
-    // -------------------------------------------------------------------------
-    // McpStatelessServerTransport
-    // -------------------------------------------------------------------------
 
     @Deactivate
     public void deactivate() {
@@ -110,10 +112,6 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         this.permissionService = permissionService;
     }
 
-    // -------------------------------------------------------------------------
-    // HTTP dispatch
-    // -------------------------------------------------------------------------
-
     @Reference(service = HttpServlet.class, target = "(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)")
     public void setGql(HttpServlet gql) {
         this.gql = gql;
@@ -127,12 +125,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
 
         try {
-            if (permissionService.hasPermission("mcp")) {
+            if (permissionService.hasPermission(MCP_ENDPOINT)) {
 
                 String body = req.getReader().lines().collect(Collectors.joining());
                 LOGGER.debug("MCP request: {}", body);
 
-                String authHeader = req.getHeader("Authorization");
+                String authHeader = req.getHeader(HttpHeaders.AUTHORIZATION);
                 JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
                 Map<String, Object> ctxMap = new java.util.HashMap<>();
                 if (authHeader != null) ctxMap.put(AUTH_HEADER_KEY, authHeader);
@@ -166,14 +164,10 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Tool definitions
-    // -------------------------------------------------------------------------
-
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         try {
-            if (permissionService.hasPermission("mcp")) {
+            if (permissionService.hasPermission(MCP_ENDPOINT)) {
                 resp.setContentType(CONTENT_TYPE_JSON);
                 resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
             }
@@ -209,13 +203,13 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 .build();
 
         return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
-            String query = (String) req.arguments().get("query");
-            Object variables = req.arguments().get("variables");
+            String query = (String) req.arguments().get(QUERY_ARG);
+            Object variables = req.arguments().get(VARIABLES_ARG);
 
             try {
                 Map<String, Object> body = variables != null
-                        ? Map.of("query", query, "variables", variables)
-                        : Map.of("query", query);
+                        ? Map.of(QUERY_ARG, query, VARIABLES_ARG, variables)
+                        : Map.of(QUERY_ARG, query);
                 String requestBody = objectMapper.writeValueAsString(body);
 
                 String auth = (String) ctx.get(AUTH_HEADER_KEY);
@@ -269,7 +263,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
         @Override
         public String getContentType() {
-            return "application/json";
+            return MediaType.APPLICATION_JSON_VALUE;
         }
 
         @Override
@@ -279,16 +273,16 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
         @Override
         public String getHeader(String name) {
-            if ("Content-Type".equalsIgnoreCase(name)) return "application/json";
-            if ("Authorization".equalsIgnoreCase(name)) return auth;
+            if (HttpHeaders.CONTENT_TYPE.equalsIgnoreCase(name)) return MediaType.APPLICATION_JSON_VALUE;
+            if (HttpHeaders.AUTHORIZATION.equalsIgnoreCase(name)) return auth;
             return null;
         }
 
         @Override
         public Enumeration<String> getHeaderNames() {
             return auth != null
-                    ? Collections.enumeration(java.util.Arrays.asList("Content-Type", "Authorization"))
-                    : Collections.enumeration(Collections.singletonList("Content-Type"));
+                    ? Collections.enumeration(java.util.Arrays.asList(HttpHeaders.CONTENT_TYPE, HttpHeaders.AUTHORIZATION))
+                    : Collections.enumeration(Collections.singletonList(HttpHeaders.CONTENT_TYPE));
         }
 
         @Override
@@ -328,12 +322,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
         @Override
         public javax.servlet.AsyncContext startAsync() {
-            throw new IllegalStateException("Async not supported");
+            throw new IllegalStateException(ASYNC_NOT_SUPPORTED);
         }
 
         @Override
         public javax.servlet.AsyncContext startAsync(javax.servlet.ServletRequest servletRequest, javax.servlet.ServletResponse servletResponse) {
-            throw new IllegalStateException("Async not supported");
+            throw new IllegalStateException(ASYNC_NOT_SUPPORTED);
         }
     }
 
