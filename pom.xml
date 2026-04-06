@@ -16,6 +16,13 @@
     <packaging>bundle</packaging>
     <description>An OSGi bundle that exposes Jahia's GraphQL API as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI assistants such as Claude to query and mutate/query Jahia content directly.</description>
 
+    <scm>
+        <connection>scm:git:git@github.com:Jahia/jahia-mcp-community-servlet.git</connection>
+        <developerConnection>scm:git:git@github.com:Jahia/jahia-mcp-community-servlet.git</developerConnection>
+        <url>https://github.com/Jahia/jahia-mcp-community-servlet</url>
+        <tag>HEAD</tag>
+    </scm>
+    
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
