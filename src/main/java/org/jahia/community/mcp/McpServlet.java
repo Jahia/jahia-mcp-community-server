@@ -46,6 +46,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private static final String MCP_ENDPOINT = "mcp";
     private static final String QUERY_ARG = "query";
     private static final String VARIABLES_ARG = "variables";
+    private static final McpJsonMapper JSON_MAPPER = new JacksonMcpJsonMapper(new ObjectMapper());
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final String FAILED_TO_SEND_ERROR_RESPONSE = "Failed to send error response";
+    private static final String FAILED_TO_READ_REQUEST_BODY = "Failed to read request body";
+    private static final String FAILED_TO_WRITE_RESPONSE = "Failed to write response";
+    private static final String REPOSITORY_ERROR_DURING_MCP_REQUEST = "Repository error during MCP request";
     // Dummy no-op request used as the required non-null delegate for HttpServletRequestWrapper
     private static final HttpServletRequest DUMMY_REQUEST = (HttpServletRequest) java.lang.reflect.Proxy.newProxyInstance(
             McpServlet.class.getClassLoader(),
@@ -66,8 +72,6 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 if (method.getReturnType() == long.class) return 0L;
                 return null;
             });
-    private final McpJsonMapper jsonMapper = new JacksonMcpJsonMapper(new ObjectMapper());
-    private final ObjectMapper objectMapper = new ObjectMapper();
     private McpStatelessServerHandler mcpHandler;
     private McpStatelessSyncServer mcpServer;
     private PermissionService permissionService;
@@ -75,8 +79,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
     @Activate
     public void activate() {
-        Thread currentThread = Thread.currentThread();
-        ClassLoader originalCL = currentThread.getContextClassLoader();
+        final Thread currentThread = Thread.currentThread();
+        final ClassLoader originalCL = currentThread.getContextClassLoader();
         currentThread.setContextClassLoader(McpServlet.class.getClassLoader());
         try {
             mcpServer = McpServer.sync(this)
@@ -120,47 +124,49 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         if (mcpHandler == null) {
-            resp.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, "MCP handler not ready");
+            try {
+                resp.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, "MCP handler not ready");
+            } catch (IOException ex) {
+                LOGGER.error(FAILED_TO_SEND_ERROR_RESPONSE, ex);
+            }
             return;
         }
 
         try {
             if (permissionService.hasPermission(MCP_ENDPOINT)) {
-
-                String body = req.getReader().lines().collect(Collectors.joining());
+                final String body = req.getReader().lines().collect(Collectors.joining());
                 LOGGER.debug("MCP request: {}", body);
 
-                String authHeader = req.getHeader(HttpHeaders.AUTHORIZATION);
-                JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
-                Map<String, Object> ctxMap = new java.util.HashMap<>();
+                final String authHeader = req.getHeader(HttpHeaders.AUTHORIZATION);
+                final JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
+                final Map<String, Object> ctxMap = new java.util.HashMap<>();
                 if (authHeader != null) ctxMap.put(AUTH_HEADER_KEY, authHeader);
                 if (currentUser != null) ctxMap.put(JAHIA_USER_KEY, currentUser);
-                McpTransportContext transportContext = ctxMap.isEmpty()
+                final McpTransportContext transportContext = ctxMap.isEmpty()
                         ? McpTransportContext.EMPTY
                         : McpTransportContext.create(ctxMap);
-                try {
-                    McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(jsonMapper, body);
+                final McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(JSON_MAPPER, body);
 
-                    if (message instanceof McpSchema.JSONRPCRequest) {
-                        McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
-                        McpSchema.JSONRPCResponse response =
-                                mcpHandler.handleRequest(transportContext, request).block();
-                        resp.setContentType(CONTENT_TYPE_JSON);
-                        resp.getWriter().write(jsonMapper.writeValueAsString(response));
+                if (message instanceof McpSchema.JSONRPCRequest) {
+                    final McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
+                    final McpSchema.JSONRPCResponse response =
+                            mcpHandler.handleRequest(transportContext, request).block();
+                    resp.setContentType(CONTENT_TYPE_JSON);
+                    resp.getWriter().write(JSON_MAPPER.writeValueAsString(response));
 
-                    } else if (message instanceof McpSchema.JSONRPCNotification) {
-                        McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
-                        mcpHandler.handleNotification(transportContext, notification).block();
-                        resp.setStatus(HttpServletResponse.SC_ACCEPTED);
-                    }
-
-                } catch (Exception ex) {
-                    LOGGER.error("Error processing MCP request", ex);
-                    resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, ex.getMessage());
+                } else if (message instanceof McpSchema.JSONRPCNotification) {
+                    final McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
+                    mcpHandler.handleNotification(transportContext, notification).block();
+                    resp.setStatus(HttpServletResponse.SC_ACCEPTED);
                 }
             }
-        } catch (RepositoryException ex) {
-            throw new RuntimeException(ex);
+        } catch (IOException | RepositoryException ex) {
+            LOGGER.error("Error processing MCP request", ex);
+            try {
+                resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, FAILED_TO_READ_REQUEST_BODY);
+            } catch (IOException ioEx) {
+                LOGGER.error(FAILED_TO_SEND_ERROR_RESPONSE, ioEx);
+            }
         }
     }
 
@@ -171,8 +177,10 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 resp.setContentType(CONTENT_TYPE_JSON);
                 resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
             }
-        } catch (RepositoryException e) {
-            throw new RuntimeException(e);
+        } catch (IOException ex) {
+            LOGGER.error(FAILED_TO_WRITE_RESPONSE, ex);
+        } catch (RepositoryException ex) {
+            LOGGER.error(REPOSITORY_ERROR_DURING_MCP_REQUEST, ex);
         }
     }
 
@@ -184,7 +192,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
      * registered by graphql-dxm-provider or its extensions.
      */
     private McpStatelessServerFeatures.SyncToolSpecification executeGraphQLTool() {
-        String schema = "{"
+        final String schema = "{"
                 + "\"type\":\"object\","
                 + "\"properties\":{"
                 + "  \"query\":{\"type\":\"string\",\"description\":\"GraphQL query or mutation string\"},"
@@ -193,29 +201,29 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 + "\"required\":[\"query\"]"
                 + "}";
 
-        McpSchema.Tool tool = McpSchema.Tool.builder()
+        final McpSchema.Tool tool = McpSchema.Tool.builder()
                 .name("executeGraphQL")
                 .description("Execute any GraphQL operation against Jahia's graphql-dxm-provider. "
                         + "Supports all JCR queries (jcr { nodeByPath, nodeById, nodesById, nodesByPath, "
                         + "nodesByQuery, nodesByCriteria }), JCR mutations, admin queries, and all other "
                         + "operations registered by graphql-dxm-provider or its extensions.")
-                .inputSchema(jsonMapper, schema)
+                .inputSchema(JSON_MAPPER, schema)
                 .build();
 
         return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
-            String query = (String) req.arguments().get(QUERY_ARG);
-            Object variables = req.arguments().get(VARIABLES_ARG);
+            final String query = (String) req.arguments().get(QUERY_ARG);
+            final Object variables = req.arguments().get(VARIABLES_ARG);
 
             try {
-                Map<String, Object> body = variables != null
+                final Map<String, Object> body = variables != null
                         ? Map.of(QUERY_ARG, query, VARIABLES_ARG, variables)
                         : Map.of(QUERY_ARG, query);
-                String requestBody = objectMapper.writeValueAsString(body);
+                final String requestBody = OBJECT_MAPPER.writeValueAsString(body);
 
-                String auth = (String) ctx.get(AUTH_HEADER_KEY);
-                JahiaUser user = (JahiaUser) ctx.get(JAHIA_USER_KEY);
+                final String auth = (String) ctx.get(AUTH_HEADER_KEY);
+                final JahiaUser user = (JahiaUser) ctx.get(JAHIA_USER_KEY);
                 final HttpServletRequest requestWrapper = new McpHttpServletRequestWrapper(requestBody, auth);
-                StringWriter writer = new StringWriter();
+                final StringWriter writer = new StringWriter();
                 final McpHttpServletResponseWrapper responseWrapper = new McpHttpServletResponseWrapper(DUMMY_RESPONSE, writer);
                 JCRSessionFactory.getInstance().setCurrentUser(user);
                 try {
@@ -224,8 +232,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                     JcrSessionFilter.endRequest();
                 }
 
-                boolean isError = responseWrapper.getStatus() >= 400;
-                String result = writer.getBuffer().toString();
+                final boolean isError = responseWrapper.getStatus() >= 400;
+                final String result = writer.getBuffer().toString();
 
                 if (isError) {
                     LOGGER.warn("GraphQL endpoint returned HTTP {}", responseWrapper.getStatus());
@@ -236,10 +244,10 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         .isError(isError)
                         .build();
 
-            } catch (Exception e) {
-                LOGGER.error("executeGraphQL failed for query: {}", query, e);
+            } catch (Exception ex) {
+                LOGGER.error("executeGraphQL failed for query: {}", query, ex);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("Error: " + e.getMessage())
+                        .addTextContent("Error: " + ex.getMessage())
                         .isError(true)
                         .build();
             }
@@ -287,7 +295,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
         @Override
         public ServletInputStream getInputStream() {
-            ByteArrayInputStream bais = new ByteArrayInputStream(body);
+            final ByteArrayInputStream bais = new ByteArrayInputStream(body);
             return new ServletInputStream() {
                 @Override
                 public int read() {
@@ -306,6 +314,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
                 @Override
                 public void setReadListener(ReadListener l) {
+                    // empty method as there's no async lifecycle to drive
                 }
             };
         }
@@ -321,12 +330,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
 
         @Override
-        public javax.servlet.AsyncContext startAsync() {
+        public AsyncContext startAsync() {
             throw new IllegalStateException(ASYNC_NOT_SUPPORTED);
         }
 
         @Override
-        public javax.servlet.AsyncContext startAsync(javax.servlet.ServletRequest servletRequest, javax.servlet.ServletResponse servletResponse) {
+        public AsyncContext startAsync(ServletRequest servletRequest, ServletResponse servletResponse) {
             throw new IllegalStateException(ASYNC_NOT_SUPPORTED);
         }
     }
