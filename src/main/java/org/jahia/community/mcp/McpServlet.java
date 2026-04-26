@@ -265,155 +265,206 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
     /**
      * Returns a blocked-result if the query violates the whitelist or blacklist, null otherwise.
-     * Introspection fields (__schema, __type, __typename) always pass regardless of configuration.
+     * Entries are dot-separated path prefixes: "admin" covers all sub-operations of admin,
+     * "admin.jahia.shutdown" covers only that specific nested path.
+     * Introspection fields (__schema, __type, __typename) always pass.
      */
     private McpSchema.CallToolResult checkAccess(final String query) {
-        final Set<String> topFields = extractTopLevelFields(query);
-        // Introspection fields are always allowed
-        final Set<String> operationFields = new LinkedHashSet<>(topFields);
-        operationFields.removeIf(f -> f.startsWith("__"));
-        if (operationFields.isEmpty()) {
-            return null;
-        }
-
         final Set<String> whitelist = mcpConfigService.getWhitelist();
         final Set<String> blacklist = mcpConfigService.getBlacklist();
 
-        if (!whitelist.isEmpty()) {
-            for (final String field : operationFields) {
-                if (!whitelist.contains(field)) {
-                    LOGGER.warn("MCP: operation '{}' blocked — not in whitelist", field);
+        if (whitelist.isEmpty() && blacklist.isEmpty()) {
+            return null;
+        }
+
+        int maxDepth = 1;
+        for (final String e : whitelist) maxDepth = Math.max(maxDepth, segmentCount(e));
+        for (final String e : blacklist) maxDepth = Math.max(maxDepth, segmentCount(e));
+
+        final Set<String> paths = new LinkedHashSet<>(extractFieldPaths(query, maxDepth));
+        paths.removeIf(p -> {
+            for (final String seg : p.split("\\.", -1)) {
+                if (seg.startsWith("__")) return true;
+            }
+            return false;
+        });
+        if (paths.isEmpty()) {
+            return null;
+        }
+
+        for (final String path : paths) {
+            for (final String entry : blacklist) {
+                if (pathCoveredBy(path, entry)) {
+                    LOGGER.warn("MCP: path '{}' blocked — covered by blacklist entry '{}'", path, entry);
                     return McpSchema.CallToolResult.builder()
-                            .addTextContent("{\"errors\":[{\"message\":\"Operation not allowed: '"
-                                    + field + "' is not in the whitelist\"}]}")
+                            .addTextContent("{\"errors\":[{\"message\":\"Operation blocked: '"
+                                    + path + "' is in the blacklist\"}]}")
                             .isError(true)
                             .build();
                 }
             }
         }
 
-        for (final String field : operationFields) {
-            if (blacklist.contains(field)) {
-                LOGGER.warn("MCP: operation '{}' blocked — in blacklist", field);
-                return McpSchema.CallToolResult.builder()
-                        .addTextContent("{\"errors\":[{\"message\":\"Operation blocked: '"
-                                + field + "' is in the blacklist\"}]}")
-                        .isError(true)
-                        .build();
+        if (!whitelist.isEmpty()) {
+            for (final String path : paths) {
+                boolean allowed = false;
+                for (final String entry : whitelist) {
+                    if (pathCoveredBy(path, entry) || pathIsContainerOf(path, entry)) {
+                        allowed = true;
+                        break;
+                    }
+                }
+                if (!allowed) {
+                    LOGGER.warn("MCP: path '{}' blocked — not covered by whitelist", path);
+                    return McpSchema.CallToolResult.builder()
+                            .addTextContent("{\"errors\":[{\"message\":\"Operation not allowed: '"
+                                    + path + "' is not in the whitelist\"}]}")
+                            .isError(true)
+                            .build();
+                }
             }
         }
 
         return null;
     }
 
+    /** True if entry is a dot-segment prefix of (or equal to) path. */
+    private static boolean pathCoveredBy(final String path, final String entry) {
+        return path.equals(entry) || path.startsWith(entry + ".");
+    }
+
+    /** True if path is an intermediate container leading toward a more-specific entry. */
+    private static boolean pathIsContainerOf(final String path, final String entry) {
+        return entry.startsWith(path + ".");
+    }
+
+    private static int segmentCount(final String entry) {
+        int n = 1;
+        for (int k = 0; k < entry.length(); k++) {
+            if (entry.charAt(k) == '.') n++;
+        }
+        return n;
+    }
+
     /**
-     * Extracts the top-level field names from a GraphQL query string.
-     * Handles anonymous queries, named queries, mutations, subscriptions,
-     * aliases, arguments, directives, and fragment spreads.
-     * Returns an empty set if the query cannot be parsed.
+     * Extracts all field paths up to {@code maxDepth} from a GraphQL query string.
+     * Segments are joined with dots: depth-3 path looks like "admin.jahia.shutdown".
+     * Handles aliases, arguments, directives, inline fragments, and named fragment spreads.
      */
-    static Set<String> extractTopLevelFields(final String query) {
+    static Set<String> extractFieldPaths(final String query, final int maxDepth) {
         if (query == null || query.isBlank()) {
             return Collections.emptySet();
         }
-        // Strip line comments
         final String q = query.replaceAll("#[^\n]*", " ");
         final int len = q.length();
-        int i = skipWS(q, 0);
+        final int[] pos = {skipWS(q, 0)};
 
-        // Skip optional operation type keyword (longest first to avoid prefix match)
         for (final String kw : List.of("subscription", "mutation", "query")) {
-            if (i + kw.length() <= len
-                    && q.regionMatches(i, kw, 0, kw.length())
-                    && (i + kw.length() == len || !isIdentChar(q.charAt(i + kw.length())))) {
-                i += kw.length();
-                i = skipWS(q, i);
-                // Skip optional operation name
-                if (i < len && isIdentStart(q.charAt(i))) {
-                    while (i < len && isIdentChar(q.charAt(i))) i++;
-                    i = skipWS(q, i);
+            if (pos[0] + kw.length() <= len
+                    && q.regionMatches(pos[0], kw, 0, kw.length())
+                    && (pos[0] + kw.length() == len || !isIdentChar(q.charAt(pos[0] + kw.length())))) {
+                pos[0] += kw.length();
+                pos[0] = skipWS(q, pos[0]);
+                if (pos[0] < len && isIdentStart(q.charAt(pos[0]))) {
+                    while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
+                    pos[0] = skipWS(q, pos[0]);
                 }
-                // Skip optional variable definitions (...)
-                if (i < len && q.charAt(i) == '(') {
-                    i = skipBalanced(q, i, '(', ')');
-                    i = skipWS(q, i);
+                if (pos[0] < len && q.charAt(pos[0]) == '(') {
+                    pos[0] = skipBalanced(q, pos[0], '(', ')');
+                    pos[0] = skipWS(q, pos[0]);
                 }
-                // Skip optional directives @name(...)
-                while (i < len && q.charAt(i) == '@') {
-                    while (i < len && !Character.isWhitespace(q.charAt(i))
-                            && q.charAt(i) != '(' && q.charAt(i) != '{') i++;
-                    i = skipWS(q, i);
-                    if (i < len && q.charAt(i) == '(') {
-                        i = skipBalanced(q, i, '(', ')');
-                        i = skipWS(q, i);
+                while (pos[0] < len && q.charAt(pos[0]) == '@') {
+                    while (pos[0] < len && !Character.isWhitespace(q.charAt(pos[0]))
+                            && q.charAt(pos[0]) != '(' && q.charAt(pos[0]) != '{') pos[0]++;
+                    pos[0] = skipWS(q, pos[0]);
+                    if (pos[0] < len && q.charAt(pos[0]) == '(') {
+                        pos[0] = skipBalanced(q, pos[0], '(', ')');
+                        pos[0] = skipWS(q, pos[0]);
                     }
                 }
                 break;
             }
         }
 
-        if (i >= len || q.charAt(i) != '{') {
+        if (pos[0] >= len || q.charAt(pos[0]) != '{') {
             return Collections.emptySet();
         }
-        i++; // consume opening {
+        final Set<String> paths = new LinkedHashSet<>();
+        collectSelectionSet(q, len, pos, "", 0, maxDepth, paths);
+        return paths;
+    }
 
-        final Set<String> fields = new LinkedHashSet<>();
-        int depth = 0;
-        while (i < len) {
-            i = skipWS(q, i);
-            if (i >= len) break;
-            final char c = q.charAt(i);
-            if (c == '}') {
-                if (depth == 0) break;
-                depth--;
-                i++;
-            } else if (c == '{') {
-                depth++;
-                i++;
-            } else if (depth > 0) {
-                // Inside a nested selection set — just advance
-                i++;
-            } else if (c == '.' && i + 2 < len && q.charAt(i + 1) == '.' && q.charAt(i + 2) == '.') {
-                // Fragment spread: ...FragmentName or ...on TypeName
-                i += 3;
-                i = skipWS(q, i);
-                while (i < len && isIdentChar(q.charAt(i))) i++;
-            } else if (isIdentStart(c)) {
-                final int start = i;
-                while (i < len && isIdentChar(q.charAt(i))) i++;
-                String name = q.substring(start, i);
-                i = skipWS(q, i);
-                // Alias: "alias: fieldName" — take the field name after the colon
-                if (i < len && q.charAt(i) == ':') {
-                    i++;
-                    i = skipWS(q, i);
-                    final int fStart = i;
-                    while (i < len && isIdentChar(q.charAt(i))) i++;
-                    name = q.substring(fStart, i);
-                    i = skipWS(q, i);
+    private static void collectSelectionSet(final String q, final int len, final int[] pos,
+            final String prefix, final int depth, final int maxDepth, final Set<String> paths) {
+        if (pos[0] >= len || q.charAt(pos[0]) != '{') return;
+        pos[0]++;
+        while (pos[0] < len) {
+            pos[0] = skipWS(q, pos[0]);
+            if (pos[0] >= len) break;
+            final char c = q.charAt(pos[0]);
+            if (c == '}') { pos[0]++; break; }
+            if (c == '.' && pos[0] + 2 < len && q.charAt(pos[0] + 1) == '.' && q.charAt(pos[0] + 2) == '.') {
+                pos[0] += 3;
+                pos[0] = skipWS(q, pos[0]);
+                final boolean isInline = pos[0] + 2 <= len
+                        && q.regionMatches(pos[0], "on", 0, 2)
+                        && (pos[0] + 2 >= len || !isIdentChar(q.charAt(pos[0] + 2)));
+                if (isInline) {
+                    pos[0] += 2;
+                    pos[0] = skipWS(q, pos[0]);
                 }
-                fields.add(name);
-                // Skip arguments (...)
-                if (i < len && q.charAt(i) == '(') {
-                    i = skipBalanced(q, i, '(', ')');
-                    i = skipWS(q, i);
-                }
-                // Skip directives @name(...)
-                while (i < len && q.charAt(i) == '@') {
-                    while (i < len && !Character.isWhitespace(q.charAt(i))
-                            && q.charAt(i) != '(' && q.charAt(i) != '{' && q.charAt(i) != '}') i++;
-                    i = skipWS(q, i);
-                    if (i < len && q.charAt(i) == '(') {
-                        i = skipBalanced(q, i, '(', ')');
-                        i = skipWS(q, i);
+                while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
+                pos[0] = skipWS(q, pos[0]);
+                while (pos[0] < len && q.charAt(pos[0]) == '@') {
+                    while (pos[0] < len && !Character.isWhitespace(q.charAt(pos[0]))
+                            && q.charAt(pos[0]) != '(' && q.charAt(pos[0]) != '{' && q.charAt(pos[0]) != '}') pos[0]++;
+                    pos[0] = skipWS(q, pos[0]);
+                    if (pos[0] < len && q.charAt(pos[0]) == '(') {
+                        pos[0] = skipBalanced(q, pos[0], '(', ')');
+                        pos[0] = skipWS(q, pos[0]);
                     }
                 }
-                // The nested { is consumed on the next iteration via depth tracking
-            } else {
-                i++;
+                if (isInline && pos[0] < len && q.charAt(pos[0]) == '{') {
+                    collectSelectionSet(q, len, pos, prefix, depth, maxDepth, paths);
+                }
+                continue;
+            }
+            if (!isIdentStart(c)) { pos[0]++; continue; }
+            final int start = pos[0];
+            while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
+            String name = q.substring(start, pos[0]);
+            pos[0] = skipWS(q, pos[0]);
+            if (pos[0] < len && q.charAt(pos[0]) == ':') {
+                pos[0]++;
+                pos[0] = skipWS(q, pos[0]);
+                final int fStart = pos[0];
+                while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
+                name = q.substring(fStart, pos[0]);
+                pos[0] = skipWS(q, pos[0]);
+            }
+            final String path = prefix.isEmpty() ? name : prefix + "." + name;
+            paths.add(path);
+            if (pos[0] < len && q.charAt(pos[0]) == '(') {
+                pos[0] = skipBalanced(q, pos[0], '(', ')');
+                pos[0] = skipWS(q, pos[0]);
+            }
+            while (pos[0] < len && q.charAt(pos[0]) == '@') {
+                while (pos[0] < len && !Character.isWhitespace(q.charAt(pos[0]))
+                        && q.charAt(pos[0]) != '(' && q.charAt(pos[0]) != '{' && q.charAt(pos[0]) != '}') pos[0]++;
+                pos[0] = skipWS(q, pos[0]);
+                if (pos[0] < len && q.charAt(pos[0]) == '(') {
+                    pos[0] = skipBalanced(q, pos[0], '(', ')');
+                    pos[0] = skipWS(q, pos[0]);
+                }
+            }
+            if (pos[0] < len && q.charAt(pos[0]) == '{') {
+                if (depth + 1 < maxDepth) {
+                    collectSelectionSet(q, len, pos, path, depth + 1, maxDepth, paths);
+                } else {
+                    pos[0] = skipBalanced(q, pos[0], '{', '}');
+                }
             }
         }
-        return fields;
     }
 
     private static int skipWS(final String s, int i) {

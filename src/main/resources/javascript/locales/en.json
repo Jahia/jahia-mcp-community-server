@@ -11,6 +11,8 @@
     "blockListEmpty": "No operations are blocked.",
     "selectAll": "Select all",
     "unselectAll": "Unselect all",
+    "customPaths": "Sub-paths (one per line)",
+    "customPathsPlaceholder": "e.g. admin.jahia.shutdown",
     "save": "Save settings",
     "saveSuccess": "Settings saved successfully.",
     "saveError": "An error occurred while saving the settings."

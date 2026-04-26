@@ -25,17 +25,16 @@ export const McpConfigAdmin = () => {
     const [saveStatus, setSaveStatus] = useState(null);
     const [whitelist, setWhitelist] = useState(new Set());
     const [blacklist, setBlacklist] = useState(new Set());
+    const [customWhitelist, setCustomWhitelist] = useState('');
+    const [customBlacklist, setCustomBlacklist] = useState('');
+    const [rawSettings, setRawSettings] = useState(null);
     const [dirty, setDirty] = useState(false);
 
     const {loading: loadingQueryFields, data: queryFieldsData} = useQuery(GET_QUERY_FIELDS, {fetchPolicy: 'cache-first'});
     const {loading: loadingMutationFields, data: mutationFieldsData} = useQuery(GET_MUTATION_FIELDS, {fetchPolicy: 'cache-first'});
     const {loading: loadingSettings} = useQuery(GET_SETTINGS, {
         fetchPolicy: 'network-only',
-        onCompleted: data => {
-            setWhitelist(new Set(data?.mcpSettings?.whitelist || []));
-            setBlacklist(new Set(data?.mcpSettings?.blacklist || []));
-            setDirty(false);
-        }
+        onCompleted: data => setRawSettings(data?.mcpSettings)
     });
 
     const [saveSettings, {loading: saving}] = useMutation(SAVE_SETTINGS);
@@ -44,6 +43,21 @@ export const McpConfigAdmin = () => {
         queryFieldsData?.queryFields?.fields,
         mutationFieldsData?.mutationFields?.fields
     );
+
+    // Once both ops and raw settings are available, split entries into checkboxes + custom text
+    useEffect(() => {
+        if (!rawSettings || loadingQueryFields || loadingMutationFields) return;
+        const opNames = new Set(operations.map(op => op.name));
+        const allWl = rawSettings.whitelist || [];
+        const allBl = rawSettings.blacklist || [];
+        setWhitelist(new Set(allWl.filter(e => opNames.has(e))));
+        setCustomWhitelist(allWl.filter(e => !opNames.has(e)).join('\n'));
+        setBlacklist(new Set(allBl.filter(e => opNames.has(e))));
+        setCustomBlacklist(allBl.filter(e => !opNames.has(e)).join('\n'));
+        setDirty(false);
+    }, [rawSettings, loadingQueryFields, loadingMutationFields]); // eslint-disable-line
+
+    const parseCustom = str => str.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
 
     const selectAll = (listSetter, otherSetter) => {
         const allNames = new Set(operations.map(op => op.name));
@@ -85,8 +99,8 @@ export const McpConfigAdmin = () => {
         try {
             const result = await saveSettings({
                 variables: {
-                    whitelist: [...whitelist],
-                    blacklist: [...blacklist]
+                    whitelist: [...whitelist, ...parseCustom(customWhitelist)],
+                    blacklist: [...blacklist, ...parseCustom(customBlacklist)]
                 }
             });
             setSaveStatus(result.data?.mcpSaveSettings ? 'success' : 'error');
@@ -128,11 +142,15 @@ export const McpConfigAdmin = () => {
                     emptyHint={t('label.allowListEmpty')}
                     selectAllLabel={t('label.selectAll')}
                     unselectAllLabel={t('label.unselectAll')}
+                    customPathsLabel={t('label.customPaths')}
+                    customPathsPlaceholder={t('label.customPathsPlaceholder')}
                     operations={operations}
                     selected={whitelist}
+                    customPaths={customWhitelist}
                     onToggle={name => toggle(setWhitelist, setBlacklist, name)}
                     onSelectAll={() => selectAll(setWhitelist, setBlacklist)}
                     onUnselectAll={() => unselectAll(setWhitelist)}
+                    onCustomPathsChange={v => { setCustomWhitelist(v); setDirty(true); }}
                     styles={styles}
                 />
                 <OperationPanel
@@ -141,11 +159,15 @@ export const McpConfigAdmin = () => {
                     emptyHint={t('label.blockListEmpty')}
                     selectAllLabel={t('label.selectAll')}
                     unselectAllLabel={t('label.unselectAll')}
+                    customPathsLabel={t('label.customPaths')}
+                    customPathsPlaceholder={t('label.customPathsPlaceholder')}
                     operations={operations}
                     selected={blacklist}
+                    customPaths={customBlacklist}
                     onToggle={name => toggle(setBlacklist, setWhitelist, name)}
                     onSelectAll={() => selectAll(setBlacklist, setWhitelist)}
                     onUnselectAll={() => unselectAll(setBlacklist)}
+                    onCustomPathsChange={v => { setCustomBlacklist(v); setDirty(true); }}
                     styles={styles}
                 />
             </div>
@@ -172,7 +194,7 @@ export const McpConfigAdmin = () => {
     );
 };
 
-const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, operations, selected, onToggle, onSelectAll, onUnselectAll, styles}) => (
+const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, customPathsLabel, customPathsPlaceholder, operations, selected, customPaths, onToggle, onSelectAll, onUnselectAll, onCustomPathsChange, styles}) => (
     <div className={styles.mcp_panel}>
         <div className={styles.mcp_panelHeader}>
             <div className={styles.mcp_panelHeaderTop}>
@@ -200,6 +222,16 @@ const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabe
                     </span>
                 </label>
             ))}
+        </div>
+        <div className={styles.mcp_customPaths}>
+            <span className={styles.mcp_customPathsLabel}>{customPathsLabel}</span>
+            <textarea
+                className={styles.mcp_customPathsTextarea}
+                value={customPaths}
+                onChange={e => onCustomPathsChange(e.target.value)}
+                placeholder={customPathsPlaceholder}
+                spellCheck={false}
+            />
         </div>
     </div>
 );
