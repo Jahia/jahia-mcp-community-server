@@ -6,13 +6,8 @@
     "allowList": "Allow List",
     "allowListHint": "Only checked operations are allowed through the MCP server.",
     "allowListEmpty": "No restrictions — all operations are allowed.",
-    "blockList": "Block List",
-    "blockListHint": "Checked operations are always blocked, regardless of the allow list.",
-    "blockListEmpty": "No operations are blocked.",
     "selectAll": "Select all",
     "unselectAll": "Unselect all",
-    "customPaths": "Sub-paths (one per line)",
-    "customPathsPlaceholder": "e.g. admin.jahia.shutdown",
     "save": "Save settings",
     "saveSuccess": "Settings saved successfully.",
     "saveError": "An error occurred while saving the settings."

@@ -54,15 +54,10 @@ export const McpConfigAdmin = () => {
     const apolloClient = useApolloClient();
     const [saveStatus, setSaveStatus] = useState(null);
     const [whitelist, setWhitelist] = useState(new Set());
-    const [blacklist, setBlacklist] = useState(new Set());
-    const [customWhitelist, setCustomWhitelist] = useState('');
-    const [customBlacklist, setCustomBlacklist] = useState('');
     const [dirty, setDirty] = useState(false);
     // Schema cache: typeName → FieldInfo[] | 'loading'
     const [typeFields, setTypeFields] = useState({});
-    // Per-panel expand state (independent)
     const [expandedWl, setExpandedWl] = useState(new Set());
-    const [expandedBl, setExpandedBl] = useState(new Set());
 
     const {loading: loadingQueryFields, data: queryFieldsData} = useQuery(GET_QUERY_FIELDS, {fetchPolicy: 'cache-first'});
     const {loading: loadingMutationFields, data: mutationFieldsData} = useQuery(GET_MUTATION_FIELDS, {fetchPolicy: 'cache-first'});
@@ -70,9 +65,6 @@ export const McpConfigAdmin = () => {
         fetchPolicy: 'network-only',
         onCompleted: data => {
             setWhitelist(new Set(data?.mcpSettings?.whitelist || []));
-            setBlacklist(new Set(data?.mcpSettings?.blacklist || []));
-            setCustomWhitelist('');
-            setCustomBlacklist('');
             setDirty(false);
         }
     });
@@ -83,8 +75,6 @@ export const McpConfigAdmin = () => {
         queryFieldsData?.queryFields?.fields,
         mutationFieldsData?.mutationFields?.fields
     );
-
-    const parseCustom = str => str.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
 
     const expandNode = async (node, expandedPaths, setExpandedPaths) => {
         if (expandedPaths.has(node.path)) {
@@ -114,8 +104,8 @@ export const McpConfigAdmin = () => {
         }
     };
 
-    const toggle = (listSetter, otherSetter, path) => {
-        listSetter(prev => {
+    const toggle = (path) => {
+        setWhitelist(prev => {
             const next = new Set(prev);
             if (next.has(path)) {
                 next.delete(path);
@@ -123,49 +113,27 @@ export const McpConfigAdmin = () => {
                 next.add(path);
                 // Remove now-redundant descendants
                 next.forEach(e => { if (e !== path && e.startsWith(path + '.')) next.delete(e); });
-                // Mutual exclusion with the other list
-                otherSetter(other => {
-                    const o = new Set(other);
-                    o.delete(path);
-                    o.forEach(e => { if (e.startsWith(path + '.')) o.delete(e); });
-                    return o;
-                });
             }
             return next;
         });
         setDirty(true);
     };
 
-    const selectAll = (listSetter, otherSetter) => {
-        const allNames = new Set(operations.map(op => op.name));
-        listSetter(allNames);
-        otherSetter(prev => {
-            const next = new Set(prev);
-            allNames.forEach(n => {
-                next.delete(n);
-                next.forEach(e => { if (e.startsWith(n + '.')) next.delete(e); });
-            });
-            return next;
-        });
+    const selectAll = () => {
+        setWhitelist(new Set(operations.map(op => op.name)));
         setDirty(true);
     };
 
-    const unselectAll = listSetter => {
-        listSetter(new Set());
+    const unselectAll = () => {
+        setWhitelist(new Set());
         setDirty(true);
     };
 
     const handleSave = async () => {
         setSaveStatus(null);
         try {
-            const allWl = [...whitelist, ...parseCustom(customWhitelist)];
-            const allBl = [...blacklist, ...parseCustom(customBlacklist)];
-            const result = await saveSettings({variables: {whitelist: allWl, blacklist: allBl}});
+            const result = await saveSettings({variables: {whitelist: [...whitelist], blacklist: []}});
             if (result.data?.mcpSaveSettings) {
-                setWhitelist(new Set(allWl));
-                setBlacklist(new Set(allBl));
-                setCustomWhitelist('');
-                setCustomBlacklist('');
                 setSaveStatus('success');
             } else {
                 setSaveStatus('error');
@@ -208,38 +176,14 @@ export const McpConfigAdmin = () => {
                     emptyHint={t('label.allowListEmpty')}
                     selectAllLabel={t('label.selectAll')}
                     unselectAllLabel={t('label.unselectAll')}
-                    customPathsLabel={t('label.customPaths')}
-                    customPathsPlaceholder={t('label.customPathsPlaceholder')}
                     operations={operations}
                     selected={whitelist}
-                    customPaths={customWhitelist}
                     typeFields={typeFields}
                     expandedPaths={expandedWl}
-                    onToggle={path => toggle(setWhitelist, setBlacklist, path)}
-                    onSelectAll={() => selectAll(setWhitelist, setBlacklist)}
-                    onUnselectAll={() => unselectAll(setWhitelist)}
-                    onCustomPathsChange={v => { setCustomWhitelist(v); setDirty(true); }}
+                    onToggle={path => toggle(path)}
+                    onSelectAll={selectAll}
+                    onUnselectAll={unselectAll}
                     onExpand={node => expandNode(node, expandedWl, setExpandedWl)}
-                    styles={styles}
-                />
-                <OperationPanel
-                    title={t('label.blockList')}
-                    hint={t('label.blockListHint')}
-                    emptyHint={t('label.blockListEmpty')}
-                    selectAllLabel={t('label.selectAll')}
-                    unselectAllLabel={t('label.unselectAll')}
-                    customPathsLabel={t('label.customPaths')}
-                    customPathsPlaceholder={t('label.customPathsPlaceholder')}
-                    operations={operations}
-                    selected={blacklist}
-                    customPaths={customBlacklist}
-                    typeFields={typeFields}
-                    expandedPaths={expandedBl}
-                    onToggle={path => toggle(setBlacklist, setWhitelist, path)}
-                    onSelectAll={() => selectAll(setBlacklist, setWhitelist)}
-                    onUnselectAll={() => unselectAll(setBlacklist)}
-                    onCustomPathsChange={v => { setCustomBlacklist(v); setDirty(true); }}
-                    onExpand={node => expandNode(node, expandedBl, setExpandedBl)}
                     styles={styles}
                 />
             </div>
@@ -327,7 +271,7 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
     );
 };
 
-const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, customPathsLabel, customPathsPlaceholder, operations, selected, customPaths, typeFields, expandedPaths, onToggle, onSelectAll, onUnselectAll, onCustomPathsChange, onExpand, styles}) => (
+const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, operations, selected, typeFields, expandedPaths, onToggle, onSelectAll, onUnselectAll, onExpand, styles}) => (
     <div className={styles.mcp_panel}>
         <div className={styles.mcp_panelHeader}>
             <div className={styles.mcp_panelHeaderTop}>
@@ -353,16 +297,6 @@ const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabe
                     styles={styles}
                 />
             ))}
-        </div>
-        <div className={styles.mcp_customPaths}>
-            <span className={styles.mcp_customPathsLabel}>{customPathsLabel}</span>
-            <textarea
-                className={styles.mcp_customPathsTextarea}
-                value={customPaths}
-                onChange={e => onCustomPathsChange(e.target.value)}
-                placeholder={customPathsPlaceholder}
-                spellCheck={false}
-            />
         </div>
     </div>
 );
