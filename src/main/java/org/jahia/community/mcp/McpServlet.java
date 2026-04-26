@@ -86,7 +86,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             mcpServer = McpServer.sync(this)
                     .serverInfo("jahia-mcp", "1.0.0")
                     .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
-                    .tools(executeGraphQLTool())
+                    .tools(executeGraphQLTool(), introspectSchemaTool())
                     .build();
         } finally {
             currentThread.setContextClassLoader(originalCL);
@@ -175,7 +175,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         try {
             if (permissionService.hasPermission(MCP_ENDPOINT)) {
                 resp.setContentType(CONTENT_TYPE_JSON);
-                resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\"}");
+                resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\",\"tools\":[\"executeGraphQL\",\"introspectSchema\"]}");
             }
         } catch (IOException ex) {
             LOGGER.error(FAILED_TO_WRITE_RESPONSE, ex);
@@ -203,10 +203,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
         final McpSchema.Tool tool = McpSchema.Tool.builder()
                 .name("executeGraphQL")
-                .description("Execute any GraphQL operation against Jahia's graphql-dxm-provider. "
-                        + "Supports all JCR queries (jcr { nodeByPath, nodeById, nodesById, nodesByPath, "
-                        + "nodesByQuery, nodesByCriteria }), JCR mutations, admin queries, and all other "
-                        + "operations registered by graphql-dxm-provider or its extensions.")
+                .description("Execute any GraphQL query or mutation against Jahia's graphql-dxm-provider. "
+                        + "Call introspectSchema first to discover all available operations and their arguments.")
                 .inputSchema(JSON_MAPPER, schema)
                 .build();
 
@@ -246,6 +244,68 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
             } catch (Exception ex) {
                 LOGGER.error("executeGraphQL failed for query: {}", query, ex);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("Error: " + ex.getMessage())
+                        .isError(true)
+                        .build();
+            }
+        });
+    }
+
+    private static final String INTROSPECTION_QUERY = "{"
+            + "  __schema {"
+            + "    queryType {"
+            + "      fields(includeDeprecated: false) {"
+            + "        name description"
+            + "        args { name description type { name kind ofType { name kind ofType { name kind } } } }"
+            + "      }"
+            + "    }"
+            + "    mutationType {"
+            + "      fields(includeDeprecated: false) {"
+            + "        name description"
+            + "        args { name description type { name kind ofType { name kind ofType { name kind } } } }"
+            + "      }"
+            + "    }"
+            + "  }"
+            + "}";
+
+    /**
+     * Tool: introspectSchema
+     * Executes a __schema introspection query and returns all available top-level
+     * query and mutation fields with their arguments, so the caller knows exactly
+     * what operations are available without having to guess.
+     */
+    private McpStatelessServerFeatures.SyncToolSpecification introspectSchemaTool() {
+        final McpSchema.Tool tool = McpSchema.Tool.builder()
+                .name("introspectSchema")
+                .description("Returns all available top-level GraphQL query and mutation operations "
+                        + "exposed by Jahia's graphql-dxm-provider and its installed extensions. "
+                        + "Call this first to discover what operations and arguments are available "
+                        + "before calling executeGraphQL.")
+                .inputSchema(JSON_MAPPER, "{\"type\":\"object\",\"properties\":{}}")
+                .build();
+
+        return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
+            try {
+                final String requestBody = OBJECT_MAPPER.writeValueAsString(Map.of(QUERY_ARG, INTROSPECTION_QUERY));
+                final String auth = (String) ctx.get(AUTH_HEADER_KEY);
+                final JahiaUser user = (JahiaUser) ctx.get(JAHIA_USER_KEY);
+                final HttpServletRequest requestWrapper = new McpHttpServletRequestWrapper(requestBody, auth);
+                final StringWriter writer = new StringWriter();
+                final McpHttpServletResponseWrapper responseWrapper = new McpHttpServletResponseWrapper(DUMMY_RESPONSE, writer);
+                JCRSessionFactory.getInstance().setCurrentUser(user);
+                try {
+                    gql.service(requestWrapper, responseWrapper);
+                } finally {
+                    JcrSessionFilter.endRequest();
+                }
+                final boolean isError = responseWrapper.getStatus() >= 400;
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent(writer.getBuffer().toString())
+                        .isError(isError)
+                        .build();
+            } catch (Exception ex) {
+                LOGGER.error("introspectSchema failed", ex);
                 return McpSchema.CallToolResult.builder()
                         .addTextContent("Error: " + ex.getMessage())
                         .isError(true)
