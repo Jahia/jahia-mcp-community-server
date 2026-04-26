@@ -1,0 +1,16 @@
+{
+  "label": {
+    "menu_entry": "MCP Server",
+    "title": "MCP Server — Operation Access Control",
+    "description": "Control which Jahia GraphQL operations the MCP server is allowed to execute. Restrictions apply to all operation types (queries and mutations) sharing the same field name. Introspection fields (__schema, __type) always pass regardless of configuration.",
+    "allowList": "Allow List",
+    "allowListHint": "Only checked operations are allowed through the MCP server.",
+    "allowListEmpty": "No restrictions — all operations are allowed.",
+    "blockList": "Block List",
+    "blockListHint": "Checked operations are always blocked, regardless of the allow list.",
+    "blockListEmpty": "No operations are blocked.",
+    "save": "Save settings",
+    "saveSuccess": "Settings saved successfully.",
+    "saveError": "An error occurred while saving the settings."
+  }
+}

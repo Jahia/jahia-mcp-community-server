@@ -23,10 +23,13 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <yarn.arguments>build:production</yarn.arguments>
+        <jahia-depends>default,graphql-dxm-provider</jahia-depends>
         <require-capability>
             osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)",osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
         </require-capability>
     </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
@@ -43,7 +46,32 @@
             <artifactId>mcp-json-jackson2</artifactId>
             <version>0.17.0</version>
         </dependency>
+        <dependency>
+            <groupId>com.graphql-java</groupId>
+            <artifactId>graphql-java</artifactId>
+            <version>${graphql-java.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.graphql-java-kickstart</groupId>
+            <artifactId>graphql-java-servlet</artifactId>
+            <version>${graphql-java-servlet.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.graphql-java</groupId>
+            <artifactId>graphql-java-annotations</artifactId>
+            <version>${graphql-java-annotations.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.jahia.modules</groupId>
+            <artifactId>graphql-dxm-provider</artifactId>
+            <version>3.4.0</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
+
     <repositories>
         <repository>
             <id>jahia-public</id>
@@ -61,6 +89,41 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>1.15.0</version>
+                <executions>
+                    <execution>
+                        <id>npm install node and yarn</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>install-node-and-yarn</goal>
+                        </goals>
+                        <configuration>
+                            <nodeVersion>v22.6.0</nodeVersion>
+                            <yarnVersion>v1.22.21</yarnVersion>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>yarn install</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>yarn post-install</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>${yarn.arguments}</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.felix</groupId>
                 <artifactId>maven-bundle-plugin</artifactId>

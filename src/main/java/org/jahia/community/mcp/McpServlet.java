@@ -14,6 +14,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
 import org.apache.hc.core5.http.HttpHeaders;
 import org.jahia.bin.filters.jcr.JcrSessionFilter;
+import org.jahia.community.mcp.config.McpConfigService;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.securityfilter.PermissionService;
 import org.jahia.services.usermanager.JahiaUser;
@@ -76,6 +77,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private McpStatelessSyncServer mcpServer;
     private PermissionService permissionService;
     private HttpServlet gql;
+    private McpConfigService mcpConfigService;
 
     @Activate
     public void activate() {
@@ -119,6 +121,11 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     @Reference(service = HttpServlet.class, target = "(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)")
     public void setGql(HttpServlet gql) {
         this.gql = gql;
+    }
+
+    @Reference
+    public void setMcpConfigService(McpConfigService mcpConfigService) {
+        this.mcpConfigService = mcpConfigService;
     }
 
     @Override
@@ -186,10 +193,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
     /**
      * Tool: executeGraphQL
-     * Executes any GraphQL operation against the Jahia graphql-dxm-provider endpoint.
-     * This gives access to all operations: jcr { nodeByPath, nodeById, nodesByQuery,
-     * nodesByCriteria, ... }, mutations, admin queries, and any other operation
-     * registered by graphql-dxm-provider or its extensions.
+     * Executes any GraphQL operation against the Jahia graphql-dxm-provider endpoint,
+     * subject to the configured whitelist/blacklist access control.
      */
     private McpStatelessServerFeatures.SyncToolSpecification executeGraphQLTool() {
         final String schema = "{"
@@ -211,6 +216,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
             final String query = (String) req.arguments().get(QUERY_ARG);
             final Object variables = req.arguments().get(VARIABLES_ARG);
+
+            // Access control: check whitelist/blacklist before forwarding to GraphQL engine
+            final McpSchema.CallToolResult blocked = checkAccess(query);
+            if (blocked != null) {
+                return blocked;
+            }
 
             try {
                 final Map<String, Object> body = variables != null
@@ -250,6 +261,182 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         .build();
             }
         });
+    }
+
+    /**
+     * Returns a blocked-result if the query violates the whitelist or blacklist, null otherwise.
+     * Introspection fields (__schema, __type, __typename) always pass regardless of configuration.
+     */
+    private McpSchema.CallToolResult checkAccess(final String query) {
+        final Set<String> topFields = extractTopLevelFields(query);
+        // Introspection fields are always allowed
+        final Set<String> operationFields = new LinkedHashSet<>(topFields);
+        operationFields.removeIf(f -> f.startsWith("__"));
+        if (operationFields.isEmpty()) {
+            return null;
+        }
+
+        final Set<String> whitelist = mcpConfigService.getWhitelist();
+        final Set<String> blacklist = mcpConfigService.getBlacklist();
+
+        if (!whitelist.isEmpty()) {
+            for (final String field : operationFields) {
+                if (!whitelist.contains(field)) {
+                    LOGGER.warn("MCP: operation '{}' blocked — not in whitelist", field);
+                    return McpSchema.CallToolResult.builder()
+                            .addTextContent("{\"errors\":[{\"message\":\"Operation not allowed: '"
+                                    + field + "' is not in the whitelist\"}]}")
+                            .isError(true)
+                            .build();
+                }
+            }
+        }
+
+        for (final String field : operationFields) {
+            if (blacklist.contains(field)) {
+                LOGGER.warn("MCP: operation '{}' blocked — in blacklist", field);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("{\"errors\":[{\"message\":\"Operation blocked: '"
+                                + field + "' is in the blacklist\"}]}")
+                        .isError(true)
+                        .build();
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extracts the top-level field names from a GraphQL query string.
+     * Handles anonymous queries, named queries, mutations, subscriptions,
+     * aliases, arguments, directives, and fragment spreads.
+     * Returns an empty set if the query cannot be parsed.
+     */
+    static Set<String> extractTopLevelFields(final String query) {
+        if (query == null || query.isBlank()) {
+            return Collections.emptySet();
+        }
+        // Strip line comments
+        final String q = query.replaceAll("#[^\n]*", " ");
+        final int len = q.length();
+        int i = skipWS(q, 0);
+
+        // Skip optional operation type keyword (longest first to avoid prefix match)
+        for (final String kw : List.of("subscription", "mutation", "query")) {
+            if (i + kw.length() <= len
+                    && q.regionMatches(i, kw, 0, kw.length())
+                    && (i + kw.length() == len || !isIdentChar(q.charAt(i + kw.length())))) {
+                i += kw.length();
+                i = skipWS(q, i);
+                // Skip optional operation name
+                if (i < len && isIdentStart(q.charAt(i))) {
+                    while (i < len && isIdentChar(q.charAt(i))) i++;
+                    i = skipWS(q, i);
+                }
+                // Skip optional variable definitions (...)
+                if (i < len && q.charAt(i) == '(') {
+                    i = skipBalanced(q, i, '(', ')');
+                    i = skipWS(q, i);
+                }
+                // Skip optional directives @name(...)
+                while (i < len && q.charAt(i) == '@') {
+                    while (i < len && !Character.isWhitespace(q.charAt(i))
+                            && q.charAt(i) != '(' && q.charAt(i) != '{') i++;
+                    i = skipWS(q, i);
+                    if (i < len && q.charAt(i) == '(') {
+                        i = skipBalanced(q, i, '(', ')');
+                        i = skipWS(q, i);
+                    }
+                }
+                break;
+            }
+        }
+
+        if (i >= len || q.charAt(i) != '{') {
+            return Collections.emptySet();
+        }
+        i++; // consume opening {
+
+        final Set<String> fields = new LinkedHashSet<>();
+        int depth = 0;
+        while (i < len) {
+            i = skipWS(q, i);
+            if (i >= len) break;
+            final char c = q.charAt(i);
+            if (c == '}') {
+                if (depth == 0) break;
+                depth--;
+                i++;
+            } else if (c == '{') {
+                depth++;
+                i++;
+            } else if (depth > 0) {
+                // Inside a nested selection set — just advance
+                i++;
+            } else if (c == '.' && i + 2 < len && q.charAt(i + 1) == '.' && q.charAt(i + 2) == '.') {
+                // Fragment spread: ...FragmentName or ...on TypeName
+                i += 3;
+                i = skipWS(q, i);
+                while (i < len && isIdentChar(q.charAt(i))) i++;
+            } else if (isIdentStart(c)) {
+                final int start = i;
+                while (i < len && isIdentChar(q.charAt(i))) i++;
+                String name = q.substring(start, i);
+                i = skipWS(q, i);
+                // Alias: "alias: fieldName" — take the field name after the colon
+                if (i < len && q.charAt(i) == ':') {
+                    i++;
+                    i = skipWS(q, i);
+                    final int fStart = i;
+                    while (i < len && isIdentChar(q.charAt(i))) i++;
+                    name = q.substring(fStart, i);
+                    i = skipWS(q, i);
+                }
+                fields.add(name);
+                // Skip arguments (...)
+                if (i < len && q.charAt(i) == '(') {
+                    i = skipBalanced(q, i, '(', ')');
+                    i = skipWS(q, i);
+                }
+                // Skip directives @name(...)
+                while (i < len && q.charAt(i) == '@') {
+                    while (i < len && !Character.isWhitespace(q.charAt(i))
+                            && q.charAt(i) != '(' && q.charAt(i) != '{' && q.charAt(i) != '}') i++;
+                    i = skipWS(q, i);
+                    if (i < len && q.charAt(i) == '(') {
+                        i = skipBalanced(q, i, '(', ')');
+                        i = skipWS(q, i);
+                    }
+                }
+                // The nested { is consumed on the next iteration via depth tracking
+            } else {
+                i++;
+            }
+        }
+        return fields;
+    }
+
+    private static int skipWS(final String s, int i) {
+        while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+        return i;
+    }
+
+    private static int skipBalanced(final String s, int i, final char open, final char close) {
+        int depth = 0;
+        while (i < s.length()) {
+            final char c = s.charAt(i++);
+            if (c == open) depth++;
+            else if (c == close && --depth == 0) return i;
+        }
+        return i;
+    }
+
+    private static boolean isIdentStart(final char c) {
+        return Character.isLetter(c) || c == '_';
+    }
+
+    private static boolean isIdentChar(final char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
     }
 
     // Step 1: enumerate all type names + root type names — zero __Type.fields selections → always safe.

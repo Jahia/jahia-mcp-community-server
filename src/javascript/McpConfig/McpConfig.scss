@@ -1,0 +1,144 @@
+.mcp_loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 48px;
+}
+
+.mcp_container {
+    padding: 24px 32px;
+    max-width: 900px;
+}
+
+.mcp_header {
+    margin-bottom: 8px;
+
+    h2 {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0;
+    }
+}
+
+.mcp_description {
+    margin-bottom: 28px;
+    color: #666;
+}
+
+.mcp_panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 28px;
+}
+
+.mcp_panel {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.mcp_panelHeader {
+    padding: 14px 16px 10px;
+    background-color: #f8f8f8;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.mcp_panelTitle {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 4px;
+    color: #333;
+}
+
+.mcp_panelHint {
+    font-size: 12px;
+    color: #888;
+}
+
+.mcp_operationList {
+    padding: 8px 0;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.mcp_operationRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 16px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+
+    &:hover {
+        background-color: #f5f5f5;
+    }
+}
+
+.mcp_checkbox {
+    flex-shrink: 0;
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+    accent-color: #0077cc;
+}
+
+.mcp_operationName {
+    font-size: 13px;
+    font-family: monospace;
+    color: #222;
+    flex: 1;
+}
+
+.mcp_typeBadges {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.mcp_badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+
+    &--query {
+        background-color: #0077cc;
+    }
+
+    &--mutation {
+        background-color: #9c27b0;
+    }
+}
+
+.mcp_actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.mcp_alert {
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+
+    &--success {
+        background-color: #e8f5e9;
+        border: 1px solid #a5d6a7;
+        color: #2e7d32;
+    }
+
+    &--error {
+        background-color: #fdecea;
+        border: 1px solid #ef9a9a;
+        color: #c62828;
+    }
+}
