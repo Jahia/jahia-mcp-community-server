@@ -252,26 +252,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         });
     }
 
-    // Step 1: fetch top-level fields for query/mutation roots + the names of all non-built-in types.
-    // Only one __Type.fields selection per root type → safe from the bad-faith guard.
+    // Step 1: enumerate all type names + root type names — zero __Type.fields selections → always safe.
     private static final String INTROSPECTION_STEP1 = "{"
             + "  __schema {"
-            + "    queryType {"
-            + "      name"
-            + "      fields(includeDeprecated: false) {"
-            + "        name description"
-            + "        args { name description type { name kind ofType { name kind ofType { name kind } } } }"
-            + "        type { name kind ofType { name kind ofType { name kind } } }"
-            + "      }"
-            + "    }"
-            + "    mutationType {"
-            + "      name"
-            + "      fields(includeDeprecated: false) {"
-            + "        name description"
-            + "        args { name description type { name kind ofType { name kind ofType { name kind } } } }"
-            + "        type { name kind ofType { name kind ofType { name kind } } }"
-            + "      }"
-            + "    }"
+            + "    queryType { name }"
+            + "    mutationType { name }"
+            + "    subscriptionType { name }"
             + "    types { name kind description }"
             + "  }"
             + "}";
@@ -325,7 +311,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 final JsonNode schemaNode = step1.path("data").path("__schema");
                 final JsonNode typesArray = schemaNode.path("types");
 
-                // Collect non-built-in type names (skip scalar/built-ins starting with __)
+                // Collect all non-built-in type names including Query/Mutation roots.
+                // Scalars have no fields; __ prefixed types are GraphQL meta-types — both skipped.
                 final List<String> typeNames = new ArrayList<>();
                 if (typesArray.isArray()) {
                     for (final JsonNode t : typesArray) {
