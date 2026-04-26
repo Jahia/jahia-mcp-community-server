@@ -1,40 +1,80 @@
 import React, {useEffect, useState} from 'react';
-import {useMutation, useQuery} from '@apollo/client';
+import {useApolloClient, useMutation, useQuery} from '@apollo/client';
 import {useTranslation} from 'react-i18next';
 import {Button, Loader, Typography} from '@jahia/moonstone';
 import styles from './McpConfig.scss';
-import {GET_MUTATION_FIELDS, GET_QUERY_FIELDS, GET_SETTINGS, SAVE_SETTINGS} from './McpConfig.gql';
+import {GET_MUTATION_FIELDS, GET_QUERY_FIELDS, GET_SETTINGS, GET_TYPE_FIELDS, SAVE_SETTINGS} from './McpConfig.gql';
+
+const MAX_TREE_DEPTH = 5;
+
+// Unwrap NON_NULL / LIST wrappers to reach the named type
+const getNamedType = typeObj => {
+    if (!typeObj) return null;
+    if (typeObj.name) return typeObj;
+    return getNamedType(typeObj.ofType);
+};
 
 const buildOperationMap = (queryFields, mutationFields) => {
     const map = {};
     (queryFields || []).forEach(f => {
-        map[f.name] = {name: f.name, description: f.description, isQuery: true, isMutation: false};
+        const named = getNamedType(f.type);
+        map[f.name] = {
+            name: f.name, path: f.name, description: f.description,
+            isQuery: true, isMutation: false,
+            typeName: named?.name || null, typeKind: named?.kind || null
+        };
     });
     (mutationFields || []).forEach(f => {
+        const named = getNamedType(f.type);
         if (map[f.name]) {
             map[f.name].isMutation = true;
         } else {
-            map[f.name] = {name: f.name, description: f.description, isQuery: false, isMutation: true};
+            map[f.name] = {
+                name: f.name, path: f.name, description: f.description,
+                isQuery: false, isMutation: true,
+                typeName: named?.name || null, typeKind: named?.kind || null
+            };
         }
     });
     return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
 };
 
+// True if path itself or any ancestor prefix is in the set
+const isCoveredBySet = (path, set) => {
+    if (set.has(path)) return true;
+    const parts = path.split('.');
+    for (let i = 1; i < parts.length; i++) {
+        if (set.has(parts.slice(0, i).join('.'))) return true;
+    }
+    return false;
+};
+
 export const McpConfigAdmin = () => {
     const {t} = useTranslation('jahia-mcp-community-server');
+    const apolloClient = useApolloClient();
     const [saveStatus, setSaveStatus] = useState(null);
     const [whitelist, setWhitelist] = useState(new Set());
     const [blacklist, setBlacklist] = useState(new Set());
     const [customWhitelist, setCustomWhitelist] = useState('');
     const [customBlacklist, setCustomBlacklist] = useState('');
-    const [rawSettings, setRawSettings] = useState(null);
     const [dirty, setDirty] = useState(false);
+    // Schema cache: typeName → FieldInfo[] | 'loading'
+    const [typeFields, setTypeFields] = useState({});
+    // Per-panel expand state (independent)
+    const [expandedWl, setExpandedWl] = useState(new Set());
+    const [expandedBl, setExpandedBl] = useState(new Set());
 
     const {loading: loadingQueryFields, data: queryFieldsData} = useQuery(GET_QUERY_FIELDS, {fetchPolicy: 'cache-first'});
     const {loading: loadingMutationFields, data: mutationFieldsData} = useQuery(GET_MUTATION_FIELDS, {fetchPolicy: 'cache-first'});
     const {loading: loadingSettings} = useQuery(GET_SETTINGS, {
         fetchPolicy: 'network-only',
-        onCompleted: data => setRawSettings(data?.mcpSettings)
+        onCompleted: data => {
+            setWhitelist(new Set(data?.mcpSettings?.whitelist || []));
+            setBlacklist(new Set(data?.mcpSettings?.blacklist || []));
+            setCustomWhitelist('');
+            setCustomBlacklist('');
+            setDirty(false);
+        }
     });
 
     const [saveSettings, {loading: saving}] = useMutation(SAVE_SETTINGS);
@@ -44,27 +84,67 @@ export const McpConfigAdmin = () => {
         mutationFieldsData?.mutationFields?.fields
     );
 
-    // Once both ops and raw settings are available, split entries into checkboxes + custom text
-    useEffect(() => {
-        if (!rawSettings || loadingQueryFields || loadingMutationFields) return;
-        const opNames = new Set(operations.map(op => op.name));
-        const allWl = rawSettings.whitelist || [];
-        const allBl = rawSettings.blacklist || [];
-        setWhitelist(new Set(allWl.filter(e => opNames.has(e))));
-        setCustomWhitelist(allWl.filter(e => !opNames.has(e)).join('\n'));
-        setBlacklist(new Set(allBl.filter(e => opNames.has(e))));
-        setCustomBlacklist(allBl.filter(e => !opNames.has(e)).join('\n'));
-        setDirty(false);
-    }, [rawSettings, loadingQueryFields, loadingMutationFields]); // eslint-disable-line
-
     const parseCustom = str => str.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+
+    const expandNode = async (node, expandedPaths, setExpandedPaths) => {
+        if (expandedPaths.has(node.path)) {
+            setExpandedPaths(prev => { const next = new Set(prev); next.delete(node.path); return next; });
+            return;
+        }
+        setExpandedPaths(prev => new Set([...prev, node.path]));
+        if (!node.typeName || typeFields[node.typeName]) return;
+        setTypeFields(prev => ({...prev, [node.typeName]: 'loading'}));
+        try {
+            const result = await apolloClient.query({
+                query: GET_TYPE_FIELDS,
+                variables: {typeName: node.typeName},
+                fetchPolicy: 'cache-first'
+            });
+            const fields = result.data?.typeFields?.fields || [];
+            setTypeFields(prev => ({
+                ...prev,
+                [node.typeName]: fields.map(f => {
+                    const named = getNamedType(f.type);
+                    return {name: f.name, description: f.description, typeName: named?.name || null, typeKind: named?.kind || null};
+                })
+            }));
+        } catch (err) {
+            console.error('Failed to load fields for type', node.typeName, err);
+            setTypeFields(prev => ({...prev, [node.typeName]: []}));
+        }
+    };
+
+    const toggle = (listSetter, otherSetter, path) => {
+        listSetter(prev => {
+            const next = new Set(prev);
+            if (next.has(path)) {
+                next.delete(path);
+            } else {
+                next.add(path);
+                // Remove now-redundant descendants
+                next.forEach(e => { if (e !== path && e.startsWith(path + '.')) next.delete(e); });
+                // Mutual exclusion with the other list
+                otherSetter(other => {
+                    const o = new Set(other);
+                    o.delete(path);
+                    o.forEach(e => { if (e.startsWith(path + '.')) o.delete(e); });
+                    return o;
+                });
+            }
+            return next;
+        });
+        setDirty(true);
+    };
 
     const selectAll = (listSetter, otherSetter) => {
         const allNames = new Set(operations.map(op => op.name));
         listSetter(allNames);
         otherSetter(prev => {
             const next = new Set(prev);
-            allNames.forEach(n => next.delete(n));
+            allNames.forEach(n => {
+                next.delete(n);
+                next.forEach(e => { if (e.startsWith(n + '.')) next.delete(e); });
+            });
             return next;
         });
         setDirty(true);
@@ -75,35 +155,21 @@ export const McpConfigAdmin = () => {
         setDirty(true);
     };
 
-    const toggle = (listSetter, otherSetter, name) => {
-        listSetter(prev => {
-            const next = new Set(prev);
-            if (next.has(name)) {
-                next.delete(name);
-            } else {
-                next.add(name);
-                // Adding to one list removes from the other to avoid contradictions
-                otherSetter(other => {
-                    const o = new Set(other);
-                    o.delete(name);
-                    return o;
-                });
-            }
-            return next;
-        });
-        setDirty(true);
-    };
-
     const handleSave = async () => {
         setSaveStatus(null);
         try {
-            const result = await saveSettings({
-                variables: {
-                    whitelist: [...whitelist, ...parseCustom(customWhitelist)],
-                    blacklist: [...blacklist, ...parseCustom(customBlacklist)]
-                }
-            });
-            setSaveStatus(result.data?.mcpSaveSettings ? 'success' : 'error');
+            const allWl = [...whitelist, ...parseCustom(customWhitelist)];
+            const allBl = [...blacklist, ...parseCustom(customBlacklist)];
+            const result = await saveSettings({variables: {whitelist: allWl, blacklist: allBl}});
+            if (result.data?.mcpSaveSettings) {
+                setWhitelist(new Set(allWl));
+                setBlacklist(new Set(allBl));
+                setCustomWhitelist('');
+                setCustomBlacklist('');
+                setSaveStatus('success');
+            } else {
+                setSaveStatus('error');
+            }
             setDirty(false);
         } catch (err) {
             console.error('Failed to save MCP settings:', err);
@@ -147,10 +213,13 @@ export const McpConfigAdmin = () => {
                     operations={operations}
                     selected={whitelist}
                     customPaths={customWhitelist}
-                    onToggle={name => toggle(setWhitelist, setBlacklist, name)}
+                    typeFields={typeFields}
+                    expandedPaths={expandedWl}
+                    onToggle={path => toggle(setWhitelist, setBlacklist, path)}
                     onSelectAll={() => selectAll(setWhitelist, setBlacklist)}
                     onUnselectAll={() => unselectAll(setWhitelist)}
                     onCustomPathsChange={v => { setCustomWhitelist(v); setDirty(true); }}
+                    onExpand={node => expandNode(node, expandedWl, setExpandedWl)}
                     styles={styles}
                 />
                 <OperationPanel
@@ -164,10 +233,13 @@ export const McpConfigAdmin = () => {
                     operations={operations}
                     selected={blacklist}
                     customPaths={customBlacklist}
-                    onToggle={name => toggle(setBlacklist, setWhitelist, name)}
+                    typeFields={typeFields}
+                    expandedPaths={expandedBl}
+                    onToggle={path => toggle(setBlacklist, setWhitelist, path)}
                     onSelectAll={() => selectAll(setBlacklist, setWhitelist)}
                     onUnselectAll={() => unselectAll(setBlacklist)}
                     onCustomPathsChange={v => { setCustomBlacklist(v); setDirty(true); }}
+                    onExpand={node => expandNode(node, expandedBl, setExpandedBl)}
                     styles={styles}
                 />
             </div>
@@ -194,7 +266,68 @@ export const McpConfigAdmin = () => {
     );
 };
 
-const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, customPathsLabel, customPathsPlaceholder, operations, selected, customPaths, onToggle, onSelectAll, onUnselectAll, onCustomPathsChange, styles}) => (
+const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, onExpand, styles}) => {
+    const isExpandable = (node.typeKind === 'OBJECT' || node.typeKind === 'INTERFACE') && depth < MAX_TREE_DEPTH;
+    const isExpanded = expandedPaths.has(node.path);
+    const rawChildren = node.typeName ? typeFields[node.typeName] : null;
+    const isLoading = rawChildren === 'loading';
+    const covered = isCoveredBySet(node.path, selected);
+    const directlySelected = selected.has(node.path);
+
+    const children = (isExpanded && Array.isArray(rawChildren))
+        ? rawChildren.map(f => ({...f, path: node.path + '.' + f.name, isQuery: node.isQuery, isMutation: node.isMutation}))
+        : null;
+
+    return (
+        <div>
+            <div
+                className={`${styles.mcp_treeRow}${covered && !directlySelected ? ' ' + styles['mcp_treeRow--covered'] : ''}`}
+                style={{paddingLeft: `${12 + depth * 18}px`}}
+            >
+                {isExpandable ? (
+                    <button className={styles.mcp_expandBtn} type="button" onClick={() => onExpand(node)}>
+                        {isExpanded ? '▾' : '▸'}
+                    </button>
+                ) : (
+                    <span className={styles.mcp_expandPlaceholder}/>
+                )}
+                <input
+                    type="checkbox"
+                    className={styles.mcp_checkbox}
+                    checked={covered}
+                    disabled={covered && !directlySelected}
+                    onChange={() => onToggle(node.path)}
+                    title={node.description || node.path}
+                />
+                <span className={styles.mcp_operationName}>{node.name}</span>
+                {depth === 0 && (
+                    <span className={styles.mcp_typeBadges}>
+                        {node.isQuery && <span className={`${styles.mcp_badge} ${styles['mcp_badge--query']}`}>Q</span>}
+                        {node.isMutation && <span className={`${styles.mcp_badge} ${styles['mcp_badge--mutation']}`}>M</span>}
+                    </span>
+                )}
+            </div>
+            {isExpanded && isLoading && (
+                <div className={styles.mcp_treeLoading} style={{paddingLeft: `${12 + (depth + 1) * 18}px`}}>…</div>
+            )}
+            {children && children.map(child => (
+                <TreeNode
+                    key={child.path}
+                    node={child}
+                    depth={depth + 1}
+                    selected={selected}
+                    typeFields={typeFields}
+                    expandedPaths={expandedPaths}
+                    onToggle={onToggle}
+                    onExpand={onExpand}
+                    styles={styles}
+                />
+            ))}
+        </div>
+    );
+};
+
+const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, customPathsLabel, customPathsPlaceholder, operations, selected, customPaths, typeFields, expandedPaths, onToggle, onSelectAll, onUnselectAll, onCustomPathsChange, onExpand, styles}) => (
     <div className={styles.mcp_panel}>
         <div className={styles.mcp_panelHeader}>
             <div className={styles.mcp_panelHeaderTop}>
@@ -208,19 +341,17 @@ const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabe
         </div>
         <div className={styles.mcp_operationList}>
             {operations.map(op => (
-                <label key={op.name} className={styles.mcp_operationRow} title={op.description || ''}>
-                    <input
-                        type="checkbox"
-                        className={styles.mcp_checkbox}
-                        checked={selected.has(op.name)}
-                        onChange={() => onToggle(op.name)}
-                    />
-                    <span className={styles.mcp_operationName}>{op.name}</span>
-                    <span className={styles.mcp_typeBadges}>
-                        {op.isQuery && <span className={`${styles.mcp_badge} ${styles['mcp_badge--query']}`}>Q</span>}
-                        {op.isMutation && <span className={`${styles.mcp_badge} ${styles['mcp_badge--mutation']}`}>M</span>}
-                    </span>
-                </label>
+                <TreeNode
+                    key={op.name}
+                    node={op}
+                    depth={0}
+                    selected={selected}
+                    typeFields={typeFields}
+                    expandedPaths={expandedPaths}
+                    onToggle={onToggle}
+                    onExpand={onExpand}
+                    styles={styles}
+                />
             ))}
         </div>
         <div className={styles.mcp_customPaths}>

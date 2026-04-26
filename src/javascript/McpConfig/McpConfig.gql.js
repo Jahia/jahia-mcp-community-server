@@ -21,6 +21,7 @@ export const GET_QUERY_FIELDS = gql`
             fields(includeDeprecated: false) {
                 name
                 description
+                type { name kind ofType { name kind ofType { name kind } } }
             }
         }
     }
@@ -32,6 +33,19 @@ export const GET_MUTATION_FIELDS = gql`
             fields(includeDeprecated: false) {
                 name
                 description
+                type { name kind ofType { name kind ofType { name kind } } }
+            }
+        }
+    }
+`;
+
+export const GET_TYPE_FIELDS = gql`
+    query McpGetTypeFields($typeName: String!) {
+        typeFields: __type(name: $typeName) {
+            fields(includeDeprecated: false) {
+                name
+                description
+                type { name kind ofType { name kind ofType { name kind } } }
             }
         }
     }
