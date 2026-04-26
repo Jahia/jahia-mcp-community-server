@@ -9,6 +9,8 @@
     "blockList": "Block List",
     "blockListHint": "Checked operations are always blocked, regardless of the allow list.",
     "blockListEmpty": "No operations are blocked.",
+    "selectAll": "Select all",
+    "unselectAll": "Unselect all",
     "save": "Save settings",
     "saveSuccess": "Settings saved successfully.",
     "saveError": "An error occurred while saving the settings."

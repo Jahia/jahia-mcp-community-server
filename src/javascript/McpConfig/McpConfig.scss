@@ -44,11 +44,38 @@
     border-bottom: 1px solid #e0e0e0;
 }
 
+.mcp_panelHeaderTop {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
 .mcp_panelTitle {
     font-size: 14px;
     font-weight: 600;
-    margin: 0 0 4px;
+    margin: 0;
     color: #333;
+}
+
+.mcp_panelBulkActions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.mcp_linkBtn {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 11px;
+    color: #0077cc;
+    cursor: pointer;
+    text-decoration: underline;
+
+    &:hover {
+        color: #005fa3;
+    }
 }
 
 .mcp_panelHint {

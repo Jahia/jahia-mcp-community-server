@@ -45,6 +45,22 @@ export const McpConfigAdmin = () => {
         mutationFieldsData?.mutationFields?.fields
     );
 
+    const selectAll = (listSetter, otherSetter) => {
+        const allNames = new Set(operations.map(op => op.name));
+        listSetter(allNames);
+        otherSetter(prev => {
+            const next = new Set(prev);
+            allNames.forEach(n => next.delete(n));
+            return next;
+        });
+        setDirty(true);
+    };
+
+    const unselectAll = listSetter => {
+        listSetter(new Set());
+        setDirty(true);
+    };
+
     const toggle = (listSetter, otherSetter, name) => {
         listSetter(prev => {
             const next = new Set(prev);
@@ -110,20 +126,26 @@ export const McpConfigAdmin = () => {
                     title={t('label.allowList')}
                     hint={t('label.allowListHint')}
                     emptyHint={t('label.allowListEmpty')}
-                    badge="mcp_badge--allow"
+                    selectAllLabel={t('label.selectAll')}
+                    unselectAllLabel={t('label.unselectAll')}
                     operations={operations}
                     selected={whitelist}
                     onToggle={name => toggle(setWhitelist, setBlacklist, name)}
+                    onSelectAll={() => selectAll(setWhitelist, setBlacklist)}
+                    onUnselectAll={() => unselectAll(setWhitelist)}
                     styles={styles}
                 />
                 <OperationPanel
                     title={t('label.blockList')}
                     hint={t('label.blockListHint')}
                     emptyHint={t('label.blockListEmpty')}
-                    badge="mcp_badge--block"
+                    selectAllLabel={t('label.selectAll')}
+                    unselectAllLabel={t('label.unselectAll')}
                     operations={operations}
                     selected={blacklist}
                     onToggle={name => toggle(setBlacklist, setWhitelist, name)}
+                    onSelectAll={() => selectAll(setBlacklist, setWhitelist)}
+                    onUnselectAll={() => unselectAll(setBlacklist)}
                     styles={styles}
                 />
             </div>
@@ -150,10 +172,16 @@ export const McpConfigAdmin = () => {
     );
 };
 
-const OperationPanel = ({title, hint, emptyHint, badge, operations, selected, onToggle, styles}) => (
+const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, operations, selected, onToggle, onSelectAll, onUnselectAll, styles}) => (
     <div className={styles.mcp_panel}>
         <div className={styles.mcp_panelHeader}>
-            <h3 className={styles.mcp_panelTitle}>{title}</h3>
+            <div className={styles.mcp_panelHeaderTop}>
+                <h3 className={styles.mcp_panelTitle}>{title}</h3>
+                <div className={styles.mcp_panelBulkActions}>
+                    <button className={styles.mcp_linkBtn} type="button" onClick={onSelectAll}>{selectAllLabel}</button>
+                    <button className={styles.mcp_linkBtn} type="button" onClick={onUnselectAll}>{unselectAllLabel}</button>
+                </div>
+            </div>
             <Typography className={styles.mcp_panelHint}>{selected.size === 0 ? emptyHint : hint}</Typography>
         </div>
         <div className={styles.mcp_operationList}>
