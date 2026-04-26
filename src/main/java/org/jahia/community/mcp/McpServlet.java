@@ -44,6 +44,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private static final String CONTENT_TYPE_JSON = "application/json;charset=UTF-8";
     private static final String AUTH_HEADER_KEY = "authorization";
     private static final String JAHIA_USER_KEY = "jahia.user";
+    private static final String CLIENT_IP_KEY = "client.ip";
     private static final String MCP_ENDPOINT = "mcp";
     private static final String QUERY_ARG = "query";
     private static final String VARIABLES_ARG = "variables";
@@ -149,6 +150,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 final Map<String, Object> ctxMap = new java.util.HashMap<>();
                 if (authHeader != null) ctxMap.put(AUTH_HEADER_KEY, authHeader);
                 if (currentUser != null) ctxMap.put(JAHIA_USER_KEY, currentUser);
+                ctxMap.put(CLIENT_IP_KEY, getClientIp(req));
                 final McpTransportContext transportContext = ctxMap.isEmpty()
                         ? McpTransportContext.EMPTY
                         : McpTransportContext.create(ctxMap);
@@ -218,7 +220,10 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             final Object variables = req.arguments().get(VARIABLES_ARG);
 
             // Access control: check whitelist/blacklist before forwarding to GraphQL engine
-            final McpSchema.CallToolResult blocked = checkAccess(query);
+            final McpSchema.CallToolResult blocked = checkAccess(
+                    query,
+                    (JahiaUser) ctx.get(JAHIA_USER_KEY),
+                    (String) ctx.get(CLIENT_IP_KEY));
             if (blocked != null) {
                 return blocked;
             }
@@ -263,13 +268,21 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         });
     }
 
+    private static String getClientIp(final HttpServletRequest req) {
+        final String forwarded = req.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        return req.getRemoteAddr();
+    }
+
     /**
      * Returns a blocked-result if the query violates the whitelist or blacklist, null otherwise.
      * Entries are dot-separated path prefixes: "admin" covers all sub-operations of admin,
      * "admin.jahia.shutdown" covers only that specific nested path.
      * Introspection fields (__schema, __type, __typename) always pass.
      */
-    private McpSchema.CallToolResult checkAccess(final String query) {
+    private McpSchema.CallToolResult checkAccess(final String query, final JahiaUser user, final String clientIp) {
         final Set<String> whitelist = mcpConfigService.getWhitelist();
         final Set<String> blacklist = mcpConfigService.getBlacklist();
 
@@ -295,7 +308,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         for (final String path : paths) {
             for (final String entry : blacklist) {
                 if (pathCoveredBy(path, entry)) {
-                    LOGGER.warn("MCP: path '{}' blocked — covered by blacklist entry '{}'", path, entry);
+                    LOGGER.warn("MCP operation blocked: path='{}', reason=blacklist entry '{}', user='{}', ip='{}'",
+                            path, entry, user != null ? user.getName() : "anonymous", clientIp);
                     return McpSchema.CallToolResult.builder()
                             .addTextContent("{\"errors\":[{\"message\":\"Operation blocked: '"
                                     + path + "' is in the blacklist\"}]}")
@@ -315,7 +329,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                     }
                 }
                 if (!allowed) {
-                    LOGGER.warn("MCP: path '{}' blocked — not covered by whitelist", path);
+                    LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
+                            path, user != null ? user.getName() : "anonymous", clientIp);
                     return McpSchema.CallToolResult.builder()
                             .addTextContent("{\"errors\":[{\"message\":\"Operation not allowed: '"
                                     + path + "' is not in the whitelist\"}]}")
