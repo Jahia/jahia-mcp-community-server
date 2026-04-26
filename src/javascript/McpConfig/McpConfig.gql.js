@@ -15,14 +15,19 @@ export const SAVE_SETTINGS = gql`
     }
 `;
 
-export const GET_OPERATIONS = gql`
-    query McpGetOperations {
+export const GET_QUERY_FIELDS = gql`
+    query McpGetQueryFields {
         queryFields: __type(name: "Query") {
             fields(includeDeprecated: false) {
                 name
                 description
             }
         }
+    }
+`;
+
+export const GET_MUTATION_FIELDS = gql`
+    query McpGetMutationFields {
         mutationFields: __type(name: "Mutation") {
             fields(includeDeprecated: false) {
                 name

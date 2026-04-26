@@ -3,7 +3,7 @@ import {useMutation, useQuery} from '@apollo/client';
 import {useTranslation} from 'react-i18next';
 import {Button, Loader, Typography} from '@jahia/moonstone';
 import styles from './McpConfig.scss';
-import {GET_OPERATIONS, GET_SETTINGS, SAVE_SETTINGS} from './McpConfig.gql';
+import {GET_MUTATION_FIELDS, GET_QUERY_FIELDS, GET_SETTINGS, SAVE_SETTINGS} from './McpConfig.gql';
 
 const buildOperationMap = (queryFields, mutationFields) => {
     const map = {};
@@ -27,7 +27,8 @@ export const McpConfigAdmin = () => {
     const [blacklist, setBlacklist] = useState(new Set());
     const [dirty, setDirty] = useState(false);
 
-    const {loading: loadingOps, data: opsData} = useQuery(GET_OPERATIONS, {fetchPolicy: 'cache-first'});
+    const {loading: loadingQueryFields, data: queryFieldsData} = useQuery(GET_QUERY_FIELDS, {fetchPolicy: 'cache-first'});
+    const {loading: loadingMutationFields, data: mutationFieldsData} = useQuery(GET_MUTATION_FIELDS, {fetchPolicy: 'cache-first'});
     const {loading: loadingSettings} = useQuery(GET_SETTINGS, {
         fetchPolicy: 'network-only',
         onCompleted: data => {
@@ -40,8 +41,8 @@ export const McpConfigAdmin = () => {
     const [saveSettings, {loading: saving}] = useMutation(SAVE_SETTINGS);
 
     const operations = buildOperationMap(
-        opsData?.queryFields?.fields,
-        opsData?.mutationFields?.fields
+        queryFieldsData?.queryFields?.fields,
+        mutationFieldsData?.mutationFields?.fields
     );
 
     const toggle = (listSetter, otherSetter, name) => {
@@ -87,7 +88,7 @@ export const McpConfigAdmin = () => {
         }
     }, [saveStatus]);
 
-    if (loadingOps || loadingSettings) {
+    if (loadingQueryFields || loadingMutationFields || loadingSettings) {
         return (
             <div className={styles.mcp_loading}>
                 <Loader size="big"/>
