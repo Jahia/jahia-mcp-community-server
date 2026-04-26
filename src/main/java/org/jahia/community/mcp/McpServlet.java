@@ -196,7 +196,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     /**
      * Tool: executeGraphQL
      * Executes any GraphQL operation against the Jahia graphql-dxm-provider endpoint,
-     * subject to the configured whitelist/blacklist access control.
+     * subject to the configured whitelist access control.
      */
     private McpStatelessServerFeatures.SyncToolSpecification executeGraphQLTool() {
         final String schema = "{"
@@ -277,22 +277,20 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     /**
-     * Returns a blocked-result if the query violates the whitelist or blacklist, null otherwise.
+     * Returns a blocked-result if the query violates the whitelist, null otherwise.
      * Entries are dot-separated path prefixes: "admin" covers all sub-operations of admin,
      * "admin.jahia.shutdown" covers only that specific nested path.
      * Introspection fields (__schema, __type, __typename) always pass.
      */
     private McpSchema.CallToolResult checkAccess(final String query, final JahiaUser user, final String clientIp) {
         final Set<String> whitelist = mcpConfigService.getWhitelist();
-        final Set<String> blacklist = mcpConfigService.getBlacklist();
 
-        if (whitelist.isEmpty() && blacklist.isEmpty()) {
+        if (whitelist.isEmpty()) {
             return null;
         }
 
         int maxDepth = 1;
         for (final String e : whitelist) maxDepth = Math.max(maxDepth, segmentCount(e));
-        for (final String e : blacklist) maxDepth = Math.max(maxDepth, segmentCount(e));
 
         final Set<String> paths = new LinkedHashSet<>(extractFieldPaths(query, maxDepth));
         paths.removeIf(p -> {
@@ -306,37 +304,21 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
 
         for (final String path : paths) {
-            for (final String entry : blacklist) {
-                if (pathCoveredBy(path, entry)) {
-                    LOGGER.warn("MCP operation blocked: path='{}', reason=blacklist entry '{}', user='{}', ip='{}'",
-                            path, entry, user != null ? user.getName() : "anonymous", clientIp);
-                    return McpSchema.CallToolResult.builder()
-                            .addTextContent("{\"errors\":[{\"message\":\"Operation blocked: '"
-                                    + path + "' is in the blacklist\"}]}")
-                            .isError(true)
-                            .build();
+            boolean allowed = false;
+            for (final String entry : whitelist) {
+                if (pathCoveredBy(path, entry) || pathIsContainerOf(path, entry)) {
+                    allowed = true;
+                    break;
                 }
             }
-        }
-
-        if (!whitelist.isEmpty()) {
-            for (final String path : paths) {
-                boolean allowed = false;
-                for (final String entry : whitelist) {
-                    if (pathCoveredBy(path, entry) || pathIsContainerOf(path, entry)) {
-                        allowed = true;
-                        break;
-                    }
-                }
-                if (!allowed) {
-                    LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
-                            path, user != null ? user.getName() : "anonymous", clientIp);
-                    return McpSchema.CallToolResult.builder()
-                            .addTextContent("{\"errors\":[{\"message\":\"Operation not allowed: '"
-                                    + path + "' is not in the whitelist\"}]}")
-                            .isError(true)
-                            .build();
-                }
+            if (!allowed) {
+                LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
+                        path, user != null ? user.getName() : "anonymous", clientIp);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("{\"errors\":[{\"message\":\"Operation not allowed: '"
+                                + path + "' is not in the whitelist\"}]}")
+                        .isError(true)
+                        .build();
             }
         }
 

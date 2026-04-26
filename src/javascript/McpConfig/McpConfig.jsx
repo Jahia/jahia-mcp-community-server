@@ -132,7 +132,7 @@ export const McpConfigAdmin = () => {
     const handleSave = async () => {
         setSaveStatus(null);
         try {
-            const result = await saveSettings({variables: {whitelist: [...whitelist], blacklist: []}});
+            const result = await saveSettings({variables: {whitelist: [...whitelist]}});
             if (result.data?.mcpSaveSettings) {
                 setSaveStatus('success');
             } else {

@@ -22,17 +22,14 @@ public class McpQueryExtension {
 
     @GraphQLField
     @GraphQLName("mcpSettings")
-    @GraphQLDescription("Returns the current MCP operation whitelist and blacklist configuration")
+    @GraphQLDescription("Returns the current MCP operation whitelist configuration")
     @GraphQLRequiresPermission("admin")
     public static GqlMcpSettings getSettings() {
         final McpConfigService config = BundleUtils.getOsgiService(McpConfigService.class, null);
         if (config == null) {
-            return new GqlMcpSettings(new ArrayList<>(), new ArrayList<>());
+            return new GqlMcpSettings(new ArrayList<>());
         }
-        return new GqlMcpSettings(
-                new ArrayList<>(config.getWhitelist()),
-                new ArrayList<>(config.getBlacklist())
-        );
+        return new GqlMcpSettings(new ArrayList<>(config.getWhitelist()));
     }
 
     @GraphQLName("McpSettings")
@@ -40,11 +37,9 @@ public class McpQueryExtension {
     public static class GqlMcpSettings {
 
         private final List<String> whitelist;
-        private final List<String> blacklist;
 
-        public GqlMcpSettings(List<String> whitelist, List<String> blacklist) {
+        public GqlMcpSettings(List<String> whitelist) {
             this.whitelist = whitelist;
-            this.blacklist = blacklist;
         }
 
         @GraphQLField
@@ -52,13 +47,6 @@ public class McpQueryExtension {
         @GraphQLDescription("If non-empty, only operations in this list are allowed; empty means allow all")
         public List<String> getWhitelist() {
             return whitelist;
-        }
-
-        @GraphQLField
-        @GraphQLName("blacklist")
-        @GraphQLDescription("Operations in this list are always blocked; empty means block none")
-        public List<String> getBlacklist() {
-            return blacklist;
         }
     }
 }

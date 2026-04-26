@@ -30,11 +30,10 @@ public class McpMutationExtension {
 
     @GraphQLField
     @GraphQLName("mcpSaveSettings")
-    @GraphQLDescription("Saves the MCP operation whitelist and blacklist configuration")
+    @GraphQLDescription("Saves the MCP operation whitelist configuration")
     @GraphQLRequiresPermission("admin")
     public static Boolean saveSettings(
-            @GraphQLName("whitelist") @GraphQLNonNull @GraphQLDescription("Operations to allow; empty list means allow all") List<String> whitelist,
-            @GraphQLName("blacklist") @GraphQLNonNull @GraphQLDescription("Operations to block; empty list means block none") List<String> blacklist) {
+            @GraphQLName("whitelist") @GraphQLNonNull @GraphQLDescription("Operations to allow; empty list means allow all") List<String> whitelist) {
         try {
             final ConfigurationAdmin configAdmin = BundleUtils.getOsgiService(ConfigurationAdmin.class, null);
             if (configAdmin == null) {
@@ -47,7 +46,6 @@ public class McpMutationExtension {
                 props = new Hashtable<>();
             }
             props.put("whitelist", String.join(",", whitelist));
-            props.put("blacklist", String.join(",", blacklist));
             config.update(props);
             return Boolean.TRUE;
         } catch (IOException e) {

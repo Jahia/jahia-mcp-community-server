@@ -16,17 +16,14 @@ import java.util.Set;
 public class McpConfigService implements ManagedService {
 
     private volatile Set<String> whitelist = Collections.emptySet();
-    private volatile Set<String> blacklist = Collections.emptySet();
 
     @Override
     public void updated(Dictionary<String, ?> dictionary) throws ConfigurationException {
         if (dictionary == null) {
             whitelist = Collections.emptySet();
-            blacklist = Collections.emptySet();
             return;
         }
         whitelist = parseList(dictionary.get("whitelist"));
-        blacklist = parseList(dictionary.get("blacklist"));
     }
 
     private static Set<String> parseList(Object value) {
@@ -42,9 +39,5 @@ public class McpConfigService implements ManagedService {
 
     public Set<String> getWhitelist() {
         return whitelist;
-    }
-
-    public Set<String> getBlacklist() {
-        return blacklist;
     }
 }

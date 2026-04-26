@@ -4,14 +4,13 @@ export const GET_SETTINGS = gql`
     query McpGetSettings {
         mcpSettings {
             whitelist
-            blacklist
         }
     }
 `;
 
 export const SAVE_SETTINGS = gql`
-    mutation McpSaveSettings($whitelist: [String]!, $blacklist: [String]!) {
-        mcpSaveSettings(whitelist: $whitelist, blacklist: $blacklist)
+    mutation McpSaveSettings($whitelist: [String]!) {
+        mcpSaveSettings(whitelist: $whitelist)
     }
 `;
 
