@@ -91,7 +91,7 @@ describe('MCP Server — Endpoint Access Control', () => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: ['jcr']}});
         executeGraphQL('{ currentUser { name } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
-            expect(response.body.result.content[0].text).to.include('not in whitelist');
+            expect(response.body.result.content[0].text).to.include('not in the whitelist');
         });
     });
 
@@ -113,7 +113,7 @@ describe('MCP Server — Endpoint Access Control', () => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: ['admin.jahia']}});
         executeGraphQL('{ currentUser { name } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
-            expect(response.body.result.content[0].text).to.include('not in whitelist');
+            expect(response.body.result.content[0].text).to.include('not in the whitelist');
         });
     });
 
