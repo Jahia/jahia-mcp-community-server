@@ -1,7 +1,7 @@
-mutation CreateMcpTestToken($tokenName: String!) {
+mutation CreateMcpTestToken($tokenName: String!, $scopes: [String]) {
     admin {
         personalApiTokens {
-            createToken(name: $tokenName)
+            createToken(name: $tokenName, scopes: $scopes)
         }
     }
 }

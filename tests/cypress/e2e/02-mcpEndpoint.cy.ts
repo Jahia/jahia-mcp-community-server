@@ -16,7 +16,7 @@ describe('MCP Server — Endpoint Access Control', () => {
 
     before(() => {
         cy.login();
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
+        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME, scopes: ['graphql', 'mcp']}}).then(result => {
             apiToken = result.data.admin.personalApiTokens.createToken;
         });
         cy.apollo({query: listTokens}).then(result => {
@@ -39,7 +39,7 @@ describe('MCP Server — Endpoint Access Control', () => {
             url: '/modules/mcp',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiToken}`
+                'Authorization': `APIToken ${apiToken}`
             },
             body: {
                 jsonrpc: '2.0',
