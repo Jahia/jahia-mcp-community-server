@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
+import javax.jcr.query.Query;
+import javax.jcr.query.QueryResult;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -23,18 +25,19 @@ public class McpSkillService {
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";
 
+    private static final String LIST_SKILLS_SQL =
+            "SELECT * FROM [mcp:skill] AS skill WHERE ISDESCENDANTNODE(skill, '" + SKILLS_PATH + "') ORDER BY NAME(skill)";
+
     public List<SkillEntry> listSkills() {
         try {
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 ensureContainer(session);
-                final JCRNodeWrapper parent = session.getNode(SKILLS_PATH);
+                final Query query = session.getWorkspace().getQueryManager().createQuery(LIST_SKILLS_SQL, Query.JCR_SQL2);
+                final QueryResult result = query.execute();
                 final List<SkillEntry> skills = new ArrayList<>();
-                final NodeIterator iter = parent.getNodes();
+                final NodeIterator iter = result.getNodes();
                 while (iter.hasNext()) {
-                    final JCRNodeWrapper node = (JCRNodeWrapper) iter.nextNode();
-                    if (node.isNodeType(SKILL_NODE_TYPE)) {
-                        skills.add(toEntry(node));
-                    }
+                    skills.add(toEntry((JCRNodeWrapper) iter.nextNode()));
                 }
                 return skills;
             });
