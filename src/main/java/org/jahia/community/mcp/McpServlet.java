@@ -2,6 +2,7 @@ package org.jahia.community.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -79,6 +80,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private PermissionService permissionService;
     private HttpServlet gql;
     private McpConfigService mcpConfigService;
+    private McpSkillService mcpSkillService;
 
     @Activate
     public void activate() {
@@ -89,7 +91,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             mcpServer = McpServer.sync(this)
                     .serverInfo("jahia-mcp", "1.0.0")
                     .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
-                    .tools(executeGraphQLTool(), introspectSchemaTool())
+                    .tools(executeGraphQLTool(), introspectSchemaTool(), listSkillsTool(), getSkillTool())
                     .build();
         } finally {
             currentThread.setContextClassLoader(originalCL);
@@ -127,6 +129,11 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     @Reference
     public void setMcpConfigService(McpConfigService mcpConfigService) {
         this.mcpConfigService = mcpConfigService;
+    }
+
+    @Reference
+    public void setMcpSkillService(McpSkillService mcpSkillService) {
+        this.mcpSkillService = mcpSkillService;
     }
 
     @Override
@@ -186,7 +193,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         try {
             if (permissionService.hasPermission(MCP_ENDPOINT)) {
                 resp.setContentType(CONTENT_TYPE_JSON);
-                resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\",\"tools\":[\"executeGraphQL\",\"introspectSchema\"]}");
+                resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\",\"tools\":[\"executeGraphQL\",\"introspectSchema\",\"listSkills\",\"getSkill\"]}");
             }
         } catch (IOException ex) {
             LOGGER.error(FAILED_TO_WRITE_RESPONSE, ex);
@@ -591,6 +598,85 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         .isError(true)
                         .build();
             }
+        });
+    }
+
+    /**
+     * Tool: listSkills
+     * Returns the name and description of every skill stored in JCR.
+     */
+    private McpStatelessServerFeatures.SyncToolSpecification listSkillsTool() {
+        final McpSchema.Tool tool = McpSchema.Tool.builder()
+                .name("listSkills")
+                .description("Returns the list of all skills available on this Jahia instance. "
+                        + "Each skill has a name and a short description. "
+                        + "Call getSkill(name) to retrieve the full Markdown instructions for a specific skill.")
+                .inputSchema(JSON_MAPPER, "{\"type\":\"object\",\"properties\":{}}")
+                .build();
+
+        return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
+            try {
+                final List<McpSkillService.SkillEntry> skills = mcpSkillService.listSkills();
+                final ArrayNode arr = OBJECT_MAPPER.createArrayNode();
+                for (final McpSkillService.SkillEntry e : skills) {
+                    final ObjectNode obj = OBJECT_MAPPER.createObjectNode();
+                    obj.put("name", e.name);
+                    obj.put("description", e.description);
+                    arr.add(obj);
+                }
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent(OBJECT_MAPPER.writeValueAsString(arr))
+                        .isError(false)
+                        .build();
+            } catch (Exception ex) {
+                LOGGER.error("listSkills failed", ex);
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("Error: " + ex.getMessage())
+                        .isError(true)
+                        .build();
+            }
+        });
+    }
+
+    /**
+     * Tool: getSkill
+     * Returns the full Markdown content of a skill by name.
+     */
+    private McpStatelessServerFeatures.SyncToolSpecification getSkillTool() {
+        final String schema = "{"
+                + "\"type\":\"object\","
+                + "\"properties\":{"
+                + "  \"name\":{\"type\":\"string\",\"description\":\"Name of the skill to retrieve\"}"
+                + "},"
+                + "\"required\":[\"name\"]"
+                + "}";
+
+        final McpSchema.Tool tool = McpSchema.Tool.builder()
+                .name("getSkill")
+                .description("Returns the full Markdown instructions for a named skill. "
+                        + "Call listSkills first to discover available skill names.")
+                .inputSchema(JSON_MAPPER, schema)
+                .build();
+
+        return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
+            final String name = (String) req.arguments().get("name");
+            if (name == null || name.isBlank()) {
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("Error: 'name' argument is required")
+                        .isError(true)
+                        .build();
+            }
+            final McpSkillService.SkillEntry skill = mcpSkillService.getSkill(name);
+            if (skill == null) {
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent("Error: skill '" + name + "' not found")
+                        .isError(true)
+                        .build();
+            }
+            return McpSchema.CallToolResult.builder()
+                    .addTextContent(skill.content)
+                    .isError(false)
+                    .build();
         });
     }
 

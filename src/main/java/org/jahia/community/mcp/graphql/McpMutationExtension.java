@@ -5,6 +5,7 @@ import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
+import org.jahia.community.mcp.McpSkillService;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.modules.graphql.provider.dxm.security.GraphQLRequiresPermission;
 import org.jahia.osgi.BundleUtils;
@@ -52,5 +53,35 @@ public class McpMutationExtension {
             LOGGER.error("Error saving MCP settings to OSGi configuration", e);
             return Boolean.FALSE;
         }
+    }
+
+    @GraphQLField
+    @GraphQLName("mcpSaveSkill")
+    @GraphQLDescription("Creates or updates a named MCP skill in JCR")
+    @GraphQLRequiresPermission("admin")
+    public static Boolean saveSkill(
+            @GraphQLName("name") @GraphQLNonNull @GraphQLDescription("Unique skill identifier (becomes the JCR node name)") String name,
+            @GraphQLName("description") @GraphQLDescription("Short description of what the skill does") String description,
+            @GraphQLName("content") @GraphQLNonNull @GraphQLDescription("Full Markdown content — instructions the AI should follow") String content) {
+        final McpSkillService service = BundleUtils.getOsgiService(McpSkillService.class, null);
+        if (service == null) {
+            LOGGER.error("McpSkillService is not available");
+            return Boolean.FALSE;
+        }
+        return service.saveSkill(name, description, content);
+    }
+
+    @GraphQLField
+    @GraphQLName("mcpDeleteSkill")
+    @GraphQLDescription("Deletes a named MCP skill from JCR")
+    @GraphQLRequiresPermission("admin")
+    public static Boolean deleteSkill(
+            @GraphQLName("name") @GraphQLNonNull @GraphQLDescription("Name of the skill to delete") String name) {
+        final McpSkillService service = BundleUtils.getOsgiService(McpSkillService.class, null);
+        if (service == null) {
+            LOGGER.error("McpSkillService is not available");
+            return Boolean.FALSE;
+        }
+        return service.deleteSkill(name);
     }
 }
