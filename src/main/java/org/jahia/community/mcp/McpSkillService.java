@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 
+@SuppressWarnings("java:S1075")
 @Component(service = McpSkillService.class, immediate = true)
 public class McpSkillService {
 

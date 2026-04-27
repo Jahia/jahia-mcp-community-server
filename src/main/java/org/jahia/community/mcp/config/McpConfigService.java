@@ -15,6 +15,7 @@ import java.util.Set;
         property = Constants.SERVICE_PID + "=org.jahia.community.mcp")
 public class McpConfigService implements ManagedService {
 
+    @SuppressWarnings("java:S3077")
     private volatile Set<String> whitelist = Collections.emptySet();
 
     @Override

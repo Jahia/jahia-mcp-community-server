@@ -9,8 +9,14 @@ const MAX_TREE_DEPTH = 5;
 
 // Unwrap NON_NULL / LIST wrappers to reach the named type
 const getNamedType = typeObj => {
-    if (!typeObj) return null;
-    if (typeObj.name) return typeObj;
+    if (!typeObj) {
+        return null;
+    }
+
+    if (typeObj.name) {
+        return typeObj;
+    }
+
     return getNamedType(typeObj.ofType);
 };
 
@@ -41,11 +47,17 @@ const buildOperationMap = (queryFields, mutationFields) => {
 
 // True if path itself or any ancestor prefix is in the set
 const isCoveredBySet = (path, set) => {
-    if (set.has(path)) return true;
+    if (set.has(path)) {
+        return true;
+    }
+
     const parts = path.split('.');
     for (let i = 1; i < parts.length; i++) {
-        if (set.has(parts.slice(0, i).join('.'))) return true;
+        if (set.has(parts.slice(0, i).join('.'))) {
+            return true;
+        }
     }
+
     return false;
 };
 
@@ -78,11 +90,19 @@ export const McpConfigAdmin = () => {
 
     const expandNode = async (node, expandedPaths, setExpandedPaths) => {
         if (expandedPaths.has(node.path)) {
-            setExpandedPaths(prev => { const next = new Set(prev); next.delete(node.path); return next; });
+            setExpandedPaths(prev => {
+                const next = new Set(prev);
+                next.delete(node.path);
+                return next;
+            });
             return;
         }
+
         setExpandedPaths(prev => new Set([...prev, node.path]));
-        if (!node.typeName || typeFields[node.typeName]) return;
+        if (!node.typeName || typeFields[node.typeName]) {
+            return;
+        }
+
         setTypeFields(prev => ({...prev, [node.typeName]: 'loading'}));
         try {
             const result = await apolloClient.query({
@@ -104,7 +124,7 @@ export const McpConfigAdmin = () => {
         }
     };
 
-    const toggle = (path) => {
+    const toggle = path => {
         setWhitelist(prev => {
             const next = new Set(prev);
             if (next.has(path)) {
@@ -112,8 +132,13 @@ export const McpConfigAdmin = () => {
             } else {
                 next.add(path);
                 // Remove now-redundant descendants
-                next.forEach(e => { if (e !== path && e.startsWith(path + '.')) next.delete(e); });
+                next.forEach(e => {
+                    if (e !== path && e.startsWith(path + '.')) {
+                        next.delete(e);
+                    }
+                });
             }
+
             return next;
         });
         setDirty(true);
@@ -138,6 +163,7 @@ export const McpConfigAdmin = () => {
             } else {
                 setSaveStatus('error');
             }
+
             setDirty(false);
         } catch (err) {
             console.error('Failed to save MCP settings:', err);
@@ -180,11 +206,11 @@ export const McpConfigAdmin = () => {
                     selected={whitelist}
                     typeFields={typeFields}
                     expandedPaths={expandedWl}
+                    styles={styles}
                     onToggle={path => toggle(path)}
                     onSelectAll={selectAll}
                     onUnselectAll={unselectAll}
                     onExpand={node => expandNode(node, expandedWl, setExpandedWl)}
-                    styles={styles}
                 />
             </div>
 
@@ -218,15 +244,15 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
     const covered = isCoveredBySet(node.path, selected);
     const directlySelected = selected.has(node.path);
 
-    const children = (isExpanded && Array.isArray(rawChildren))
-        ? rawChildren.map(f => ({...f, path: node.path + '.' + f.name, isQuery: node.isQuery, isMutation: node.isMutation}))
-        : null;
+    const children = (isExpanded && Array.isArray(rawChildren)) ?
+        rawChildren.map(f => ({...f, path: node.path + '.' + f.name, isQuery: node.isQuery, isMutation: node.isMutation})) :
+        null;
 
     return (
         <div>
             <div
                 className={`${styles.mcp_treeRow}${covered && !directlySelected ? ' ' + styles['mcp_treeRow--covered'] : ''}`}
-                style={{paddingLeft: `${12 + depth * 18}px`}}
+                style={{paddingLeft: `${12 + (depth * 18)}px`}}
             >
                 {isExpandable ? (
                     <button className={styles.mcp_expandBtn} type="button" onClick={() => onExpand(node)}>
@@ -240,8 +266,8 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
                     className={styles.mcp_checkbox}
                     checked={covered}
                     disabled={covered && !directlySelected}
-                    onChange={() => onToggle(node.path)}
                     title={node.description || node.path}
+                    onChange={() => onToggle(node.path)}
                 />
                 <span className={styles.mcp_operationName}>{node.name}</span>
                 {depth === 0 && (
@@ -252,7 +278,7 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
                 )}
             </div>
             {isExpanded && isLoading && (
-                <div className={styles.mcp_treeLoading} style={{paddingLeft: `${12 + (depth + 1) * 18}px`}}>…</div>
+                <div className={styles.mcp_treeLoading} style={{paddingLeft: `${12 + ((depth + 1) * 18)}px`}}>…</div>
             )}
             {children && children.map(child => (
                 <TreeNode
@@ -262,9 +288,9 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
                     selected={selected}
                     typeFields={typeFields}
                     expandedPaths={expandedPaths}
+                    styles={styles}
                     onToggle={onToggle}
                     onExpand={onExpand}
-                    styles={styles}
                 />
             ))}
         </div>
@@ -292,9 +318,9 @@ const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabe
                     selected={selected}
                     typeFields={typeFields}
                     expandedPaths={expandedPaths}
+                    styles={styles}
                     onToggle={onToggle}
                     onExpand={onExpand}
-                    styles={styles}
                 />
             ))}
         </div>

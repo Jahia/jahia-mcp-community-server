@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@SuppressWarnings("java:S2226")
 @Component(service = {HttpServlet.class, Servlet.class},
         property = {"alias=/mcp", "allow-api-token=true"})
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
@@ -55,6 +56,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private static final String FAILED_TO_READ_REQUEST_BODY = "Failed to read request body";
     private static final String FAILED_TO_WRITE_RESPONSE = "Failed to write response";
     private static final String REPOSITORY_ERROR_DURING_MCP_REQUEST = "Repository error during MCP request";
+    private static final String ERROR_PREFIX = "Error: ";
     // Dummy no-op request used as the required non-null delegate for HttpServletRequestWrapper
     private static final HttpServletRequest DUMMY_REQUEST = (HttpServletRequest) java.lang.reflect.Proxy.newProxyInstance(
             McpServlet.class.getClassLoader(),
@@ -149,32 +151,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
 
         try {
             if (permissionService.hasPermission(MCP_ENDPOINT)) {
-                final String body = req.getReader().lines().collect(Collectors.joining());
-                LOGGER.debug("MCP request: {}", body);
-                final String authHeader = req.getHeader(HttpHeaders.AUTHORIZATION);
-                final JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
-                final Map<String, Object> ctxMap = new java.util.HashMap<>();
-                if (authHeader != null) ctxMap.put(AUTH_HEADER_KEY, authHeader);
-                if (currentUser != null) ctxMap.put(JAHIA_USER_KEY, currentUser);
-                ctxMap.put(CLIENT_IP_KEY, getClientIp(req));
-                final McpTransportContext transportContext = ctxMap.isEmpty()
-                        ? McpTransportContext.EMPTY
-                        : McpTransportContext.create(ctxMap);
-                final McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(JSON_MAPPER, body);
-
-                if (message instanceof McpSchema.JSONRPCRequest) {
-                    final McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
-                    final McpSchema.JSONRPCResponse response =
-                            mcpHandler.handleRequest(transportContext, request).block();
-                    resp.setContentType(CONTENT_TYPE_JSON);
-                    resp.getWriter().write(JSON_MAPPER.writeValueAsString(response));
-
-                } else if (message instanceof McpSchema.JSONRPCNotification) {
-                    final McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
-                    mcpHandler.handleNotification(transportContext, notification).block();
-                    resp.setStatus(HttpServletResponse.SC_ACCEPTED);
-                }
-            }else{
+                handleAuthorizedRequest(req, resp);
+            } else {
                 resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             }
         } catch (IOException | RepositoryException ex) {
@@ -184,6 +162,32 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             } catch (IOException ioEx) {
                 LOGGER.error(FAILED_TO_SEND_ERROR_RESPONSE, ioEx);
             }
+        }
+    }
+
+    private void handleAuthorizedRequest(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        final String body = req.getReader().lines().collect(Collectors.joining());
+        LOGGER.debug("MCP request: {}", body);
+        final String authHeader = req.getHeader(HttpHeaders.AUTHORIZATION);
+        final JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
+        final Map<String, Object> ctxMap = new java.util.HashMap<>();
+        if (authHeader != null) ctxMap.put(AUTH_HEADER_KEY, authHeader);
+        if (currentUser != null) ctxMap.put(JAHIA_USER_KEY, currentUser);
+        ctxMap.put(CLIENT_IP_KEY, getClientIp(req));
+        final McpTransportContext transportContext = ctxMap.isEmpty()
+                ? McpTransportContext.EMPTY
+                : McpTransportContext.create(ctxMap);
+        final McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(JSON_MAPPER, body);
+        if (message instanceof McpSchema.JSONRPCRequest) {
+            final McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
+            final McpSchema.JSONRPCResponse response =
+                    mcpHandler.handleRequest(transportContext, request).block();
+            resp.setContentType(CONTENT_TYPE_JSON);
+            resp.getWriter().write(JSON_MAPPER.writeValueAsString(response));
+        } else if (message instanceof McpSchema.JSONRPCNotification) {
+            final McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
+            mcpHandler.handleNotification(transportContext, notification).block();
+            resp.setStatus(HttpServletResponse.SC_ACCEPTED);
         }
     }
 
@@ -269,7 +273,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             } catch (Exception ex) {
                 LOGGER.error("executeGraphQL failed for query: {}", query, ex);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("Error: " + ex.getMessage())
+                        .addTextContent(ERROR_PREFIX + ex.getMessage())
                         .isError(true)
                         .build();
             }
@@ -312,14 +316,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
 
         for (final String path : paths) {
-            boolean allowed = false;
-            for (final String entry : whitelist) {
-                if (pathCoveredBy(path, entry) || pathIsContainerOf(path, entry)) {
-                    allowed = true;
-                    break;
-                }
-            }
-            if (!allowed) {
+            if (!isPathAllowed(path, whitelist)) {
                 LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
                         path, user != null ? user.getName() : "anonymous", clientIp);
                 return McpSchema.CallToolResult.builder()
@@ -331,6 +328,15 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
 
         return null;
+    }
+
+    private static boolean isPathAllowed(final String path, final Set<String> whitelist) {
+        for (final String entry : whitelist) {
+            if (pathCoveredBy(path, entry) || pathIsContainerOf(path, entry)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** True if entry is a dot-segment prefix of (or equal to) path. */
@@ -362,35 +368,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         }
         final String q = query.replaceAll("#[^\n]*", " ");
         final int len = q.length();
-        final int[] pos = {skipWS(q, 0)};
-
-        for (final String kw : List.of("subscription", "mutation", "query")) {
-            if (pos[0] + kw.length() <= len
-                    && q.regionMatches(pos[0], kw, 0, kw.length())
-                    && (pos[0] + kw.length() == len || !isIdentChar(q.charAt(pos[0] + kw.length())))) {
-                pos[0] += kw.length();
-                pos[0] = skipWS(q, pos[0]);
-                if (pos[0] < len && isIdentStart(q.charAt(pos[0]))) {
-                    while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
-                    pos[0] = skipWS(q, pos[0]);
-                }
-                if (pos[0] < len && q.charAt(pos[0]) == '(') {
-                    pos[0] = skipBalanced(q, pos[0], '(', ')');
-                    pos[0] = skipWS(q, pos[0]);
-                }
-                while (pos[0] < len && q.charAt(pos[0]) == '@') {
-                    while (pos[0] < len && !Character.isWhitespace(q.charAt(pos[0]))
-                            && q.charAt(pos[0]) != '(' && q.charAt(pos[0]) != '{') pos[0]++;
-                    pos[0] = skipWS(q, pos[0]);
-                    if (pos[0] < len && q.charAt(pos[0]) == '(') {
-                        pos[0] = skipBalanced(q, pos[0], '(', ')');
-                        pos[0] = skipWS(q, pos[0]);
-                    }
-                }
-                break;
-            }
-        }
-
+        final int[] pos = {skipOperationHeader(q, len, skipWS(q, 0))};
         if (pos[0] >= len || q.charAt(pos[0]) != '{') {
             return Collections.emptySet();
         }
@@ -399,77 +377,121 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         return paths;
     }
 
+    private static int skipOperationHeader(final String q, final int len, int pos) {
+        for (final String kw : List.of("subscription", "mutation", QUERY_ARG)) {
+            if (pos + kw.length() <= len
+                    && q.regionMatches(pos, kw, 0, kw.length())
+                    && (pos + kw.length() == len || !isIdentChar(q.charAt(pos + kw.length())))) {
+                return skipAfterKeyword(q, len, pos + kw.length());
+            }
+        }
+        return pos;
+    }
+
+    private static int skipAfterKeyword(final String q, final int len, int pos) {
+        pos = skipWS(q, pos);
+        if (pos < len && isIdentStart(q.charAt(pos))) {
+            while (pos < len && isIdentChar(q.charAt(pos))) pos++;
+            pos = skipWS(q, pos);
+        }
+        if (pos < len && q.charAt(pos) == '(') {
+            pos = skipBalanced(q, pos, '(', ')');
+            pos = skipWS(q, pos);
+        }
+        return skipDirectives(q, len, pos);
+    }
+
+    private static int skipDirectives(final String q, final int len, int pos) {
+        while (pos < len && q.charAt(pos) == '@') {
+            while (pos < len && !Character.isWhitespace(q.charAt(pos))
+                    && q.charAt(pos) != '(' && q.charAt(pos) != '{') pos++;
+            pos = skipWS(q, pos);
+            if (pos < len && q.charAt(pos) == '(') {
+                pos = skipBalanced(q, pos, '(', ')');
+                pos = skipWS(q, pos);
+            }
+        }
+        return pos;
+    }
+
     private static void collectSelectionSet(final String q, final int len, final int[] pos,
             final String prefix, final int depth, final int maxDepth, final Set<String> paths) {
         if (pos[0] >= len || q.charAt(pos[0]) != '{') return;
         pos[0]++;
         while (pos[0] < len) {
             pos[0] = skipWS(q, pos[0]);
-            if (pos[0] >= len) break;
-            final char c = q.charAt(pos[0]);
+            final char c = pos[0] < len ? q.charAt(pos[0]) : '}';
             if (c == '}') { pos[0]++; break; }
             if (c == '.' && pos[0] + 2 < len && q.charAt(pos[0] + 1) == '.' && q.charAt(pos[0] + 2) == '.') {
-                pos[0] += 3;
-                pos[0] = skipWS(q, pos[0]);
-                final boolean isInline = pos[0] + 2 <= len
-                        && q.regionMatches(pos[0], "on", 0, 2)
-                        && (pos[0] + 2 >= len || !isIdentChar(q.charAt(pos[0] + 2)));
-                if (isInline) {
-                    pos[0] += 2;
-                    pos[0] = skipWS(q, pos[0]);
-                }
-                while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
-                pos[0] = skipWS(q, pos[0]);
-                while (pos[0] < len && q.charAt(pos[0]) == '@') {
-                    while (pos[0] < len && !Character.isWhitespace(q.charAt(pos[0]))
-                            && q.charAt(pos[0]) != '(' && q.charAt(pos[0]) != '{' && q.charAt(pos[0]) != '}') pos[0]++;
-                    pos[0] = skipWS(q, pos[0]);
-                    if (pos[0] < len && q.charAt(pos[0]) == '(') {
-                        pos[0] = skipBalanced(q, pos[0], '(', ')');
-                        pos[0] = skipWS(q, pos[0]);
-                    }
-                }
-                if (isInline && pos[0] < len && q.charAt(pos[0]) == '{') {
-                    collectSelectionSet(q, len, pos, prefix, depth, maxDepth, paths);
-                }
-                continue;
-            }
-            if (!isIdentStart(c)) { pos[0]++; continue; }
-            final int start = pos[0];
-            while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
-            String name = q.substring(start, pos[0]);
-            pos[0] = skipWS(q, pos[0]);
-            if (pos[0] < len && q.charAt(pos[0]) == ':') {
+                processFragmentSpread(q, len, pos, prefix, depth, maxDepth, paths);
+            } else if (isIdentStart(c)) {
+                collectField(q, len, pos, prefix, depth, maxDepth, paths);
+            } else {
                 pos[0]++;
-                pos[0] = skipWS(q, pos[0]);
-                final int fStart = pos[0];
-                while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
-                name = q.substring(fStart, pos[0]);
-                pos[0] = skipWS(q, pos[0]);
-            }
-            final String path = prefix.isEmpty() ? name : prefix + "." + name;
-            paths.add(path);
-            if (pos[0] < len && q.charAt(pos[0]) == '(') {
-                pos[0] = skipBalanced(q, pos[0], '(', ')');
-                pos[0] = skipWS(q, pos[0]);
-            }
-            while (pos[0] < len && q.charAt(pos[0]) == '@') {
-                while (pos[0] < len && !Character.isWhitespace(q.charAt(pos[0]))
-                        && q.charAt(pos[0]) != '(' && q.charAt(pos[0]) != '{' && q.charAt(pos[0]) != '}') pos[0]++;
-                pos[0] = skipWS(q, pos[0]);
-                if (pos[0] < len && q.charAt(pos[0]) == '(') {
-                    pos[0] = skipBalanced(q, pos[0], '(', ')');
-                    pos[0] = skipWS(q, pos[0]);
-                }
-            }
-            if (pos[0] < len && q.charAt(pos[0]) == '{') {
-                if (depth + 1 < maxDepth) {
-                    collectSelectionSet(q, len, pos, path, depth + 1, maxDepth, paths);
-                } else {
-                    pos[0] = skipBalanced(q, pos[0], '{', '}');
-                }
             }
         }
+    }
+
+    private static void processFragmentSpread(final String q, final int len, final int[] pos,
+            final String prefix, final int depth, final int maxDepth, final Set<String> paths) {
+        pos[0] += 3;
+        pos[0] = skipWS(q, pos[0]);
+        final boolean isInline = pos[0] + 2 <= len
+                && q.regionMatches(pos[0], "on", 0, 2)
+                && (pos[0] + 2 >= len || !isIdentChar(q.charAt(pos[0] + 2)));
+        if (isInline) {
+            pos[0] += 2;
+            pos[0] = skipWS(q, pos[0]);
+        }
+        while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
+        pos[0] = skipWS(q, pos[0]);
+        pos[0] = skipFieldDirectives(q, len, pos[0]);
+        if (isInline && pos[0] < len && q.charAt(pos[0]) == '{') {
+            collectSelectionSet(q, len, pos, prefix, depth, maxDepth, paths);
+        }
+    }
+
+    private static void collectField(final String q, final int len, final int[] pos,
+            final String prefix, final int depth, final int maxDepth, final Set<String> paths) {
+        final int start = pos[0];
+        while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
+        String name = q.substring(start, pos[0]);
+        pos[0] = skipWS(q, pos[0]);
+        if (pos[0] < len && q.charAt(pos[0]) == ':') {
+            pos[0]++;
+            pos[0] = skipWS(q, pos[0]);
+            final int fStart = pos[0];
+            while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
+            name = q.substring(fStart, pos[0]);
+            pos[0] = skipWS(q, pos[0]);
+        }
+        final String path = prefix.isEmpty() ? name : prefix + "." + name;
+        paths.add(path);
+        if (pos[0] < len && q.charAt(pos[0]) == '(') {
+            pos[0] = skipBalanced(q, pos[0], '(', ')');
+            pos[0] = skipWS(q, pos[0]);
+        }
+        pos[0] = skipFieldDirectives(q, len, pos[0]);
+        if (pos[0] < len && q.charAt(pos[0]) == '{') {
+            if (depth + 1 < maxDepth) {
+                collectSelectionSet(q, len, pos, path, depth + 1, maxDepth, paths);
+            } else {
+                pos[0] = skipBalanced(q, pos[0], '{', '}');
+            }
+        }
+    }
+
+    private static int skipFieldDirectives(final String q, final int len, int pos) {
+        while (pos < len && q.charAt(pos) == '@') {
+            while (pos < len && !Character.isWhitespace(q.charAt(pos))
+                    && q.charAt(pos) != '(' && q.charAt(pos) != '{' && q.charAt(pos) != '}') pos++;
+            pos = skipWS(q, pos);
+            if (pos < len && q.charAt(pos) == '(') {
+                pos = skipBalanced(q, pos, '(', ')');
+                pos = skipWS(q, pos);
+            }
+        }
+        return pos;
     }
 
     private static int skipWS(final String s, int i) {
@@ -541,63 +563,65 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             try {
                 final String auth = (String) ctx.get(AUTH_HEADER_KEY);
                 final JahiaUser user = (JahiaUser) ctx.get(JAHIA_USER_KEY);
-
-                // Step 1: top-level fields + all type names
-                final JsonNode step1 = executeInternalGraphQL(INTROSPECTION_STEP1, auth, user);
-                if (step1 == null) {
-                    return McpSchema.CallToolResult.builder()
-                            .addTextContent("Error: introspection step 1 returned no data")
-                            .isError(true)
-                            .build();
-                }
-
-                final JsonNode schemaNode = step1.path("data").path("__schema");
-                final JsonNode typesArray = schemaNode.path("types");
-
-                // Collect all non-built-in type names including Query/Mutation roots.
-                // Scalars have no fields; __ prefixed types are GraphQL meta-types — both skipped.
-                final List<String> typeNames = new ArrayList<>();
-                if (typesArray.isArray()) {
-                    for (final JsonNode t : typesArray) {
-                        final String name = t.path("name").asText("");
-                        final String kind = t.path("kind").asText("");
-                        if (!name.startsWith("__") && !"SCALAR".equals(kind) && !name.isEmpty()) {
-                            typeNames.add(name);
-                        }
-                    }
-                }
-
-                // Step 2: fetch full type details one by one — each request has one __Type.fields → safe
-                final ObjectNode typeDetails = OBJECT_MAPPER.createObjectNode();
-                for (final String typeName : typeNames) {
-                    final String query = String.format(INTROSPECTION_TYPE_QUERY, typeName);
-                    final JsonNode typeResult = executeInternalGraphQL(query, auth, user);
-                    if (typeResult != null) {
-                        final JsonNode typeNode = typeResult.path("data").path("__type");
-                        if (!typeNode.isMissingNode() && !typeNode.isNull()) {
-                            typeDetails.set(typeName, typeNode);
-                        }
-                    }
-                }
-
-                // Assemble combined result
-                final ObjectNode result = OBJECT_MAPPER.createObjectNode();
-                result.set("schema", schemaNode);
-                result.set("types", typeDetails);
-
-                return McpSchema.CallToolResult.builder()
-                        .addTextContent(OBJECT_MAPPER.writeValueAsString(result))
-                        .isError(false)
-                        .build();
-
+                return buildIntrospectionResult(auth, user);
             } catch (Exception ex) {
                 LOGGER.error("introspectSchema failed", ex);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("Error: " + ex.getMessage())
+                        .addTextContent(ERROR_PREFIX + ex.getMessage())
                         .isError(true)
                         .build();
             }
         });
+    }
+
+    private McpSchema.CallToolResult buildIntrospectionResult(final String auth, final JahiaUser user)
+            throws IOException, ServletException {
+        final JsonNode step1 = executeInternalGraphQL(INTROSPECTION_STEP1, auth, user);
+        if (step1 == null) {
+            return McpSchema.CallToolResult.builder()
+                    .addTextContent(ERROR_PREFIX + "introspection step 1 returned no data")
+                    .isError(true)
+                    .build();
+        }
+        final JsonNode schemaNode = step1.path("data").path("__schema");
+        final ObjectNode typeDetails = fetchTypeDetails(auth, user, collectTypeNames(schemaNode.path("types")));
+        final ObjectNode result = OBJECT_MAPPER.createObjectNode();
+        result.set("schema", schemaNode);
+        result.set("types", typeDetails);
+        return McpSchema.CallToolResult.builder()
+                .addTextContent(OBJECT_MAPPER.writeValueAsString(result))
+                .isError(false)
+                .build();
+    }
+
+    private static List<String> collectTypeNames(final JsonNode typesArray) {
+        final List<String> typeNames = new ArrayList<>();
+        if (typesArray.isArray()) {
+            for (final JsonNode t : typesArray) {
+                final String name = t.path("name").asText("");
+                final String kind = t.path("kind").asText("");
+                if (!name.startsWith("__") && !"SCALAR".equals(kind) && !name.isEmpty()) {
+                    typeNames.add(name);
+                }
+            }
+        }
+        return typeNames;
+    }
+
+    private ObjectNode fetchTypeDetails(final String auth, final JahiaUser user, final List<String> typeNames)
+            throws IOException, ServletException {
+        final ObjectNode typeDetails = OBJECT_MAPPER.createObjectNode();
+        for (final String typeName : typeNames) {
+            final JsonNode typeResult = executeInternalGraphQL(
+                    String.format(INTROSPECTION_TYPE_QUERY, typeName), auth, user);
+            if (typeResult != null) {
+                final JsonNode typeNode = typeResult.path("data").path("__type");
+                if (!typeNode.isMissingNode() && !typeNode.isNull()) {
+                    typeDetails.set(typeName, typeNode);
+                }
+            }
+        }
+        return typeDetails;
     }
 
     /**
@@ -631,7 +655,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             } catch (Exception ex) {
                 LOGGER.error("listSkills failed", ex);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("Error: " + ex.getMessage())
+                        .addTextContent(ERROR_PREFIX + ex.getMessage())
                         .isError(true)
                         .build();
             }
@@ -662,14 +686,14 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             final String name = (String) req.arguments().get("name");
             if (name == null || name.isBlank()) {
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("Error: 'name' argument is required")
+                        .addTextContent(ERROR_PREFIX + "'name' argument is required")
                         .isError(true)
                         .build();
             }
             final McpSkillService.SkillEntry skill = mcpSkillService.getSkill(name);
             if (skill == null) {
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("Error: skill '" + name + "' not found")
+                        .addTextContent(ERROR_PREFIX + "skill '" + name + "' not found")
                         .isError(true)
                         .build();
             }
@@ -680,7 +704,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         });
     }
 
-    private JsonNode executeInternalGraphQL(String query, String auth, JahiaUser user) throws Exception {
+    private JsonNode executeInternalGraphQL(String query, String auth, JahiaUser user) throws IOException, ServletException {
         final String requestBody = OBJECT_MAPPER.writeValueAsString(Map.of(QUERY_ARG, query));
         final HttpServletRequest requestWrapper = new McpHttpServletRequestWrapper(requestBody, auth);
         final StringWriter writer = new StringWriter();
