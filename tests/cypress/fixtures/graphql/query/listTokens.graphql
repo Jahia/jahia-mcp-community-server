@@ -1,0 +1,12 @@
+query ListTokens {
+    admin {
+        personalApiTokens {
+            tokens {
+                nodes {
+                    key
+                    name
+                }
+            }
+        }
+    }
+}

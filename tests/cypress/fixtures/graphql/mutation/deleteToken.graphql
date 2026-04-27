@@ -1,0 +1,7 @@
+mutation DeleteMcpTestToken($tokenKey: String!) {
+    admin {
+        personalApiTokens {
+            deleteToken(key: $tokenKey)
+        }
+    }
+}

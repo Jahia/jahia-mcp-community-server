@@ -3,16 +3,44 @@ import {DocumentNode} from 'graphql';
 describe('MCP Server — Endpoint Access Control', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const saveSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/saveSettings.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const createToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/createToken.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const deleteToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteToken.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const listTokens: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/listTokens.graphql');
+
+    const TOKEN_NAME = 'mcp-cypress-test-token';
+    let apiToken: string;
+    let tokenKey: string;
+
+    before(() => {
+        cy.login();
+        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
+            apiToken = result.data.admin.personalApiTokens.createToken;
+        });
+        cy.apollo({query: listTokens}).then(result => {
+            const found = result.data.admin.personalApiTokens.tokens.nodes.find(
+                (t: {key: string; name: string}) => t.name === TOKEN_NAME
+            );
+            tokenKey = found.key;
+        });
+        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
+    });
+
+    after(() => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
+        cy.apollo({mutation: deleteToken, variables: {tokenKey}});
+    });
 
     const callTool = (name: string, args: Record<string, unknown>) => {
         return cy.request({
             method: 'POST',
             url: '/modules/mcp',
-            auth: {
-                user: 'root',
-                pass: Cypress.env('SUPER_USER_PASSWORD') || 'root1234'
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiToken}`
             },
-            headers: {'Content-Type': 'application/json'},
             body: {
                 jsonrpc: '2.0',
                 id: 1,
@@ -23,10 +51,6 @@ describe('MCP Server — Endpoint Access Control', () => {
     };
 
     const executeGraphQL = (query: string) => callTool('executeGraphQL', {query});
-
-    before(() => {
-        cy.login();
-    });
 
     afterEach(() => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
@@ -79,7 +103,6 @@ describe('MCP Server — Endpoint Access Control', () => {
     });
 
     it('blocks a sibling path not covered by the whitelisted dot-path', () => {
-        // Whitelist covers admin.jahia but NOT currentUser
         cy.apollo({mutation: saveSettings, variables: {whitelist: ['admin.jahia']}});
         executeGraphQL('{ currentUser { name } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
@@ -103,7 +126,7 @@ describe('MCP Server — Endpoint Access Control', () => {
 
     // --- Authentication ---
 
-    it('returns 403 for unauthenticated requests', () => {
+    it('returns 401 or 403 for unauthenticated requests', () => {
         cy.request({
             method: 'POST',
             url: '/modules/mcp',

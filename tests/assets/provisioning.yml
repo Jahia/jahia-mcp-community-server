@@ -3,6 +3,7 @@
 - karafCommand: "log:log 'START - Install jahia-mcp-community-server dependencies'"
 - installBundle:
       - 'mvn:org.jahia.modules/graphql-dxm-provider/LATEST'
+      - 'mvn:org.jahia.modules/personal-api-tokens/LATEST'
   autoStart: true
   uninstallPreviousVersion: false
 - karafCommand: "log:log 'END - Install jahia-mcp-community-server dependencies'"
