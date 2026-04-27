@@ -1,0 +1,5 @@
+query McpGetSettings {
+    mcpSettings {
+        whitelist
+    }
+}

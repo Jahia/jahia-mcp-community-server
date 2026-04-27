@@ -1,0 +1,3 @@
+mutation McpSaveSettings($whitelist: [String]!) {
+    mcpSaveSettings(whitelist: $whitelist)
+}
