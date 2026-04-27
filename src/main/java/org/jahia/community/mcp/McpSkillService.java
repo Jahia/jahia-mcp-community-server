@@ -29,7 +29,7 @@ public class McpSkillService {
     private static final Logger LOGGER = LoggerFactory.getLogger(McpSkillService.class);
     private static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
-    private static final String PROP_NAME = "mcp:name";
+    private static final String PROP_NAME = "jcr:title";
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";
     private static final String SKILLS_RESOURCE_DIR = "skills";
