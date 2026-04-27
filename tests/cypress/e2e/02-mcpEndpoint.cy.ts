@@ -16,6 +16,13 @@ describe('MCP Server — Endpoint Access Control', () => {
 
     before(() => {
         cy.login();
+        // Delete all existing tokens to guarantee a clean state
+        cy.apollo({query: listTokens}).then(result => {
+            const nodes: {key: string}[] = result.data.admin.personalApiTokens.tokens.nodes;
+            nodes.forEach(t => {
+                cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
+            });
+        });
         cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME, scopes: ['graphql', 'mcp']}}).then(result => {
             apiToken = result.data.admin.personalApiTokens.createToken;
         });
@@ -76,7 +83,7 @@ describe('MCP Server — Endpoint Access Control', () => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
         executeGraphQL('{ admin { jahia { isAlive } } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
-            expect(response.body.result.content[0].text).to.include('not in whitelist');
+            expect(response.body.result.content[0].text).to.include('not in the whitelist');
         });
     });
 
