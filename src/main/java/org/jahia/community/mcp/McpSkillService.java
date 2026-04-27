@@ -19,6 +19,7 @@ public class McpSkillService {
     private static final Logger LOGGER = LoggerFactory.getLogger(McpSkillService.class);
     private static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
+    private static final String PROP_NAME = "mcp:name";
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";
 
@@ -59,7 +60,7 @@ public class McpSkillService {
         }
     }
 
-    public boolean saveSkill(String name, String description, String content) {
+    public boolean saveSkill(String name, String mcpName, String description, String content) {
         try {
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 ensureContainer(session);
@@ -69,6 +70,9 @@ public class McpSkillService {
                     node = session.getNode(path);
                 } else {
                     node = session.getNode(SKILLS_PATH).addNode(name, SKILL_NODE_TYPE);
+                }
+                if (mcpName != null) {
+                    node.setProperty(PROP_NAME, mcpName);
                 }
                 if (description != null) {
                     node.setProperty(PROP_DESCRIPTION, description);
@@ -110,6 +114,7 @@ public class McpSkillService {
     private SkillEntry toEntry(JCRNodeWrapper node) throws RepositoryException {
         return new SkillEntry(
                 node.getName(),
+                node.hasProperty(PROP_NAME) ? node.getProperty(PROP_NAME).getString() : "",
                 node.hasProperty(PROP_DESCRIPTION) ? node.getProperty(PROP_DESCRIPTION).getString() : "",
                 node.hasProperty(PROP_CONTENT) ? node.getProperty(PROP_CONTENT).getString() : ""
         );
@@ -117,11 +122,13 @@ public class McpSkillService {
 
     public static final class SkillEntry {
         public final String name;
+        public final String mcpName;
         public final String description;
         public final String content;
 
-        public SkillEntry(String name, String description, String content) {
+        public SkillEntry(String name, String mcpName, String description, String content) {
             this.name = name;
+            this.mcpName = mcpName;
             this.description = description;
             this.content = content;
         }

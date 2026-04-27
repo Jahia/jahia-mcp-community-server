@@ -44,7 +44,7 @@ public class McpQueryExtension {
             return new ArrayList<>();
         }
         return service.listSkills().stream()
-                .map(e -> new GqlMcpSkill(e.name, e.description, e.content))
+                .map(e -> new GqlMcpSkill(e.name, e.mcpName, e.description, e.content))
                 .collect(Collectors.toList());
     }
 
@@ -71,20 +71,29 @@ public class McpQueryExtension {
     public static class GqlMcpSkill {
 
         private final String name;
+        private final String mcpName;
         private final String description;
         private final String content;
 
-        public GqlMcpSkill(String name, String description, String content) {
+        public GqlMcpSkill(String name, String mcpName, String description, String content) {
             this.name = name;
+            this.mcpName = mcpName;
             this.description = description;
             this.content = content;
         }
 
         @GraphQLField
         @GraphQLName("name")
-        @GraphQLDescription("Unique skill name — used as the JCR node name and as the key passed to getSkill")
+        @GraphQLDescription("Unique skill identifier — the JCR node name, used as the key passed to getSkill")
         public String getName() {
             return name;
+        }
+
+        @GraphQLField
+        @GraphQLName("mcpName")
+        @GraphQLDescription("Human-readable display name for the skill (mcp:name property)")
+        public String getMcpName() {
+            return mcpName;
         }
 
         @GraphQLField

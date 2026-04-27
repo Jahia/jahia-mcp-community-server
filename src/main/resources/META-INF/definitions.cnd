@@ -1,7 +1,9 @@
-<jnt = 'http://www.jahia.org/jahia/nt/1.0'>
 <jmix = 'http://www.jahia.org/jahia/mix/1.0'>
+<jnt = 'http://www.jahia.org/jahia/nt/1.0'>
 <mcp = 'http://www.jahia.org/jahia/mcp/1.0'>
 
-[mcp:skill] > jnt:content
+[mcp:skill] > jnt:content, jmix:droppableContent, jmix:editorialContent
+ - mcp:name (string)
  - mcp:description (string)
- - mcp:content (string)
+ - mcp:content (string, richtext)
+

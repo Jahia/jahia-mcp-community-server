@@ -61,6 +61,7 @@ public class McpMutationExtension {
     @GraphQLRequiresPermission("admin")
     public static Boolean saveSkill(
             @GraphQLName("name") @GraphQLNonNull @GraphQLDescription("Unique skill identifier (becomes the JCR node name)") String name,
+            @GraphQLName("mcpName") @GraphQLDescription("Human-readable display name for the skill") String mcpName,
             @GraphQLName("description") @GraphQLDescription("Short description of what the skill does") String description,
             @GraphQLName("content") @GraphQLNonNull @GraphQLDescription("Full Markdown content — instructions the AI should follow") String content) {
         final McpSkillService service = BundleUtils.getOsgiService(McpSkillService.class, null);
@@ -68,7 +69,7 @@ public class McpMutationExtension {
             LOGGER.error("McpSkillService is not available");
             return Boolean.FALSE;
         }
-        return service.saveSkill(name, description, content);
+        return service.saveSkill(name, mcpName, description, content);
     }
 
     @GraphQLField

@@ -151,7 +151,6 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             if (permissionService.hasPermission(MCP_ENDPOINT)) {
                 final String body = req.getReader().lines().collect(Collectors.joining());
                 LOGGER.debug("MCP request: {}", body);
-
                 final String authHeader = req.getHeader(HttpHeaders.AUTHORIZATION);
                 final JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
                 final Map<String, Object> ctxMap = new java.util.HashMap<>();
@@ -621,6 +620,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 for (final McpSkillService.SkillEntry e : skills) {
                     final ObjectNode obj = OBJECT_MAPPER.createObjectNode();
                     obj.put("name", e.name);
+                    obj.put("mcpName", e.mcpName);
                     obj.put("description", e.description);
                     arr.add(obj);
                 }
