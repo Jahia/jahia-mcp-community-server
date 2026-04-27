@@ -2,19 +2,20 @@
 
 ## What this module does
 
-Exposes Jahia's GraphQL API as a stateless MCP (Model Context Protocol) HTTP server. AI clients (Claude Code) call two tools — `introspectSchema` and `executeGraphQL` — over JSON-RPC 2.0. Access is gated by an API-token permission check and an optional dot-path whitelist.
+Exposes Jahia's GraphQL API as a stateless MCP (Model Context Protocol) HTTP server. AI clients (Claude Code) call four tools — `introspectSchema`, `executeGraphQL`, `listSkills`, and `getSkill` — over JSON-RPC 2.0. Access is gated by an API-token permission check and an optional dot-path whitelist. Skills (Markdown instruction documents) are stored in JCR and delivered dynamically to MCP clients.
 
 ## Source layout
 
 ```
 src/main/java/org/jahia/community/mcp/
-    McpServlet.java                        # Main servlet + MCP transport + both tools
+    McpServlet.java                        # Main servlet + MCP transport + all four tools
+    McpSkillService.java                   # OSGi component — JCR CRUD for mcp:skill nodes
     config/
         McpConfigService.java              # OSGi ManagedService — reads whitelist from .cfg
     graphql/
         McpGraphQLExtensionsProvider.java  # Registers GraphQL extensions
-        McpQueryExtension.java             # mcpSettings query + GqlMcpSettings type
-        McpMutationExtension.java          # mcpSaveSettings mutation
+        McpQueryExtension.java             # mcpSettings + mcpSkills queries
+        McpMutationExtension.java          # mcpSaveSettings + mcpSaveSkill + mcpDeleteSkill
 
 src/javascript/McpConfig/
     McpConfig.jsx                          # React admin UI (lazy-loaded operation tree)
@@ -22,16 +23,24 @@ src/javascript/McpConfig/
     McpConfig.scss                         # CSS Modules styles
 
 src/main/resources/
-    META-INF/configurations/
-        org.jahia.community.mcp.cfg        # Default OSGi config (whitelist=)
-        org.jahia.bundles.api.authorization-mcp.yml  # Grants mcp permission to admin role
-        org.jahia.modules.PersonalApiToken-mcp.cfg   # Binds token scope to /modules/mcp
+    META-INF/
+        definitions.cnd                    # mcp:skill node type definition
+        configurations/
+            org.jahia.community.mcp.cfg        # Default OSGi config (whitelist=)
+            org.jahia.bundles.api.authorization-mcp.yml  # Grants mcp permission to admin role
+            org.jahia.modules.PersonalApiToken-mcp.cfg   # Binds token scope to /modules/mcp
     javascript/locales/en.json             # UI translation strings
+    skills/                                # Default skills seeded into JCR on activation
+        default/
+            hello-jahia.md                 # Default hello-jahia skill
+            jahia-properties.md            # Jahia 8.2 properties quick guide
+            jahia-properties-ref.md        # Jahia 8.2 full properties reference
 
 tests/                                     # Cypress Docker integration tests
     cypress/e2e/
         01-mcpSettings.cy.ts               # Settings GraphQL API
         02-mcpEndpoint.cy.ts               # MCP endpoint access control
+        03-mcpSkills.cy.ts                 # Skills GraphQL API + MCP listSkills/getSkill tools
 ```
 
 ## Architecture
@@ -40,8 +49,8 @@ tests/                                     # Cypress Docker integration tests
 
 - OSGi `@Component(service={HttpServlet,Servlet}, property={"alias=/mcp","allow-api-token=true"})`
 - Implements `McpStatelessServerTransport` — each POST is a complete, independent JSON-RPC exchange
-- On `@Activate`, builds `McpStatelessSyncServer` with two tools; sets the thread's context classloader to the bundle's own classloader before building (required for the MCP SDK's Jackson init)
-- Three OSGi `@Reference` injections: `PermissionService`, `OsgiGraphQLHttpServlet` (target filter), `McpConfigService`
+- On `@Activate`, builds `McpStatelessSyncServer` with four tools; sets the thread's context classloader to the bundle's own classloader before building (required for the MCP SDK's Jackson init)
+- Four OSGi `@Reference` injections: `PermissionService`, `OsgiGraphQLHttpServlet` (target filter), `McpConfigService`, `McpSkillService`
 
 ### Request flow (doPost)
 
@@ -60,6 +69,44 @@ Jahia's bad-faith introspection guard blocks any GraphQL document containing mor
 
 1. **Step 1** — one request: `__schema { queryType mutationType types { name kind } }` — gets all type names
 2. **Step 2** — one request per type: `__type(name: $typeName) { fields { name ... } }` — each has exactly one `__Type.fields`
+
+### Skills mechanism
+
+Skills are `mcp:skill` JCR nodes stored under `/sites/systemsite/contents/mcp-skills/`. They can be organized at any depth in sub-folders.
+
+**`McpSkillService`** is an OSGi `@Component(immediate=true)` that:
+- On `@Activate(BundleContext)`: scans `skills/` in the bundle using `bundle.findEntries("skills", "*.md", true)`, parses YAML frontmatter (`mcpName`, `description`) and body (content), and creates JCR nodes for any that do not already exist. Folder hierarchy mirrors the JCR sub-folder structure.
+- `listSkills()`: JCR-SQL2 query — `SELECT * FROM [mcp:skill] WHERE ISDESCENDANTNODE(skill, '<SKILLS_PATH>') ORDER BY NAME(skill)` — finds skills at any depth
+- `getSkill(name)`: direct path lookup at `SKILLS_PATH + "/" + name`
+- `saveSkill(name, mcpName, description, content)` / `deleteSkill(name)`: system JCR session CRUD
+
+**Skill file format** (`src/main/resources/skills/<subfolder>/<name>.md`):
+```markdown
+---
+mcpName: Display Name
+description: Short description
+---
+Full Markdown content here.
+```
+
+**MCP tools**:
+- `listSkills` — returns `[{name, mcpName, description}]` JSON array
+- `getSkill(name)` — returns raw Markdown content; `name` may include sub-folder path (e.g. `default/hello-jahia`)
+
+**GraphQL API** (all require `admin` permission):
+- `mcpSkills` query: `{ name, mcpName, description, content }`
+- `mcpSaveSkill(name!, mcpName, description, content!)` mutation
+- `mcpDeleteSkill(name!)` mutation
+
+### JCR node type (definitions.cnd)
+
+```
+[mcp:skill] > jnt:content, mcpmix:mcp, mix:title
+ - mcp:description (string)
+ - mcp:content (string, textarea)
+```
+
+`mix:title` provides `jcr:title` as the display name property (mapped to `mcpName` in Java/GraphQL). `mcpmix:mcp` is a module mixin combining `jmix:accessControllableContent` and `jmix:droppableContent`.
 
 ### Access control (checkAccess)
 
@@ -110,11 +157,14 @@ For a whitelist entry `E` and a query path `P`:
 
 A path passes the whitelist check if either condition is true for any entry.
 
+### mcp:name → jcr:title
+
+The skill display name is stored as `jcr:title` (from `mix:title` mixin), not as a custom `mcp:name` property. This avoids `ConstraintViolationException` and integrates with Jahia's standard editorial UI. In Java/GraphQL the field is exposed as `mcpName`.
+
 ## Build
 
 ```bash
 mvn clean package          # builds Java + React (yarn build:production)
-mvn clean package -Pyarn:watch   # not available; use yarn start in src/javascript/ for dev
 ```
 
 Frontend entry point: `src/javascript/index.js` → `McpConfig/McpConfig.jsx` registered as Jahia admin panel.
@@ -129,7 +179,7 @@ yarn install
 ./ci.startup.sh            # docker-compose up + wait for Jahia + provision + run + collect
 ```
 
-The `02-mcpEndpoint.cy.ts` suite creates a personal API token (scopes: `graphql`, `mcp`) at the start, deletes all pre-existing tokens first for a clean state, and uses `APIToken <value>` in `Authorization` headers for all `cy.request()` calls to `/modules/mcp`.
+The `02-mcpEndpoint.cy.ts` and `03-mcpSkills.cy.ts` suites create a personal API token (scopes: `graphql`, `mcp`) at the start, delete all pre-existing tokens first for a clean state, and use `APIToken <value>` in `Authorization` headers for all `cy.request()` calls to `/modules/mcp`.
 
 ## Configuration files
 

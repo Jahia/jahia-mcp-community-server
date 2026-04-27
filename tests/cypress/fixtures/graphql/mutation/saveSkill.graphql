@@ -1,0 +1,3 @@
+mutation SaveMcpSkill($name: String!, $mcpName: String, $description: String, $content: String!) {
+    mcpSaveSkill(name: $name, mcpName: $mcpName, description: $description, content: $content)
+}

@@ -29,6 +29,8 @@ The caller's `Authorization` header and the current Jahia user are forwarded so 
 
 Deploy the bundle JAR via the Jahia Module Manager or drop it into `$JAHIA_HOME/modules/`.
 
+On first activation the module automatically seeds a set of default skills into JCR under `/sites/systemsite/contents/mcp-skills/`.
+
 ## Authentication
 
 Access to `/modules/mcp` requires a personal API token with both the **`graphql`** and **`mcp`** scopes.
@@ -108,6 +110,79 @@ query {
 
 Introspection fields (`__schema`, `__type`) always pass regardless of whitelist configuration.
 
+### `listSkills`
+
+Returns the name, display name (`mcpName`), and description of every skill stored in JCR under `/sites/systemsite/contents/mcp-skills/`. Skills can be organized in sub-folders at any depth.
+
+No input arguments required.
+
+**Example response:**
+
+```json
+[
+  {"name":"hello-jahia","mcpName":"Hello Jahia","description":"How to respond to Hello Jahia"}
+]
+```
+
+### `getSkill`
+
+Returns the full Markdown content of a skill by name. Call `listSkills` first to discover available names.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Skill name as returned by `listSkills` (may include sub-folder path, e.g. `default/hello-jahia`) |
+
+## Skills
+
+Skills are Markdown documents stored as `mcp:skill` JCR nodes. They allow Jahia-specific knowledge and instructions to be delivered dynamically to any MCP client session.
+
+### Default skills
+
+A set of default skills is seeded into JCR on module activation. They are defined as `.md` files under `src/main/resources/skills/` and are only created if the node does not already exist.
+
+### Managing skills via GraphQL
+
+```graphql
+# List all skills
+query {
+    mcpSkills {
+        name
+        mcpName
+        description
+        content
+    }
+}
+
+# Create or update a skill
+mutation {
+    mcpSaveSkill(
+        name: "my-skill",
+        mcpName: "My Skill Display Name",
+        description: "What this skill does",
+        content: "# My Skill\n\nInstructions for Claude..."
+    )
+}
+
+# Delete a skill
+mutation {
+    mcpDeleteSkill(name: "my-skill")
+}
+```
+
+### Adding a bundled default skill
+
+Drop a `.md` file with frontmatter into `src/main/resources/skills/<subfolder>/`:
+
+```markdown
+---
+mcpName: My Skill Display Name
+description: Short description of what this skill does
+---
+Full Markdown instructions here...
+```
+
+The file name (without `.md`) becomes the JCR node name. The folder hierarchy mirrors the JCR sub-folder structure under `mcp-skills/`.
+
 ## Access control — Allow List
 
 The admin UI at **Administration → MCP Server** lets you restrict which GraphQL operations the MCP server may execute.
@@ -148,7 +223,7 @@ WARN McpServlet - MCP operation blocked: path='admin.jahia.shutdown', reason=not
 A `GET /modules/mcp` request returns a JSON status response for authenticated users with the `mcp` permission:
 
 ```json
-{"status":"Jahia MCP server running","version":"1.0.0","tools":["executeGraphQL","introspectSchema"]}
+{"status":"Jahia MCP server running","version":"1.0.0","tools":["executeGraphQL","introspectSchema","listSkills","getSkill"]}
 ```
 
 ## Testing
@@ -171,3 +246,4 @@ Test results are written to `tests/results/`.
 |---|---|
 | `01-mcpSettings.cy.ts` | GraphQL settings API: read, write, round-trip, dot-path persistence |
 | `02-mcpEndpoint.cy.ts` | MCP endpoint: whitelist enforcement, dot-path coverage, introspection pass-through, 401 for unauthenticated requests |
+| `03-mcpSkills.cy.ts` | Skills GraphQL API (save/read/update/delete), MCP `listSkills` and `getSkill` tools, default skill seeding |

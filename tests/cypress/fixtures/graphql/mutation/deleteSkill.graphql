@@ -1,0 +1,3 @@
+mutation DeleteMcpSkill($name: String!) {
+    mcpDeleteSkill(name: $name)
+}
