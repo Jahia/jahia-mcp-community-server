@@ -133,7 +133,7 @@ describe('MCP Server — Endpoint Access Control', () => {
 
     // --- Authentication ---
 
-    it('returns 401 or 403 for unauthenticated requests', () => {
+    it('returns 401 for unauthenticated requests', () => {
         cy.request({
             method: 'POST',
             url: '/modules/mcp',
@@ -145,6 +145,6 @@ describe('MCP Server — Endpoint Access Control', () => {
                 params: {name: 'executeGraphQL', arguments: {query: '{ currentUser { name } }'}}
             },
             failOnStatusCode: false
-        }).its('status').should('be.oneOf', [401, 403]);
+        }).its('status').should('eq', 401);
     });
 });

@@ -168,6 +168,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                     mcpHandler.handleNotification(transportContext, notification).block();
                     resp.setStatus(HttpServletResponse.SC_ACCEPTED);
                 }
+            }else{
+                resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             }
         } catch (IOException | RepositoryException ex) {
             LOGGER.error("Error processing MCP request", ex);
