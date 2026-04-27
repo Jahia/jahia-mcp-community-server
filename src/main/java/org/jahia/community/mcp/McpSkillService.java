@@ -3,6 +3,7 @@ package org.jahia.community.mcp;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.content.JCRTemplate;
+import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +25,32 @@ public class McpSkillService {
     private static final String PROP_NAME = "mcp:name";
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";
+
+    private static final String DEFAULT_SKILL_PATH = SKILLS_PATH + "/default/hello-jahia";
+
+    @Activate
+    public void activate() {
+        try {
+            JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
+                ensureContainer(session);
+                if (!session.nodeExists(SKILLS_PATH + "/default")) {
+                    session.getNode(SKILLS_PATH).addNode("default", "jnt:contentList");
+                    session.save();
+                }
+                if (!session.nodeExists(DEFAULT_SKILL_PATH)) {
+                    final JCRNodeWrapper skill = session.getNode(SKILLS_PATH + "/default").addNode("hello-jahia", SKILL_NODE_TYPE);
+                    skill.setProperty(PROP_NAME, "Hello Jahia");
+                    skill.setProperty(PROP_DESCRIPTION, "Simple skill — how to respond to \"Hello Jahia\"");
+                    skill.setProperty(PROP_CONTENT, "If you get \"Hello Jahia\", answer \"Hello Jahian\".");
+                    session.save();
+                    LOGGER.info("Created default MCP skill: {}", DEFAULT_SKILL_PATH);
+                }
+                return null;
+            });
+        } catch (RepositoryException e) {
+            LOGGER.error("Error creating default MCP skills", e);
+        }
+    }
 
     private static final String LIST_SKILLS_SQL =
             "SELECT * FROM [mcp:skill] AS skill WHERE ISDESCENDANTNODE(skill, '" + SKILLS_PATH + "') ORDER BY NAME(skill)";
