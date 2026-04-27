@@ -1,9 +1,12 @@
 <jmix = 'http://www.jahia.org/jahia/mix/1.0'>
 <jnt = 'http://www.jahia.org/jahia/nt/1.0'>
 <mcp = 'http://www.jahia.org/jahia/mcp/1.0'>
+<mcpmix = 'http://www.jahia.org/jahia/mcpmix/1.0'>
+<mix = 'http://www.jcp.org/jcr/mix/1.0'>
 
-[mcp:skill] > jnt:content, jmix:droppableContent, jmix:editorialContent
- - mcp:name (string)
+[mcpmix:mcp] > jmix:accessControllableContent, jmix:droppableContent mixin
+
+[mcp:skill] > jnt:content, mcpmix:mcp, mix:title
  - mcp:description (string)
- - mcp:content (string, richtext)
+ - mcp:content (string, textarea)
 

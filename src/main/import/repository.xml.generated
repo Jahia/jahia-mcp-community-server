@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<content xmlns:j="http://www.jahia.org/jahia/1.0" xmlns:jcr="http://www.jcp.org/jcr/1.0">
+   <modules jcr:primaryType="jnt:modules">
+      <jahia-mcp-community-server j:dependencies="default graphql-dxm-provider"
+                                  j:modulePriority="0"
+                                  j:moduleType="module"
+                                  j:title="Jahia MCP Community Server"
+                                  jcr:mixinTypes="jmix:hasExternalProviderExtension"
+                                  jcr:primaryType="jnt:module">
+         <sources j:title="Jahia MCP Community Server (1.0.2-SNAPSHOT)"
+                  jcr:mixinTypes="jmix:sourceControl jmix:hasExternalProviderExtension"
+                  jcr:primaryType="jnt:moduleVersionFolder"
+                  scmStatus="modified"
+                  j:staticMountPointProviderKey="module-jahia-mcp-community-server-1.0.2-SNAPSHOT">
+            <src jcr:mixinTypes="jmix:sourceControl jmix:hasExternalProviderExtension"
+                 jcr:primaryType="jnt:folder"
+                 scmStatus="modified">
+               <main jcr:mixinTypes="jmix:sourceControl jmix:hasExternalProviderExtension"
+                     jcr:primaryType="jnt:folder"
+                     scmStatus="modified">
+                  <resources jcr:mixinTypes="jmix:sourceControl jmix:hasExternalProviderExtension"
+                             jcr:primaryType="jnt:folder"
+                             scmStatus="modified">
+                     <META-INF jcr:mixinTypes="jmix:sourceControl jmix:hasExternalProviderExtension"
+                               jcr:primaryType="jnt:metaInfFolder"
+                               scmStatus="modified">
+                        <definitions.cnd jcr:mixinTypes="jmix:sourceControl"
+                                         jcr:primaryType="jnt:definitionFile"
+                                         scmStatus="modified"
+                                         sourceCode="&lt;jmix = 'http://www.jahia.org/jahia/mix/1.0'&gt;&#xA;&lt;jnt = 'http://www.jahia.org/jahia/nt/1.0'&gt;&#xA;&lt;mcp = 'http://www.jahia.org/jahia/mcp/1.0'&gt;&#xA;&lt;mcpmix = 'http://www.jahia.org/jahia/mcpmix/1.0'&gt;&#xA;&lt;mix = 'http://www.jcp.org/jcr/mix/1.0'&gt;&#xA;&#xA;[mcpmix:mcp] &gt; jmix:accessControllableContent, jmix:droppableContent mixin&#xA;&#xA;[mcp:skill] &gt; jnt:content, mcpmix:mcp, mix:title&#xA; - mcp:description (string)&#xA; - mcp:content (string, textarea)&#xA;&#xA;"/>
+                     </META-INF>
+                  </resources>
+               </main>
+            </src>
+         </sources>
+         <files jcr:primaryType="jnt:folder"/>
+         <contents jcr:primaryType="jnt:contentFolder"/>
+         <templates j:rootTemplatePath="/base" jcr:primaryType="jnt:templatesFolder">
+            <files jcr:primaryType="jnt:folder"/>
+            <contents jcr:primaryType="jnt:contentFolder"/>
+         </templates>
+      </jahia-mcp-community-server>
+   </modules>
+</content>
