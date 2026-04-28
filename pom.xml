@@ -9,7 +9,7 @@
     <groupId>org.jahia.community</groupId>
     <artifactId>jahia-mcp-community-server</artifactId>
     <name>Jahia MCP Community Server</name>
-    <version>1.0.3</version>
+    <version>1.0.4-SNAPSHOT</version>
     <packaging>bundle</packaging>
     <description>An OSGi bundle that exposes Jahia's GraphQL API as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI assistants such as Claude to query and mutate/query Jahia content directly.</description>
 
@@ -17,7 +17,7 @@
         <connection>scm:git:git@github.com:Jahia/jahia-mcp-community-server.git</connection>
         <developerConnection>scm:git:git@github.com:Jahia/jahia-mcp-community-server.git</developerConnection>
         <url>https://github.com/Jahia/jahia-mcp-community-server</url>
-        <tag>1_0_3</tag>
+        <tag>HEAD</tag>
     </scm>
 
     <properties>
