@@ -1,5 +1,5 @@
 import {registry} from '@jahia/ui-extender';
-import register from './McpConfig/register';
+import register from './CommunityMcpConfig/register';
 import i18next from 'i18next';
 
 export default function () {

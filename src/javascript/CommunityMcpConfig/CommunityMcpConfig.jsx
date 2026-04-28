@@ -2,8 +2,8 @@ import React, {useEffect, useState} from 'react';
 import {useApolloClient, useMutation, useQuery} from '@apollo/client';
 import {useTranslation} from 'react-i18next';
 import {Button, Loader, Typography} from '@jahia/moonstone';
-import styles from './McpConfig.scss';
-import {GET_MUTATION_FIELDS, GET_QUERY_FIELDS, GET_SETTINGS, GET_TYPE_FIELDS, SAVE_SETTINGS} from './McpConfig.gql';
+import styles from './CommunityMcpConfig.scss';
+import {GET_MUTATION_FIELDS, GET_QUERY_FIELDS, GET_SETTINGS, GET_TYPE_FIELDS, SAVE_SETTINGS} from './CommunityMcpConfig.gql';
 
 const MAX_TREE_DEPTH = 5;
 
@@ -61,7 +61,7 @@ const isCoveredBySet = (path, set) => {
     return false;
 };
 
-export const McpConfigAdmin = () => {
+export const CommunityMcpConfigAdmin = () => {
     const {t} = useTranslation('jahia-mcp-community-server');
     const apolloClient = useApolloClient();
     const [saveStatus, setSaveStatus] = useState(null);
@@ -327,4 +327,4 @@ const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabe
     </div>
 );
 
-export default McpConfigAdmin;
+export default CommunityMcpConfigAdmin;

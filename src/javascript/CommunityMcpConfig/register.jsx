@@ -1,5 +1,5 @@
 import {registry} from '@jahia/ui-extender';
-import {McpConfigAdmin} from './McpConfig';
+import {CommunityMcpConfigAdmin} from './CommunityMcpConfig';
 import React from 'react';
 
 export default () => {
@@ -8,6 +8,6 @@ export default () => {
         requiredPermission: 'admin',
         label: 'jahia-mcp-community-server:label.menu_entry',
         isSelectable: true,
-        render: () => React.createElement(McpConfigAdmin)
+        render: () => React.createElement(CommunityMcpConfigAdmin)
     });
 };

@@ -17,10 +17,10 @@ src/main/java/org/jahia/community/mcp/
         McpQueryExtension.java             # mcpSettings + mcpSkills queries
         McpMutationExtension.java          # mcpSaveSettings + mcpSaveSkill + mcpDeleteSkill
 
-src/javascript/McpConfig/
-    McpConfig.jsx                          # React admin UI (lazy-loaded operation tree)
-    McpConfig.gql.js                       # Apollo GQL documents
-    McpConfig.scss                         # CSS Modules styles
+src/javascript/CommunityMcpConfig/
+    CommunityMcpConfig.jsx                 # React admin UI (lazy-loaded operation tree)
+    CommunityMcpConfig.gql.js              # Apollo GQL documents
+    CommunityMcpConfig.scss                # CSS Modules styles
 
 src/main/resources/
     META-INF/
@@ -167,7 +167,7 @@ The skill display name is stored as `jcr:title` (from `mix:title` mixin), not as
 mvn clean package          # builds Java + React (yarn build:production)
 ```
 
-Frontend entry point: `src/javascript/index.js` → `McpConfig/McpConfig.jsx` registered as Jahia admin panel.
+Frontend entry point: `src/javascript/index.js` → `CommunityMcpConfig/CommunityMcpConfig.jsx` registered as Jahia admin panel.
 
 ## Tests
 
