@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
 
 @SuppressWarnings("java:S2226")
 @Component(service = {HttpServlet.class, Servlet.class},
-        property = {"alias=/mcp", "allow-api-token=true"})
+        property = {"alias=/community-mcp", "allow-api-token=true"})
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpServlet.class);
@@ -98,7 +98,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         } finally {
             currentThread.setContextClassLoader(originalCL);
         }
-        LOGGER.info("Jahia MCP community server activated at /modules/mcp (using internal GraphQL servlet)");
+        LOGGER.info("Jahia MCP community server activated at /modules/community-mcp (using internal GraphQL servlet)");
     }
 
     @Deactivate

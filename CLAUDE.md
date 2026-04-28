@@ -28,7 +28,7 @@ src/main/resources/
         configurations/
             org.jahia.community.mcp.cfg        # Default OSGi config (whitelist=)
             org.jahia.bundles.api.authorization-mcp.yml  # Grants mcp permission to admin role
-            org.jahia.modules.PersonalApiToken-mcp.cfg   # Binds token scope to /modules/mcp
+            org.jahia.modules.PersonalApiToken-mcp.cfg   # Binds token scope to /modules/community-mcp
     javascript/locales/en.json             # UI translation strings
     skills/                                # Default skills seeded into JCR on activation
         default/
@@ -47,7 +47,7 @@ tests/                                     # Cypress Docker integration tests
 
 ### Servlet (McpServlet)
 
-- OSGi `@Component(service={HttpServlet,Servlet}, property={"alias=/mcp","allow-api-token=true"})`
+- OSGi `@Component(service={HttpServlet,Servlet}, property={"alias=/community-mcp","allow-api-token=true"})`
 - Implements `McpStatelessServerTransport` — each POST is a complete, independent JSON-RPC exchange
 - On `@Activate`, builds `McpStatelessSyncServer` with four tools; sets the thread's context classloader to the bundle's own classloader before building (required for the MCP SDK's Jackson init)
 - Four OSGi `@Reference` injections: `PermissionService`, `OsgiGraphQLHttpServlet` (target filter), `McpConfigService`, `McpSkillService`
@@ -179,7 +179,7 @@ yarn install
 ./ci.startup.sh            # docker-compose up + wait for Jahia + provision + run + collect
 ```
 
-The `02-mcpEndpoint.cy.ts` and `03-mcpSkills.cy.ts` suites create a personal API token (scopes: `graphql`, `mcp`) at the start, delete all pre-existing tokens first for a clean state, and use `APIToken <value>` in `Authorization` headers for all `cy.request()` calls to `/modules/mcp`.
+The `02-mcpEndpoint.cy.ts` and `03-mcpSkills.cy.ts` suites create a personal API token (scopes: `graphql`, `mcp`) at the start, delete all pre-existing tokens first for a clean state, and use `APIToken <value>` in `Authorization` headers for all `cy.request()` calls to `/modules/community-mcp`.
 
 ## Configuration files
 
@@ -187,4 +187,4 @@ The `02-mcpEndpoint.cy.ts` and `03-mcpSkills.cy.ts` suites create a personal API
 |---|---|
 | `org.jahia.community.mcp.cfg` | Persists `whitelist` as comma-separated dot-paths |
 | `org.jahia.bundles.api.authorization-mcp.yml` | Grants `mcp` permission to `admin` role |
-| `org.jahia.modules.PersonalApiToken-mcp.cfg` | Binds API token scope `mcp` to URL `/modules/mcp` |
+| `org.jahia.modules.PersonalApiToken-mcp.cfg` | Binds API token scope `mcp` to URL `/modules/community-mcp` |

@@ -51,7 +51,7 @@ describe('MCP Server — Skills', () => {
     const callTool = (name: string, args: Record<string, unknown>) => {
         return cy.request({
             method: 'POST',
-            url: '/modules/mcp',
+            url: '/modules/community-mcp',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `APIToken ${apiToken}`

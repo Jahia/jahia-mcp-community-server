@@ -43,7 +43,7 @@ describe('MCP Server — Endpoint Access Control', () => {
     const callTool = (name: string, args: Record<string, unknown>) => {
         return cy.request({
             method: 'POST',
-            url: '/modules/mcp',
+            url: '/modules/community-mcp',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `APIToken ${apiToken}`
@@ -136,7 +136,7 @@ describe('MCP Server — Endpoint Access Control', () => {
     it('returns 401 for unauthenticated requests', () => {
         cy.request({
             method: 'POST',
-            url: '/modules/mcp',
+            url: '/modules/community-mcp',
             headers: {'Content-Type': 'application/json'},
             body: {
                 jsonrpc: '2.0',

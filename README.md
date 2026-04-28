@@ -6,11 +6,11 @@ An OSGi bundle that exposes Jahia's GraphQL API as a [Model Context Protocol (MC
 
 ## How it works
 
-The servlet registers at `/modules/mcp` and implements the stateless MCP JSON-RPC 2.0 protocol over HTTP. When an MCP client calls a tool, the servlet dispatches the GraphQL request **in-process** via an OSGi service reference to `OsgiGraphQLHttpServlet` — no extra HTTP hop is involved.
+The servlet registers at `/modules/community-mcp` and implements the stateless MCP JSON-RPC 2.0 protocol over HTTP. When an MCP client calls a tool, the servlet dispatches the GraphQL request **in-process** via an OSGi service reference to `OsgiGraphQLHttpServlet` — no extra HTTP hop is involved.
 
 ```
 MCP Client (Claude Code)
-    │  POST /modules/mcp
+    │  POST /modules/community-mcp
     │  Authorization: APIToken <token>
     ▼
 McpServlet  ──[whitelist check]──►  OsgiGraphQLHttpServlet
@@ -33,7 +33,7 @@ On first activation the module automatically seeds a set of default skills into 
 
 ## Authentication
 
-Access to `/modules/mcp` requires a personal API token with both the **`graphql`** and **`mcp`** scopes.
+Access to `/modules/community-mcp` requires a personal API token with both the **`graphql`** and **`mcp`** scopes.
 
 Generate one in Jahia under **Administration → Profile → Personal API Tokens**, or via GraphQL:
 
@@ -64,7 +64,7 @@ Add the following to `~/.claude/settings.json`:
   "mcpServers": {
     "jahia-mcp": {
       "type": "http",
-      "url": "http://localhost:8080/modules/mcp",
+      "url": "http://localhost:8080/modules/community-mcp",
       "headers": {
         "authorization": "APIToken <your-token>"
       }
@@ -220,7 +220,7 @@ WARN McpServlet - MCP operation blocked: path='admin.jahia.shutdown', reason=not
 
 ## Health check
 
-A `GET /modules/mcp` request returns a JSON status response for authenticated users with the `mcp` permission:
+A `GET /modules/community-mcp` request returns a JSON status response for authenticated users with the `mcp` permission:
 
 ```json
 {"status":"Jahia MCP server running","version":"1.0.0","tools":["executeGraphQL","introspectSchema","listSkills","getSkill"]}
