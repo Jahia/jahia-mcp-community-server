@@ -27,8 +27,8 @@ src/main/resources/
         definitions.cnd                    # mcp:skill node type definition
         configurations/
             org.jahia.community.mcp.cfg        # Default OSGi config (whitelist=)
-            org.jahia.bundles.api.authorization-mcp.yml  # Grants mcp permission to admin role
-            org.jahia.modules.PersonalApiToken-mcp.cfg   # Binds token scope to /modules/community-mcp
+            org.jahia.bundles.api.authorization-community-mcp.yml  # Grants community-mcp permission to admin role
+            org.jahia.modules.PersonalApiToken-community-mcp.cfg   # Binds token scope to /modules/community-mcp
     javascript/locales/en.json             # UI translation strings
     skills/                                # Default skills seeded into JCR on activation
         default/
@@ -179,12 +179,12 @@ yarn install
 ./ci.startup.sh            # docker-compose up + wait for Jahia + provision + run + collect
 ```
 
-The `02-mcpEndpoint.cy.ts` and `03-mcpSkills.cy.ts` suites create a personal API token (scopes: `graphql`, `mcp`) at the start, delete all pre-existing tokens first for a clean state, and use `APIToken <value>` in `Authorization` headers for all `cy.request()` calls to `/modules/community-mcp`.
+The `02-mcpEndpoint.cy.ts` and `03-mcpSkills.cy.ts` suites create a personal API token (scopes: `graphql`, `community-mcp`) at the start, delete all pre-existing tokens first for a clean state, and use `APIToken <value>` in `Authorization` headers for all `cy.request()` calls to `/modules/community-mcp`.
 
 ## Configuration files
 
 | File | Purpose |
 |---|---|
 | `org.jahia.community.mcp.cfg` | Persists `whitelist` as comma-separated dot-paths |
-| `org.jahia.bundles.api.authorization-mcp.yml` | Grants `mcp` permission to `admin` role |
-| `org.jahia.modules.PersonalApiToken-mcp.cfg` | Binds API token scope `mcp` to URL `/modules/community-mcp` |
+| `org.jahia.bundles.api.authorization-community-mcp.yml` | Grants `community-mcp` permission to `admin` role |
+| `org.jahia.modules.PersonalApiToken-community-mcp.cfg` | Binds API token scope `community-mcp` to URL `/modules/community-mcp` |

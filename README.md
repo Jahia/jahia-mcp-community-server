@@ -53,7 +53,7 @@ Pass the token in every request:
 Authorization: APIToken <your-token>
 ```
 
-The `mcp` permission is automatically granted to users with the `admin` role (configured in `META-INF/configurations/org.jahia.bundles.api.authorization-mcp.yml`).
+The `mcp` permission is automatically granted to users with the `admin` role (configured in `META-INF/configurations/org.jahia.bundles.api.authorization-community-mcp.yml`).
 
 ## MCP client setup (Claude Code)
 
