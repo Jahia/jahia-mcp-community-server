@@ -33,7 +33,7 @@ On first activation the module automatically seeds a set of default skills into 
 
 ## Authentication
 
-Access to `/modules/community-mcp` requires a personal API token with both the **`graphql`** and **`mcp`** scopes.
+Access to `/modules/community-mcp` requires a personal API token with both the **`graphql`** and **`community-mcp`** scopes.
 
 Generate one in Jahia under **Administration → Profile → Personal API Tokens**, or via GraphQL:
 
@@ -41,7 +41,7 @@ Generate one in Jahia under **Administration → Profile → Personal API Tokens
 mutation {
     admin {
         personalApiTokens {
-            createToken(name: "my-mcp-token", scopes: ["graphql", "mcp"])
+            createToken(name: "my-mcp-token", scopes: ["graphql", "community-mcp"])
         }
     }
 }

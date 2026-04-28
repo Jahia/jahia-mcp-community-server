@@ -28,7 +28,7 @@ describe('MCP Server — Skills', () => {
                 cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
             });
         });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME, scopes: ['graphql', 'mcp']}}).then(result => {
+        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME, scopes: ['graphql', 'community-mcp']}}).then(result => {
             apiToken = result.data.admin.personalApiTokens.createToken;
         });
         cy.apollo({query: listTokens}).then(result => {

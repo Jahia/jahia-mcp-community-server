@@ -54,7 +54,7 @@ tests/                                     # Cypress Docker integration tests
 
 ### Request flow (doPost)
 
-1. `permissionService.hasPermission("mcp")` — returns **401** if false
+1. `permissionService.hasPermission("community-mcp")` — returns **401** if false
 2. Reads body, extracts `Authorization` header + current `JahiaUser` + client IP → `McpTransportContext`
 3. Deserializes JSON-RPC message and delegates to `mcpHandler`
 4. For `tools/call → executeGraphQL`: calls `checkAccess(query, user, ip)` before forwarding to GQL servlet

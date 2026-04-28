@@ -47,7 +47,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private static final String AUTH_HEADER_KEY = "authorization";
     private static final String JAHIA_USER_KEY = "jahia.user";
     private static final String CLIENT_IP_KEY = "client.ip";
-    private static final String MCP_ENDPOINT = "mcp";
+    private static final String MCP_ENDPOINT = "community-mcp";
     private static final String QUERY_ARG = "query";
     private static final String VARIABLES_ARG = "variables";
     private static final McpJsonMapper JSON_MAPPER = new JacksonMcpJsonMapper(new ObjectMapper());
