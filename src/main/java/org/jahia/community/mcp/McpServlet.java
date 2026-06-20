@@ -34,9 +34,10 @@ import javax.servlet.http.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.stream.Collectors;
 
-@SuppressWarnings("java:S2226")
+// S2226: OSGi-injected fields are written on bind/activate threads and read on request
+// threads — volatile provides the required visibility without a lock.
+@SuppressWarnings({"java:S2226","java:S3077"})
 @Component(service = {HttpServlet.class, Servlet.class},
         property = {"alias=/community-mcp", "allow-api-token=true"})
 public class McpServlet extends HttpServlet implements McpStatelessServerTransport {
@@ -53,10 +54,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private static final McpJsonMapper JSON_MAPPER = new JacksonMcpJsonMapper(new ObjectMapper());
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String FAILED_TO_SEND_ERROR_RESPONSE = "Failed to send error response";
-    private static final String FAILED_TO_READ_REQUEST_BODY = "Failed to read request body";
     private static final String FAILED_TO_WRITE_RESPONSE = "Failed to write response";
     private static final String REPOSITORY_ERROR_DURING_MCP_REQUEST = "Repository error during MCP request";
-    private static final String ERROR_PREFIX = "Error: ";
+    private static final String INTERNAL_ERROR_MSG = "Internal error executing operation";
+    // S1192: JSON-RPC error envelope fragments used in every error response
+    private static final String JSONRPC_ERROR_PREFIX = "{\"errors\":[{\"message\":\""; // S1192
+    private static final String JSONRPC_ERROR_SUFFIX = "\"}]}";
     // Dummy no-op request used as the required non-null delegate for HttpServletRequestWrapper
     private static final HttpServletRequest DUMMY_REQUEST = (HttpServletRequest) java.lang.reflect.Proxy.newProxyInstance(
             McpServlet.class.getClassLoader(),
@@ -77,12 +80,13 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 if (method.getReturnType() == long.class) return 0L;
                 return null;
             });
-    private McpStatelessServerHandler mcpHandler;
-    private McpStatelessSyncServer mcpServer;
-    private PermissionService permissionService;
-    private HttpServlet gql;
-    private McpConfigService mcpConfigService;
-    private McpSkillService mcpSkillService;
+    // volatile: written on OSGi bind/activate threads, read on servlet request threads
+    private volatile McpStatelessServerHandler mcpHandler;
+    private volatile McpStatelessSyncServer mcpServer;
+    private volatile PermissionService permissionService;
+    private volatile HttpServlet gql;
+    private volatile McpConfigService mcpConfigService;
+    private volatile McpSkillService mcpSkillService;
 
     @Activate
     public void activate() {
@@ -154,19 +158,34 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 handleAuthorizedRequest(req, resp);
             } else {
                 resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                resp.setHeader("WWW-Authenticate", "APIToken realm=\"community-mcp\"");
             }
         } catch (IOException | RepositoryException ex) {
             LOGGER.error("Error processing MCP request", ex);
             try {
-                resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, FAILED_TO_READ_REQUEST_BODY);
+                resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, INTERNAL_ERROR_MSG);
             } catch (IOException ioEx) {
                 LOGGER.error(FAILED_TO_SEND_ERROR_RESPONSE, ioEx);
             }
         }
     }
 
+    /** Maximum POST body size (2 MB) accepted before rejection. */
+    private static final int MAX_BODY_BYTES = 2 * 1024 * 1024;
+
     private void handleAuthorizedRequest(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        final String body = req.getReader().lines().collect(Collectors.joining());
+        // SEC-5: reject oversized bodies before any parsing
+        final int contentLength = req.getContentLength();
+        if (contentLength > MAX_BODY_BYTES) {
+            LOGGER.warn("MCP request body too large: Content-Length={}", contentLength);
+            sendJsonRpcError(resp, null, -32700, "Request body too large");
+            return;
+        }
+        final String body = readBodyCapped(req);
+        if (body == null) {
+            sendJsonRpcError(resp, null, -32700, "Request body too large");
+            return;
+        }
         LOGGER.debug("MCP request: {}", body);
         final String authHeader = req.getHeader(HttpHeaders.AUTHORIZATION);
         final JahiaUser currentUser = JCRSessionFactory.getInstance().getCurrentUser();
@@ -177,7 +196,15 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         final McpTransportContext transportContext = ctxMap.isEmpty()
                 ? McpTransportContext.EMPTY
                 : McpTransportContext.create(ctxMap);
-        final McpSchema.JSONRPCMessage message = McpSchema.deserializeJsonRpcMessage(JSON_MAPPER, body);
+        // ERR-1: JSON parse failure → -32700
+        final McpSchema.JSONRPCMessage message;
+        try {
+            message = McpSchema.deserializeJsonRpcMessage(JSON_MAPPER, body);
+        } catch (Exception ex) {
+            LOGGER.warn("MCP JSON-RPC parse error: {}", ex.getMessage());
+            sendJsonRpcError(resp, null, -32700, "Parse error");
+            return;
+        }
         if (message instanceof McpSchema.JSONRPCRequest) {
             final McpSchema.JSONRPCRequest request = (McpSchema.JSONRPCRequest) message;
             final McpSchema.JSONRPCResponse response =
@@ -188,7 +215,39 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             final McpSchema.JSONRPCNotification notification = (McpSchema.JSONRPCNotification) message;
             mcpHandler.handleNotification(transportContext, notification).block();
             resp.setStatus(HttpServletResponse.SC_ACCEPTED);
+        } else {
+            // ERR-4: neither Request nor Notification
+            LOGGER.warn("MCP received invalid JSON-RPC message type");
+            sendJsonRpcError(resp, null, -32600, "Invalid Request");
         }
+    }
+
+    /** Reads the request body up to MAX_BODY_BYTES; returns null if cap exceeded. */
+    private static String readBodyCapped(HttpServletRequest req) throws IOException {
+        final char[] buf = new char[4096];
+        final StringBuilder sb = new StringBuilder();
+        try (java.io.Reader reader = req.getReader()) {
+            int n;
+            while ((n = reader.read(buf)) != -1) {
+                sb.append(buf, 0, n);
+                if (sb.length() > MAX_BODY_BYTES) {
+                    LOGGER.warn("MCP request body exceeded {} bytes during read", MAX_BODY_BYTES);
+                    return null;
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Writes a minimal JSON-RPC 2.0 error response. id may be null. */
+    private static void sendJsonRpcError(HttpServletResponse resp, Object id, int code, String message) throws IOException {
+        resp.setContentType(CONTENT_TYPE_JSON);
+        final String idJson = id == null ? "null" : "\"" + id + "\"";
+        resp.getWriter().write(
+                "{\"jsonrpc\":\"2.0\",\"id\":"  + idJson
+                + ",\"error\":{\"code\":" + code
+                + ",\"message\":\"" + message.replace("\"", "\\\"") + "\"}}"
+        );
     }
 
     @Override
@@ -197,6 +256,10 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             if (permissionService.hasPermission(MCP_ENDPOINT)) {
                 resp.setContentType(CONTENT_TYPE_JSON);
                 resp.getWriter().write("{\"status\":\"Jahia MCP server running\",\"version\":\"1.0.0\",\"tools\":[\"executeGraphQL\",\"introspectSchema\",\"listSkills\",\"getSkill\"]}");
+            } else {
+                // ERR-9: return 401 + WWW-Authenticate for unauthenticated GET
+                resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                resp.setHeader("WWW-Authenticate", "APIToken realm=\"community-mcp\"");
             }
         } catch (IOException ex) {
             LOGGER.error(FAILED_TO_WRITE_RESPONSE, ex);
@@ -228,7 +291,15 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 .build();
 
         return new McpStatelessServerFeatures.SyncToolSpecification(tool, (ctx, req) -> {
-            final String query = (String) req.arguments().get(QUERY_ARG);
+            // CORR-1: validate query present before any use
+            final Object rawQuery = req.arguments().get(QUERY_ARG);
+            if (!(rawQuery instanceof String) || ((String) rawQuery).isBlank()) {
+                return McpSchema.CallToolResult.builder()
+                        .addTextContent(JSONRPC_ERROR_PREFIX + "'query' argument is required and must not be blank" + JSONRPC_ERROR_SUFFIX)
+                        .isError(true)
+                        .build();
+            }
+            final String query = (String) rawQuery;
             final Object variables = req.arguments().get(VARIABLES_ARG);
 
             // Access control: check whitelist/blacklist before forwarding to GraphQL engine
@@ -271,20 +342,24 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                         .build();
 
             } catch (Exception ex) {
-                LOGGER.error("executeGraphQL failed for query: {}", query, ex);
+                LOGGER.error("executeGraphQL failed", ex);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent(ERROR_PREFIX + ex.getMessage())
+                        .addTextContent(JSONRPC_ERROR_PREFIX + INTERNAL_ERROR_MSG + JSONRPC_ERROR_SUFFIX)
                         .isError(true)
                         .build();
             }
         });
     }
 
+    /**
+     * Returns the TCP peer address of the client.
+     *
+     * <p>X-Forwarded-For is intentionally not trusted here: without a known
+     * trusted-proxy list, the header is trivially spoofable. If you deploy
+     * Jahia behind a reverse proxy and need real-client IP, configure
+     * RemoteIpValve at the Tomcat layer instead of reading the header here.
+     */
     private static String getClientIp(final HttpServletRequest req) {
-        final String forwarded = req.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
         return req.getRemoteAddr();
     }
 
@@ -298,12 +373,44 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         final Set<String> whitelist = mcpConfigService.getWhitelist();
 
         if (whitelist.isEmpty()) {
+            // SEC-3: warn loudly on every call in allow-all mode so operators notice
+            LOGGER.warn("MCP GraphQL gate is running in ALLOW-ALL mode (whitelist is empty). "
+                    + "All GraphQL operations are permitted. Configure a whitelist in "
+                    + "Administration -> MCP Server to restrict access.");
             return null;
+        }
+
+        // SEC-2: named fragment spreads cannot be resolved against the whitelist without
+        // the full fragment definitions — fail closed rather than allowing a bypass.
+        if (containsNamedFragmentSpread(query)) {
+            return buildNamedFragmentBlockedResult(user, clientIp);
         }
 
         int maxDepth = 1;
         for (final String e : whitelist) maxDepth = Math.max(maxDepth, segmentCount(e));
 
+        final Set<String> paths = collectNonIntrospectionPaths(query, maxDepth);
+        if (paths.isEmpty()) {
+            return null;
+        }
+
+        return findFirstBlockedPath(paths, whitelist, user, clientIp);
+    }
+
+    /** Logs and returns a blocked result when a named fragment spread is detected. */
+    private McpSchema.CallToolResult buildNamedFragmentBlockedResult(final JahiaUser user, final String clientIp) {
+        LOGGER.warn("MCP operation blocked: named fragment spreads not permitted when "
+                + "whitelist is active, user='{}', ip='{}'",
+                user != null ? user.getName() : "anonymous", clientIp);
+        return McpSchema.CallToolResult.builder()
+                .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: "
+                        + "named fragment spreads are not permitted when a whitelist is active" + JSONRPC_ERROR_SUFFIX)
+                .isError(true)
+                .build();
+    }
+
+    /** Extracts field paths from the query and removes introspection segments. */
+    private static Set<String> collectNonIntrospectionPaths(final String query, final int maxDepth) {
         final Set<String> paths = new LinkedHashSet<>(extractFieldPaths(query, maxDepth));
         paths.removeIf(p -> {
             for (final String seg : p.split("\\.", -1)) {
@@ -311,22 +418,24 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             }
             return false;
         });
-        if (paths.isEmpty()) {
-            return null;
-        }
+        return paths;
+    }
 
+    /** Returns a blocked result for the first path not allowed by the whitelist, or null if all pass. */
+    private static McpSchema.CallToolResult findFirstBlockedPath(
+            final Set<String> paths, final Set<String> whitelist,
+            final JahiaUser user, final String clientIp) {
         for (final String path : paths) {
             if (!isPathAllowed(path, whitelist)) {
                 LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
                         path, user != null ? user.getName() : "anonymous", clientIp);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent("{\"errors\":[{\"message\":\"Operation not allowed: '"
-                                + path + "' is not in the whitelist\"}]}")
+                        .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: '"
+                                + path + "' is not in the whitelist" + JSONRPC_ERROR_SUFFIX)
                         .isError(true)
                         .build();
             }
         }
-
         return null;
     }
 
@@ -358,15 +467,136 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     /**
+     * Strips GraphQL line comments ({@code # ...}) while preserving {@code #} characters that
+     * occur inside string literals ({@code "..."} and block strings {@code """..."""}). A naive
+     * regex strip would corrupt queries such as {@code nodeByPath(path: "/sites#main")} and cause
+     * false whitelist blocks.
+     */
+    static String stripComments(final String query) {
+        final StringBuilder sb = new StringBuilder(query.length());
+        final int len = query.length();
+        int i = 0;
+        while (i < len) {
+            final char c = query.charAt(i);
+            if (c == '"') {
+                i = appendStringLiteral(query, len, i, sb);
+            } else if (c == '#') {
+                sb.append(' ');
+                i = skipLineComment(query, len, i);
+            } else {
+                sb.append(c);
+                i++;
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Appends a block string ({@code """..."""}) or simple string ({@code "..."}) starting at
+     * {@code i} (which must point at the opening {@code "}) to {@code sb}.
+     * Returns the index of the first character after the closing quote(s).
+     */
+    private static int appendStringLiteral(final String query, final int len, int i, final StringBuilder sb) {
+        if (i + 2 < len && query.charAt(i + 1) == '"' && query.charAt(i + 2) == '"') {
+            return appendBlockString(query, len, i, sb);
+        }
+        return appendSimpleString(query, len, i, sb);
+    }
+
+    /** Copies a block string {@code """..."""} to {@code sb}, returns index after closing triple-quote. */
+    private static int appendBlockString(final String query, final int len, int i, final StringBuilder sb) {
+        sb.append("\"\"\"");
+        i += 3;
+        while (i < len && !(i + 2 < len && query.charAt(i) == '"'
+                && query.charAt(i + 1) == '"' && query.charAt(i + 2) == '"')) {
+            sb.append(query.charAt(i++));
+        }
+        if (i + 2 < len) {
+            sb.append("\"\"\"");
+            i += 3;
+        }
+        return i;
+    }
+
+    /** Copies a simple string {@code "..."} (with escape handling) to {@code sb}, returns index after closing quote. */
+    private static int appendSimpleString(final String query, final int len, int i, final StringBuilder sb) {
+        sb.append('"');
+        i++;
+        while (i < len && query.charAt(i) != '"') {
+            if (query.charAt(i) == '\\' && i + 1 < len) {
+                sb.append(query.charAt(i++));
+            }
+            sb.append(query.charAt(i++));
+        }
+        if (i < len) {
+            sb.append('"');
+            i++;
+        }
+        return i;
+    }
+
+    /** Advances past a line comment (from the {@code #} up to but not including the newline). */
+    private static int skipLineComment(final String query, final int len, int i) {
+        while (i < len && query.charAt(i) != '\n') {
+            i++;
+        }
+        return i;
+    }
+
+    /**
+     * Returns {@code true} if the query contains a named fragment spread
+     * ({@code ...FragmentName} where {@code FragmentName} is not the {@code on} keyword).
+     * Inline fragments ({@code ... on TypeName { ... }}) are allowed.
+     */
+    static boolean containsNamedFragmentSpread(final String query) {
+        if (query == null || query.isBlank()) return false;
+        final String q = stripComments(query);
+        int i = 0;
+        final int len = q.length();
+        while (i < len) {
+            final int next = advancePastSpread(q, len, i);
+            if (next < 0) {
+                return true;  // named spread detected
+            }
+            i = next;
+        }
+        return false;
+    }
+
+    /**
+     * If position {@code i} starts a named fragment spread ({@code ...Name} where Name != "on"),
+     * returns {@code -1}. If it starts an inline fragment ({@code ... on}) or any other token,
+     * returns the next position to continue scanning from.
+     */
+    private static int advancePastSpread(final String q, final int len, final int i) {
+        if (i + 2 < len && q.charAt(i) == '.' && q.charAt(i + 1) == '.' && q.charAt(i + 2) == '.') {
+            int pos = i + 3;
+            while (pos < len && Character.isWhitespace(q.charAt(pos))) pos++;
+            if (pos < len && isIdentStart(q.charAt(pos))) {
+                final int nameStart = pos;
+                while (pos < len && isIdentChar(q.charAt(pos))) pos++;
+                final String name = q.substring(nameStart, pos);
+                if (!"on".equals(name)) {
+                    return -1;  // named spread found
+                }
+            }
+            return pos;
+        }
+        return i + 1;
+    }
+
+    /**
      * Extracts all field paths up to {@code maxDepth} from a GraphQL query string.
      * Segments are joined with dots: depth-3 path looks like "admin.jahia.shutdown".
-     * Handles aliases, arguments, directives, inline fragments, and named fragment spreads.
+     * Handles aliases, arguments, directives, and inline fragments.
+     * Named fragment spreads are NOT expanded; {@link #containsNamedFragmentSpread(String)}
+     * must be called before this method when a whitelist is active.
      */
     static Set<String> extractFieldPaths(final String query, final int maxDepth) {
         if (query == null || query.isBlank()) {
             return Collections.emptySet();
         }
-        final String q = query.replaceAll("#[^\n]*", " ");
+        final String q = stripComments(query);
         final int len = q.length();
         final int[] pos = {skipOperationHeader(q, len, skipWS(q, 0))};
         if (pos[0] >= len || q.charAt(pos[0]) != '{') {
@@ -567,7 +797,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             } catch (Exception ex) {
                 LOGGER.error("introspectSchema failed", ex);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent(ERROR_PREFIX + ex.getMessage())
+                        .addTextContent(JSONRPC_ERROR_PREFIX + INTERNAL_ERROR_MSG + JSONRPC_ERROR_SUFFIX)
                         .isError(true)
                         .build();
             }
@@ -578,8 +808,9 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             throws IOException, ServletException {
         final JsonNode step1 = executeInternalGraphQL(INTROSPECTION_STEP1, auth, user);
         if (step1 == null) {
+            LOGGER.error("introspection step 1 returned no data");
             return McpSchema.CallToolResult.builder()
-                    .addTextContent(ERROR_PREFIX + "introspection step 1 returned no data")
+                    .addTextContent(JSONRPC_ERROR_PREFIX + INTERNAL_ERROR_MSG + JSONRPC_ERROR_SUFFIX)
                     .isError(true)
                     .build();
         }
@@ -655,7 +886,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             } catch (Exception ex) {
                 LOGGER.error("listSkills failed", ex);
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent(ERROR_PREFIX + ex.getMessage())
+                        .addTextContent(JSONRPC_ERROR_PREFIX + INTERNAL_ERROR_MSG + JSONRPC_ERROR_SUFFIX)
                         .isError(true)
                         .build();
             }
@@ -686,14 +917,14 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             final String name = (String) req.arguments().get("name");
             if (name == null || name.isBlank()) {
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent(ERROR_PREFIX + "'name' argument is required")
+                        .addTextContent(JSONRPC_ERROR_PREFIX + "'name' argument is required" + JSONRPC_ERROR_SUFFIX)
                         .isError(true)
                         .build();
             }
             final McpSkillService.SkillEntry skill = mcpSkillService.getSkill(name);
             if (skill == null) {
                 return McpSchema.CallToolResult.builder()
-                        .addTextContent(ERROR_PREFIX + "skill '" + name + "' not found")
+                        .addTextContent(JSONRPC_ERROR_PREFIX + "skill not found" + JSONRPC_ERROR_SUFFIX)
                         .isError(true)
                         .build();
             }
@@ -716,7 +947,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             JcrSessionFilter.endRequest();
         }
         final String responseBody = writer.getBuffer().toString();
-        if (responseBody == null || responseBody.isEmpty()) {
+        if (responseBody.isEmpty()) {
             return null;
         }
         return OBJECT_MAPPER.readTree(responseBody);

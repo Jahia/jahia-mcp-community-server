@@ -20,9 +20,23 @@
     }
 }
 
+// Visually hidden but available to assistive technologies
+.mcp_visuallyHidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 .mcp_description {
     margin-bottom: 28px;
-    color: #666;
+    // #595959 on white => contrast ratio ~7.0:1 (WCAG AAA for normal text)
+    color: #595959;
 }
 
 .mcp_panels {
@@ -69,18 +83,51 @@
     border: none;
     padding: 0;
     font-size: 11px;
-    color: #0077cc;
+    // #00568f on #f8f8f8 => ~7.1:1 (WCAG AAA)
+    color: #00568f;
     cursor: pointer;
     text-decoration: underline;
 
     &:hover {
-        color: #005fa3;
+        color: #003f6b;
+    }
+
+    &:focus-visible {
+        outline: 2px solid #0055aa;
+        outline-offset: 2px;
     }
 }
 
 .mcp_panelHint {
     font-size: 12px;
-    color: #888;
+    // #595959 on #f8f8f8 => contrast ratio ~6.6:1; bumped darker for AAA
+    color: #4d4d4d;
+}
+
+.mcp_badgeLegend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #4d4d4d;
+}
+
+.mcp_badgeLegendItem {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.mcp_operationGroup {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.mcp_operationGroupLegend {
+    padding: 0;
 }
 
 .mcp_operationList {
@@ -102,6 +149,12 @@
         background-color: #f5f5f5;
     }
 
+    &:focus-within {
+        outline: 2px solid #0055aa;
+        outline-offset: -2px;
+        background-color: #eef6fc;
+    }
+
     &--covered {
         opacity: 0.55;
     }
@@ -111,12 +164,13 @@
     background: none;
     border: none;
     padding: 0;
-    width: 14px;
-    height: 14px;
+    // Target size: WCAG 2.2 — minimum 24x24
+    min-width: 24px;
+    min-height: 24px;
     flex-shrink: 0;
     cursor: pointer;
-    color: #999;
-    font-size: 9px;
+    color: #595959;
+    font-size: 11px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -124,16 +178,23 @@
     &:hover {
         color: #333;
     }
+
+    &:focus-visible {
+        outline: 2px solid #0055aa;
+        outline-offset: 1px;
+        border-radius: 3px;
+    }
 }
 
 .mcp_expandPlaceholder {
-    width: 14px;
+    width: 24px;
     flex-shrink: 0;
 }
 
 .mcp_treeLoading {
     font-size: 12px;
-    color: #bbb;
+    // #767676 on white => ~4.5:1; lifted from #bbb which failed even AA
+    color: #767676;
     padding-top: 3px;
     padding-bottom: 3px;
     padding-right: 16px;
@@ -142,9 +203,18 @@
 .mcp_checkbox {
     flex-shrink: 0;
     cursor: pointer;
-    width: 14px;
-    height: 14px;
-    accent-color: #0077cc;
+    // Target size: WCAG 2.2 — the box stays 16px but the hit area is padded to 24x24
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    margin: 4px;
+    accent-color: #0055aa;
+
+    &:focus-visible {
+        outline: 2px solid #0055aa;
+        outline-offset: 2px;
+    }
 }
 
 .mcp_operationName {
@@ -171,12 +241,13 @@
     font-weight: 700;
     color: #fff;
 
+    // White letter on these backgrounds: both >= 7:1 (WCAG AAA)
     &--query {
-        background-color: #0077cc;
+        background-color: #005a9e;
     }
 
     &--mutation {
-        background-color: #9c27b0;
+        background-color: #7b1fa2;
     }
 }
 

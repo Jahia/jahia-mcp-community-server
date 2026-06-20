@@ -10,6 +10,17 @@
     "unselectAll": "Unselect all",
     "save": "Save settings",
     "saveSuccess": "Settings saved successfully.",
-    "saveError": "An error occurred while saving the settings."
+    "saveError": "An error occurred while saving the settings.",
+    "saveErrorDetail": "An error occurred while saving the settings: {{message}}",
+    "saveNetworkError": "Could not reach the server. Check your connection and try again.",
+    "loading": "Loading…",
+    "loadingFields": "Loading fields…",
+    "expand": "Expand {{name}}",
+    "collapse": "Collapse {{name}}",
+    "queryBadge": "Query operation",
+    "mutationBadge": "Mutation operation",
+    "legendQuery": "Q = Query operation",
+    "legendMutation": "M = Mutation operation",
+    "coveredByAncestor": "allowed through a parent entry"
   }
 }

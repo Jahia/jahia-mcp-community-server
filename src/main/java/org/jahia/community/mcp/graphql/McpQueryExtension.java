@@ -45,7 +45,7 @@ public class McpQueryExtension {
         }
         return service.listSkills().stream()
                 .map(e -> new GqlMcpSkill(e.name, e.mcpName, e.description, e.content))
-                .collect(Collectors.toList());
+                .collect(Collectors.toUnmodifiableList());
     }
 
     @GraphQLName("McpSettings")

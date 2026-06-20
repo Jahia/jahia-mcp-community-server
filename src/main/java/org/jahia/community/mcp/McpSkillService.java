@@ -22,18 +22,61 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.regex.Pattern;
 
 @SuppressWarnings("java:S1075")
 @Component(service = McpSkillService.class, immediate = true)
 public class McpSkillService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpSkillService.class);
-    private static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
+    static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
     private static final String PROP_NAME = "jcr:title";
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";
     private static final String SKILLS_RESOURCE_DIR = "skills";
+
+    /**
+     * Allowed skill name: alphanumeric, underscore, hyphen segments separated by single slashes.
+     * Possessive quantifiers ({@code ++}, {@code *+}) eliminate backtracking entirely,
+     * making the pattern ReDoS-safe (S5998).
+     * Empty segments (leading/trailing/double slash) and traversal segments (./..)
+     * are additionally rejected by the per-segment check in {@link #validateSkillName(String)}.
+     */
+    static final Pattern SKILL_NAME_PATTERN =
+            Pattern.compile("^(?:[A-Za-z0-9_-]++/)*+[A-Za-z0-9_-]++$");
+
+    /**
+     * Validates a caller-supplied skill name is safe for JCR path construction.
+     * @throws IllegalArgumentException if the name is null, blank, or contains illegal characters
+     */
+    static String validateSkillName(final String name) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Skill name must not be null or blank");
+        }
+        if (!SKILL_NAME_PATTERN.matcher(name).matches()) {
+            throw new IllegalArgumentException(
+                    "Skill name contains illegal characters (only A-Za-z0-9_-/ allowed, no leading slash): " + name);
+        }
+        for (final String segment : name.split("/", -1)) {
+            if (segment.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Skill name must not contain empty path segments (leading, trailing, or double slash): " + name);
+            }
+            if ("..".equals(segment) || ".".equals(segment)) {
+                throw new IllegalArgumentException(
+                        "Skill name must not contain path-traversal segments: " + name);
+            }
+        }
+        return name;
+    }
+
+    /** Asserts the resolved JCR path is a proper descendant of SKILLS_PATH. */
+    private static void assertDescendant(final String resolvedPath) {
+        if (!resolvedPath.startsWith(SKILLS_PATH + "/") || resolvedPath.length() <= SKILLS_PATH.length() + 1) {
+            throw new SecurityException("Resolved skill path escapes the skills root: " + resolvedPath);
+        }
+    }
 
     @Activate
     public void activate(BundleContext bundleContext) {
@@ -69,6 +112,23 @@ public class McpSkillService {
         if (!relative.endsWith(".md")) return;
         final String relNoExt = relative.substring(0, relative.length() - 3); // "default/hello-jahia"
 
+        // Validate the bundled skill name — reject anything that looks like a traversal path.
+        // Bundled resources come from the bundle itself, but validate defensively anyway.
+        try {
+            validateSkillName(relNoExt);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.error("Skipping bundled skill with unsafe name '{}': {}", relNoExt, ex.getMessage());
+            return;
+        }
+
+        // Validate the bundled skill name defensively (resources come from the bundle itself,
+        // but belt-and-suspenders against unexpected file names in the JAR).
+        try {
+            validateSkillName(relNoExt);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.error("Skipping bundled skill with unsafe name '{}': {}", relNoExt, ex.getMessage());
+            return;
+        }
         final String jcrPath = SKILLS_PATH + "/" + relNoExt;
         if (session.nodeExists(jcrPath)) {
             return;
@@ -143,7 +203,7 @@ public class McpSkillService {
                 while (iter.hasNext()) {
                     skills.add(toEntry((JCRNodeWrapper) iter.nextNode()));
                 }
-                return skills;
+                return Collections.unmodifiableList(skills);
             });
         } catch (RepositoryException e) {
             LOGGER.error("Error listing MCP skills", e);
@@ -151,27 +211,44 @@ public class McpSkillService {
         }
     }
 
-    public SkillEntry getSkill(String name) {
+    public SkillEntry getSkill(final String name) {
+        try {
+            validateSkillName(name);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.warn("getSkill rejected unsafe name: {}", ex.getMessage());
+            return null;
+        }
         try {
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 final String path = SKILLS_PATH + "/" + name;
+                assertDescendant(path);
                 if (!session.nodeExists(path)) {
                     return null;
                 }
                 final JCRNodeWrapper node = session.getNode(path);
                 return node.isNodeType(SKILL_NODE_TYPE) ? toEntry(node) : null;
             });
+        } catch (SecurityException ex) {
+            LOGGER.warn("getSkill path-traversal attempt blocked: {}", ex.getMessage());
+            return null;
         } catch (RepositoryException e) {
             LOGGER.error("Error getting MCP skill: {}", name, e);
             return null;
         }
     }
 
-    public boolean saveSkill(String name, String mcpName, String description, String content) {
+    public boolean saveSkill(final String name, final String mcpName, final String description, final String content) {
+        try {
+            validateSkillName(name);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.warn("saveSkill rejected unsafe name: {}", ex.getMessage());
+            return false;
+        }
         try {
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 ensureContainer(session);
                 final String path = SKILLS_PATH + "/" + name;
+                assertDescendant(path);
                 final JCRNodeWrapper node;
                 if (session.nodeExists(path)) {
                     node = session.getNode(path);
@@ -188,16 +265,26 @@ public class McpSkillService {
                 session.save();
                 return true;
             });
+        } catch (SecurityException ex) {
+            LOGGER.warn("saveSkill path-traversal attempt blocked: {}", ex.getMessage());
+            return false;
         } catch (RepositoryException e) {
             LOGGER.error("Error saving MCP skill: {}", name, e);
             return false;
         }
     }
 
-    public boolean deleteSkill(String name) {
+    public boolean deleteSkill(final String name) {
+        try {
+            validateSkillName(name);
+        } catch (IllegalArgumentException ex) {
+            LOGGER.warn("deleteSkill rejected unsafe name: {}", ex.getMessage());
+            return false;
+        }
         try {
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 final String path = SKILLS_PATH + "/" + name;
+                assertDescendant(path);
                 if (!session.nodeExists(path)) {
                     return false;
                 }
@@ -205,6 +292,9 @@ public class McpSkillService {
                 session.save();
                 return true;
             });
+        } catch (SecurityException ex) {
+            LOGGER.warn("deleteSkill path-traversal attempt blocked: {}", ex.getMessage());
+            return false;
         } catch (RepositoryException e) {
             LOGGER.error("Error deleting MCP skill: {}", name, e);
             return false;

@@ -1,0 +1,26 @@
+{
+  "label": {
+    "menu_entry": "Serveur MCP",
+    "title": "Serveur MCP — Contrôle d'accès aux opérations",
+    "description": "Contrôlez quelles opérations GraphQL de Jahia le serveur MCP est autorisé à exécuter. Les restrictions s'appliquent à tous les types d'opérations (requêtes et mutations) partageant le même nom de champ. Les champs d'introspection (__schema, __type) passent toujours, quelle que soit la configuration.",
+    "allowList": "Liste d'autorisation",
+    "allowListHint": "Seules les opérations cochées sont autorisées à transiter par le serveur MCP.",
+    "allowListEmpty": "Aucune restriction — toutes les opérations sont autorisées.",
+    "selectAll": "Tout sélectionner",
+    "unselectAll": "Tout désélectionner",
+    "save": "Enregistrer les paramètres",
+    "saveSuccess": "Paramètres enregistrés avec succès.",
+    "saveError": "Une erreur s'est produite lors de l'enregistrement des paramètres.",
+    "saveErrorDetail": "Une erreur s'est produite lors de l'enregistrement des paramètres : {{message}}",
+    "saveNetworkError": "Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.",
+    "loading": "Chargement…",
+    "loadingFields": "Chargement des champs…",
+    "expand": "Développer {{name}}",
+    "collapse": "Réduire {{name}}",
+    "queryBadge": "Opération de requête",
+    "mutationBadge": "Opération de mutation",
+    "legendQuery": "Q = Opération de requête",
+    "legendMutation": "M = Opération de mutation",
+    "coveredByAncestor": "autorisé via une entrée parente"
+  }
+}
