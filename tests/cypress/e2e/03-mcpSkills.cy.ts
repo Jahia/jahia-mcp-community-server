@@ -69,7 +69,7 @@ describe('MCP Server — Skills', () => {
 
     it('mcpSkills returns the default hello-jahia skill seeded on activation', () => {
         cy.apollo({query: getSkills}).then(result => {
-            const skills: {name: string}[] = result.data.mcpSkills;
+            const skills: {name: string}[] = result.data.mcp.skills;
             const names = skills.map((s: {name: string}) => s.name);
             expect(names).to.include('hello-jahia');
         });
@@ -79,7 +79,7 @@ describe('MCP Server — Skills', () => {
         cy.apollo({
             mutation: saveSkill,
             variables: {name: TEST_SKILL, mcpName: 'Cypress Test', description: 'Test skill', content: 'Test content'}
-        }).its('data.mcpSaveSkill').should('eq', true);
+        }).its('data.mcp.saveSkill').should('eq', true);
     });
 
     it('mcpSkills reads back a saved skill with all fields', () => {
@@ -88,7 +88,7 @@ describe('MCP Server — Skills', () => {
             variables: {name: TEST_SKILL, mcpName: 'Cypress Test', description: 'A test skill', content: 'Hello from Cypress'}
         });
         cy.apollo({query: getSkills}).then(result => {
-            const skill = result.data.mcpSkills.find((s: {name: string}) => s.name === TEST_SKILL);
+            const skill = result.data.mcp.skills.find((s: {name: string}) => s.name === TEST_SKILL);
             expect(skill).to.exist;
             expect(skill.mcpName).to.eq('Cypress Test');
             expect(skill.description).to.eq('A test skill');
@@ -100,7 +100,7 @@ describe('MCP Server — Skills', () => {
         cy.apollo({mutation: saveSkill, variables: {name: TEST_SKILL, mcpName: 'v1', description: '', content: 'v1 content'}});
         cy.apollo({mutation: saveSkill, variables: {name: TEST_SKILL, mcpName: 'v2', description: '', content: 'v2 content'}});
         cy.apollo({query: getSkills}).then(result => {
-            const skill = result.data.mcpSkills.find((s: {name: string}) => s.name === TEST_SKILL);
+            const skill = result.data.mcp.skills.find((s: {name: string}) => s.name === TEST_SKILL);
             expect(skill.mcpName).to.eq('v2');
             expect(skill.content).to.eq('v2 content');
         });
@@ -109,16 +109,16 @@ describe('MCP Server — Skills', () => {
     it('mcpDeleteSkill removes a skill and returns true', () => {
         cy.apollo({mutation: saveSkill, variables: {name: TEST_SKILL, mcpName: '', description: '', content: 'to delete'}});
         cy.apollo({mutation: deleteSkill, variables: {name: TEST_SKILL}})
-            .its('data.mcpDeleteSkill').should('eq', true);
+            .its('data.mcp.deleteSkill').should('eq', true);
         cy.apollo({query: getSkills}).then(result => {
-            const names = result.data.mcpSkills.map((s: {name: string}) => s.name);
+            const names = result.data.mcp.skills.map((s: {name: string}) => s.name);
             expect(names).not.to.include(TEST_SKILL);
         });
     });
 
     it('mcpDeleteSkill returns false for a non-existent skill', () => {
         cy.apollo({mutation: deleteSkill, variables: {name: 'does-not-exist'}})
-            .its('data.mcpDeleteSkill').should('eq', false);
+            .its('data.mcp.deleteSkill').should('eq', false);
     });
 
     // --- MCP tools ---

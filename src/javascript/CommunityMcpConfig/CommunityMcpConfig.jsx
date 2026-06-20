@@ -35,8 +35,8 @@ export const CommunityMcpConfigAdmin = () => {
     // `onCompleted` fires on every cache read (including unrelated cache writes) and
     // would clobber unsaved edits already made by the user.
     useEffect(() => {
-        if (settingsData?.mcpSettings) {
-            setWhitelist(new Set(settingsData.mcpSettings.whitelist || []));
+        if (settingsData?.mcp?.settings) {
+            setWhitelist(new Set(settingsData.mcp.settings.whitelist || []));
             setDirty(false);
         }
     }, [settingsData]);
@@ -97,7 +97,7 @@ export const CommunityMcpConfigAdmin = () => {
         setSaveStatus(null);
         try {
             const result = await saveSettings({variables: {whitelist: [...whitelist]}});
-            if (result.data?.mcpSaveSettings) {
+            if (result.data?.mcp?.saveSettings) {
                 setSaveStatus('success');
                 setDirty(false);
             } else {

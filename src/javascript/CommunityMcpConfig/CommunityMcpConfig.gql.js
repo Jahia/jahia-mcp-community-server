@@ -2,15 +2,19 @@ import {gql} from '@apollo/client';
 
 export const GET_SETTINGS = gql`
     query McpGetSettings {
-        mcpSettings {
-            whitelist
+        mcp {
+            settings {
+                whitelist
+            }
         }
     }
 `;
 
 export const SAVE_SETTINGS = gql`
     mutation McpSaveSettings($whitelist: [String]!) {
-        mcpSaveSettings(whitelist: $whitelist)
+        mcp {
+            saveSettings(whitelist: $whitelist)
+        }
     }
 `;
 

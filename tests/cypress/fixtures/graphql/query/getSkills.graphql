@@ -1,8 +1,10 @@
 query GetMcpSkills {
-    mcpSkills {
-        name
-        mcpName
-        description
-        content
+    mcp {
+        skills {
+            name
+            mcpName
+            description
+            content
+        }
     }
 }
