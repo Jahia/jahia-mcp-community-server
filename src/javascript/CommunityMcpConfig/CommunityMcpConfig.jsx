@@ -1,65 +1,18 @@
 import React, {useEffect, useState} from 'react';
+import PropTypes from 'prop-types';
 import {useApolloClient, useMutation, useQuery} from '@apollo/client';
 import {useTranslation} from 'react-i18next';
 import {Button, Loader, Typography} from '@jahia/moonstone';
 import styles from './CommunityMcpConfig.scss';
 import {GET_MUTATION_FIELDS, GET_QUERY_FIELDS, GET_SETTINGS, GET_TYPE_FIELDS, SAVE_SETTINGS} from './CommunityMcpConfig.gql';
-
-const MAX_TREE_DEPTH = 5;
-
-// Unwrap NON_NULL / LIST wrappers to reach the named type
-const getNamedType = typeObj => {
-    if (!typeObj) {
-        return null;
-    }
-
-    if (typeObj.name) {
-        return typeObj;
-    }
-
-    return getNamedType(typeObj.ofType);
-};
-
-const buildOperationMap = (queryFields, mutationFields) => {
-    const map = {};
-    (queryFields || []).forEach(f => {
-        const named = getNamedType(f.type);
-        map[f.name] = {
-            name: f.name, path: f.name, description: f.description,
-            isQuery: true, isMutation: false,
-            typeName: named?.name || null, typeKind: named?.kind || null
-        };
-    });
-    (mutationFields || []).forEach(f => {
-        const named = getNamedType(f.type);
-        if (map[f.name]) {
-            map[f.name].isMutation = true;
-        } else {
-            map[f.name] = {
-                name: f.name, path: f.name, description: f.description,
-                isQuery: false, isMutation: true,
-                typeName: named?.name || null, typeKind: named?.kind || null
-            };
-        }
-    });
-    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
-};
-
-// True if path itself or any ancestor prefix is in the set
-const isCoveredBySet = (path, set) => {
-    if (set.has(path)) {
-        return true;
-    }
-
-    const parts = path.split('.');
-    for (let i = 1; i < parts.length; i++) {
-        if (set.has(parts.slice(0, i).join('.'))) {
-            return true;
-        }
-    }
-
-    return false;
-};
+import {
+    buildChildNodes,
+    buildOperationMap,
+    isCoveredBySet,
+    isExpandableKind,
+    mapTypeFields,
+    toggleWhitelistPath
+} from './operationTree';
 
 export const CommunityMcpConfigAdmin = () => {
     const {t} = useTranslation('jahia-mcp-community-server');
@@ -73,15 +26,20 @@ export const CommunityMcpConfigAdmin = () => {
 
     const {loading: loadingQueryFields, data: queryFieldsData} = useQuery(GET_QUERY_FIELDS, {fetchPolicy: 'cache-first'});
     const {loading: loadingMutationFields, data: mutationFieldsData} = useQuery(GET_MUTATION_FIELDS, {fetchPolicy: 'cache-first'});
-    const {loading: loadingSettings} = useQuery(GET_SETTINGS, {
-        fetchPolicy: 'network-only',
-        onCompleted: data => {
-            setWhitelist(new Set(data?.mcpSettings?.whitelist || []));
+    // Network-only so we always read the server's persisted whitelist on mount.
+    const {loading: loadingSettings, data: settingsData} = useQuery(GET_SETTINGS, {fetchPolicy: 'network-only'});
+
+    const [saveSettings, {loading: saving, error: saveError}] = useMutation(SAVE_SETTINGS);
+
+    // Sync server settings into local state via an effect rather than `onCompleted`.
+    // `onCompleted` fires on every cache read (including unrelated cache writes) and
+    // would clobber unsaved edits already made by the user.
+    useEffect(() => {
+        if (settingsData?.mcpSettings) {
+            setWhitelist(new Set(settingsData.mcpSettings.whitelist || []));
             setDirty(false);
         }
-    });
-
-    const [saveSettings, {loading: saving}] = useMutation(SAVE_SETTINGS);
+    }, [settingsData]);
 
     const operations = buildOperationMap(
         queryFieldsData?.queryFields?.fields,
@@ -110,13 +68,9 @@ export const CommunityMcpConfigAdmin = () => {
                 variables: {typeName: node.typeName},
                 fetchPolicy: 'cache-first'
             });
-            const fields = result.data?.typeFields?.fields || [];
             setTypeFields(prev => ({
                 ...prev,
-                [node.typeName]: fields.map(f => {
-                    const named = getNamedType(f.type);
-                    return {name: f.name, description: f.description, typeName: named?.name || null, typeKind: named?.kind || null};
-                })
+                [node.typeName]: mapTypeFields(result.data?.typeFields?.fields)
             }));
         } catch (err) {
             console.error('Failed to load fields for type', node.typeName, err);
@@ -125,22 +79,7 @@ export const CommunityMcpConfigAdmin = () => {
     };
 
     const toggle = path => {
-        setWhitelist(prev => {
-            const next = new Set(prev);
-            if (next.has(path)) {
-                next.delete(path);
-            } else {
-                next.add(path);
-                // Remove now-redundant descendants
-                next.forEach(e => {
-                    if (e !== path && e.startsWith(path + '.')) {
-                        next.delete(e);
-                    }
-                });
-            }
-
-            return next;
-        });
+        setWhitelist(prev => toggleWhitelistPath(prev, path));
         setDirty(true);
     };
 
@@ -160,14 +99,14 @@ export const CommunityMcpConfigAdmin = () => {
             const result = await saveSettings({variables: {whitelist: [...whitelist]}});
             if (result.data?.mcpSaveSettings) {
                 setSaveStatus('success');
+                setDirty(false);
             } else {
                 setSaveStatus('error');
             }
-
-            setDirty(false);
         } catch (err) {
             console.error('Failed to save MCP settings:', err);
-            setSaveStatus('error');
+            // Distinguish a transport/network failure from a GraphQL-level error.
+            setSaveStatus(err?.networkError ? 'networkError' : 'error');
         }
     };
 
@@ -178,10 +117,20 @@ export const CommunityMcpConfigAdmin = () => {
         }
     }, [saveStatus]);
 
+    const saveMessage = (() => {
+        switch (saveStatus) {
+            case 'success': return t('label.saveSuccess');
+            case 'networkError': return t('label.saveNetworkError');
+            case 'error': return saveError?.message ? t('label.saveErrorDetail', {message: saveError.message}) : t('label.saveError');
+            default: return '';
+        }
+    })();
+
     if (loadingQueryFields || loadingMutationFields || loadingSettings) {
         return (
-            <div className={styles.mcp_loading}>
+            <div className={styles.mcp_loading} role="status" aria-busy="true" aria-live="polite">
                 <Loader size="big"/>
+                <span className={styles.mcp_visuallyHidden}>{t('label.loading')}</span>
             </div>
         );
     }
@@ -202,6 +151,14 @@ export const CommunityMcpConfigAdmin = () => {
                     emptyHint={t('label.allowListEmpty')}
                     selectAllLabel={t('label.selectAll')}
                     unselectAllLabel={t('label.unselectAll')}
+                    queryBadgeLabel={t('label.queryBadge')}
+                    mutationBadgeLabel={t('label.mutationBadge')}
+                    legendQueryLabel={t('label.legendQuery')}
+                    legendMutationLabel={t('label.legendMutation')}
+                    coveredLabel={t('label.coveredByAncestor')}
+                    loadingFieldsLabel={t('label.loadingFields')}
+                    expandLabel={name => t('label.expand', {name})}
+                    collapseLabel={name => t('label.collapse', {name})}
                     operations={operations}
                     selected={whitelist}
                     typeFields={typeFields}
@@ -215,16 +172,17 @@ export const CommunityMcpConfigAdmin = () => {
             </div>
 
             <div className={styles.mcp_actions}>
-                {saveStatus === 'success' && (
-                    <div className={`${styles.mcp_alert} ${styles['mcp_alert--success']}`}>
-                        {t('label.saveSuccess')}
-                    </div>
-                )}
-                {saveStatus === 'error' && (
-                    <div className={`${styles.mcp_alert} ${styles['mcp_alert--error']}`}>
-                        {t('label.saveError')}
-                    </div>
-                )}
+                <output
+                    aria-live="polite"
+                    aria-atomic="true"
+                    className={
+                        saveStatus === 'success' ?
+                            `${styles.mcp_alert} ${styles['mcp_alert--success']}` :
+                            (saveStatus ? `${styles.mcp_alert} ${styles['mcp_alert--error']}` : styles.mcp_visuallyHidden)
+                    }
+                >
+                    {saveMessage}
+                </output>
                 <Button
                     label={t('label.save')}
                     variant="primary"
@@ -236,26 +194,42 @@ export const CommunityMcpConfigAdmin = () => {
     );
 };
 
-const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, onExpand, styles}) => {
-    const isExpandable = (node.typeKind === 'OBJECT' || node.typeKind === 'INTERFACE') && depth < MAX_TREE_DEPTH;
+const treeNodeShape = {
+    name: PropTypes.string.isRequired,
+    path: PropTypes.string.isRequired,
+    description: PropTypes.string,
+    typeName: PropTypes.string,
+    typeKind: PropTypes.string,
+    isQuery: PropTypes.bool,
+    isMutation: PropTypes.bool
+};
+
+const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, onExpand, styles, expandLabel, collapseLabel, queryBadgeLabel, mutationBadgeLabel, coveredLabel, loadingFieldsLabel}) => {
+    const isExpandable = isExpandableKind(node.typeKind, depth);
     const isExpanded = expandedPaths.has(node.path);
     const rawChildren = node.typeName ? typeFields[node.typeName] : null;
     const isLoading = rawChildren === 'loading';
     const covered = isCoveredBySet(node.path, selected);
     const directlySelected = selected.has(node.path);
+    const coveredByAncestor = covered && !directlySelected;
 
-    const children = (isExpanded && Array.isArray(rawChildren)) ?
-        rawChildren.map(f => ({...f, path: node.path + '.' + f.name, isQuery: node.isQuery, isMutation: node.isMutation})) :
-        null;
+    const children = isExpanded ? buildChildNodes(node, rawChildren) : null;
+    const checkboxLabel = node.description || node.path;
 
     return (
         <div>
             <div
-                className={`${styles.mcp_treeRow}${covered && !directlySelected ? ' ' + styles['mcp_treeRow--covered'] : ''}`}
+                className={`${styles.mcp_treeRow}${coveredByAncestor ? ' ' + styles['mcp_treeRow--covered'] : ''}`}
                 style={{paddingLeft: `${12 + (depth * 18)}px`}}
             >
                 {isExpandable ? (
-                    <button className={styles.mcp_expandBtn} type="button" onClick={() => onExpand(node)}>
+                    <button
+                        className={styles.mcp_expandBtn}
+                        type="button"
+                        aria-label={isExpanded ? collapseLabel(node.name) : expandLabel(node.name)}
+                        aria-expanded={isExpanded}
+                        onClick={() => onExpand(node)}
+                    >
                         {isExpanded ? '▾' : '▸'}
                     </button>
                 ) : (
@@ -265,20 +239,28 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
                     type="checkbox"
                     className={styles.mcp_checkbox}
                     checked={covered}
-                    disabled={covered && !directlySelected}
-                    title={node.description || node.path}
+                    disabled={coveredByAncestor}
+                    aria-label={coveredByAncestor ? `${checkboxLabel} (${coveredLabel})` : checkboxLabel}
                     onChange={() => onToggle(node.path)}
                 />
                 <span className={styles.mcp_operationName}>{node.name}</span>
                 {depth === 0 && (
                     <span className={styles.mcp_typeBadges}>
-                        {node.isQuery && <span className={`${styles.mcp_badge} ${styles['mcp_badge--query']}`}>Q</span>}
-                        {node.isMutation && <span className={`${styles.mcp_badge} ${styles['mcp_badge--mutation']}`}>M</span>}
+                        {node.isQuery && <span className={`${styles.mcp_badge} ${styles['mcp_badge--query']}`} aria-label={queryBadgeLabel}>Q</span>}
+                        {node.isMutation && <span className={`${styles.mcp_badge} ${styles['mcp_badge--mutation']}`} aria-label={mutationBadgeLabel}>M</span>}
                     </span>
                 )}
             </div>
             {isExpanded && isLoading && (
-                <div className={styles.mcp_treeLoading} style={{paddingLeft: `${12 + ((depth + 1) * 18)}px`}}>…</div>
+                <div
+                    className={styles.mcp_treeLoading}
+                    role="status"
+                    aria-busy="true"
+                    style={{paddingLeft: `${12 + ((depth + 1) * 18)}px`}}
+                >
+                    <span aria-hidden="true">…</span>
+                    <span className={styles.mcp_visuallyHidden}>{loadingFieldsLabel}</span>
+                </div>
             )}
             {children && children.map(child => (
                 <TreeNode
@@ -289,6 +271,12 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
                     typeFields={typeFields}
                     expandedPaths={expandedPaths}
                     styles={styles}
+                    expandLabel={expandLabel}
+                    collapseLabel={collapseLabel}
+                    queryBadgeLabel={queryBadgeLabel}
+                    mutationBadgeLabel={mutationBadgeLabel}
+                    coveredLabel={coveredLabel}
+                    loadingFieldsLabel={loadingFieldsLabel}
                     onToggle={onToggle}
                     onExpand={onExpand}
                 />
@@ -297,34 +285,98 @@ const TreeNode = ({node, depth, selected, typeFields, expandedPaths, onToggle, o
     );
 };
 
-const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, operations, selected, typeFields, expandedPaths, onToggle, onSelectAll, onUnselectAll, onExpand, styles}) => (
-    <div className={styles.mcp_panel}>
-        <div className={styles.mcp_panelHeader}>
-            <div className={styles.mcp_panelHeaderTop}>
-                <h3 className={styles.mcp_panelTitle}>{title}</h3>
-                <div className={styles.mcp_panelBulkActions}>
-                    <button className={styles.mcp_linkBtn} type="button" onClick={onSelectAll}>{selectAllLabel}</button>
-                    <button className={styles.mcp_linkBtn} type="button" onClick={onUnselectAll}>{unselectAllLabel}</button>
+TreeNode.propTypes = {
+    node: PropTypes.shape(treeNodeShape).isRequired,
+    depth: PropTypes.number.isRequired,
+    selected: PropTypes.instanceOf(Set).isRequired,
+    typeFields: PropTypes.object.isRequired,
+    expandedPaths: PropTypes.instanceOf(Set).isRequired,
+    onToggle: PropTypes.func.isRequired,
+    onExpand: PropTypes.func.isRequired,
+    styles: PropTypes.object.isRequired,
+    expandLabel: PropTypes.func.isRequired,
+    collapseLabel: PropTypes.func.isRequired,
+    queryBadgeLabel: PropTypes.string.isRequired,
+    mutationBadgeLabel: PropTypes.string.isRequired,
+    coveredLabel: PropTypes.string.isRequired,
+    loadingFieldsLabel: PropTypes.string.isRequired
+};
+
+const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, queryBadgeLabel, mutationBadgeLabel, legendQueryLabel, legendMutationLabel, coveredLabel, loadingFieldsLabel, expandLabel, collapseLabel, operations, selected, typeFields, expandedPaths, onToggle, onSelectAll, onUnselectAll, onExpand, styles}) => {
+    const titleId = 'mcp-panel-title';
+    return (
+        <div className={styles.mcp_panel}>
+            <div className={styles.mcp_panelHeader}>
+                <div className={styles.mcp_panelHeaderTop}>
+                    <h3 className={styles.mcp_panelTitle} id={titleId}>{title}</h3>
+                    <div className={styles.mcp_panelBulkActions}>
+                        <button className={styles.mcp_linkBtn} type="button" onClick={onSelectAll}>{selectAllLabel}</button>
+                        <button className={styles.mcp_linkBtn} type="button" onClick={onUnselectAll}>{unselectAllLabel}</button>
+                    </div>
+                </div>
+                <Typography className={styles.mcp_panelHint}>{selected.size === 0 ? emptyHint : hint}</Typography>
+                <div className={styles.mcp_badgeLegend}>
+                    <span className={styles.mcp_badgeLegendItem}>
+                        <span className={`${styles.mcp_badge} ${styles['mcp_badge--query']}`} aria-hidden="true">Q</span>
+                        {legendQueryLabel}
+                    </span>
+                    <span className={styles.mcp_badgeLegendItem}>
+                        <span className={`${styles.mcp_badge} ${styles['mcp_badge--mutation']}`} aria-hidden="true">M</span>
+                        {legendMutationLabel}
+                    </span>
                 </div>
             </div>
-            <Typography className={styles.mcp_panelHint}>{selected.size === 0 ? emptyHint : hint}</Typography>
+            <fieldset className={styles.mcp_operationGroup} aria-labelledby={titleId}>
+                <legend className={styles.mcp_visuallyHidden}>{title}</legend>
+                <div className={styles.mcp_operationList}>
+                    {operations.map(op => (
+                        <TreeNode
+                            key={op.name}
+                            node={op}
+                            depth={0}
+                            selected={selected}
+                            typeFields={typeFields}
+                            expandedPaths={expandedPaths}
+                            styles={styles}
+                            expandLabel={expandLabel}
+                            collapseLabel={collapseLabel}
+                            queryBadgeLabel={queryBadgeLabel}
+                            mutationBadgeLabel={mutationBadgeLabel}
+                            coveredLabel={coveredLabel}
+                            loadingFieldsLabel={loadingFieldsLabel}
+                            onToggle={onToggle}
+                            onExpand={onExpand}
+                        />
+                    ))}
+                </div>
+            </fieldset>
         </div>
-        <div className={styles.mcp_operationList}>
-            {operations.map(op => (
-                <TreeNode
-                    key={op.name}
-                    node={op}
-                    depth={0}
-                    selected={selected}
-                    typeFields={typeFields}
-                    expandedPaths={expandedPaths}
-                    styles={styles}
-                    onToggle={onToggle}
-                    onExpand={onExpand}
-                />
-            ))}
-        </div>
-    </div>
-);
+    );
+};
+
+OperationPanel.propTypes = {
+    title: PropTypes.string.isRequired,
+    hint: PropTypes.string.isRequired,
+    emptyHint: PropTypes.string.isRequired,
+    selectAllLabel: PropTypes.string.isRequired,
+    unselectAllLabel: PropTypes.string.isRequired,
+    queryBadgeLabel: PropTypes.string.isRequired,
+    mutationBadgeLabel: PropTypes.string.isRequired,
+    legendQueryLabel: PropTypes.string.isRequired,
+    legendMutationLabel: PropTypes.string.isRequired,
+    coveredLabel: PropTypes.string.isRequired,
+    loadingFieldsLabel: PropTypes.string.isRequired,
+    expandLabel: PropTypes.func.isRequired,
+    collapseLabel: PropTypes.func.isRequired,
+    operations: PropTypes.array.isRequired,
+    selected: PropTypes.instanceOf(Set).isRequired,
+    typeFields: PropTypes.object.isRequired,
+    expandedPaths: PropTypes.instanceOf(Set).isRequired,
+    onToggle: PropTypes.func.isRequired,
+    onSelectAll: PropTypes.func.isRequired,
+    onUnselectAll: PropTypes.func.isRequired,
+    onExpand: PropTypes.func.isRequired,
+    styles: PropTypes.object.isRequired
+};
 
 export default CommunityMcpConfigAdmin;

@@ -183,6 +183,42 @@ Full Markdown instructions here...
 
 The file name (without `.md`) becomes the JCR node name. The folder hierarchy mirrors the JCR sub-folder structure under `mcp-skills/`.
 
+
+## Security notes
+
+### Allow-all mode (empty whitelist)
+
+When the whitelist is empty (the default), **all GraphQL operations are permitted** to any caller
+who holds a valid API token with the `community-mcp` scope. The server logs a `WARN` on every
+request in this state to make it visible in logs:
+
+```
+WARN McpServlet - MCP GraphQL gate is running in ALLOW-ALL mode (whitelist is empty). ...
+```
+
+Configure an explicit whitelist in **Administration → MCP Server** (or in
+`META-INF/configurations/org.jahia.community.mcp.cfg`) to restrict which operations MCP clients
+may call.
+
+### Named fragment spreads blocked when whitelist is active
+
+When a whitelist is configured, GraphQL queries that use **named fragment spreads**
+(`...FragmentName`) are rejected. The whitelist gate cannot resolve spread contents without the
+full fragment definition, so it fails closed rather than allowing a bypass.
+
+Inline fragments (`... on TypeName { ... }`) are fully supported.
+
+### X-Forwarded-For not trusted
+
+Client IP logged in audit/block messages is taken from `HttpServletRequest.getRemoteAddr()`
+(the TCP peer address). `X-Forwarded-For` is intentionally ignored to prevent IP spoofing.
+If Jahia is behind a trusted reverse proxy, configure `RemoteIpValve` at the Tomcat layer to
+rewrite `remoteAddr` to the real client IP before the request reaches the servlet.
+
+### Request body size cap
+
+POST bodies larger than **2 MB** are rejected with a JSON-RPC `-32700` error before any parsing.
+
 ## Access control — Allow List
 
 The admin UI at **Administration → MCP Server** lets you restrict which GraphQL operations the MCP server may execute.
