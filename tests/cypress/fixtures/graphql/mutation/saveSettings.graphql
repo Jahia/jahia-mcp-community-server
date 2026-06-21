@@ -1,3 +1,5 @@
 mutation McpSaveSettings($whitelist: [String]!) {
-    mcpSaveSettings(whitelist: $whitelist)
+    mcp {
+        saveSettings(whitelist: $whitelist)
+    }
 }
