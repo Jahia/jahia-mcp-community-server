@@ -90,6 +90,16 @@
             <version>3.25.3</version>
             <scope>test</scope>
         </dependency>
+        <!-- Test-only SLF4J backend so audit-log assertions (F10) can attach a ListAppender.
+             Not embedded in the bundle; at runtime SLF4J is bound by Pax Logging. -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <!-- 1.5.x provides the SLF4J 2.x ServiceLoader binding to match slf4j-api 2.0.x
+                 pulled transitively by the MCP SDK (1.2.x uses the incompatible 1.7 binder). -->
+            <version>1.5.13</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <repositories>
