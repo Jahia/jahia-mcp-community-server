@@ -83,14 +83,31 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         });
     });
 
-    // U4 (e2e mitigation) — a multi-operation document is rejected end-to-end. checkAccess sees
-    // only op A (currentUser, allowed), but executeGraphQL forwards no operationName, so
-    // graphql-java refuses the multi-op document and op B (admin) never executes. This is the
-    // regression guard for the latent first-op-only parser gap: if operationName forwarding is
-    // ever added, op B would evade the whitelist and this assertion must be re-examined.
+    // U4 (e2e mitigation) — a multi-operation document does not let the second (unchecked)
+    // operation run. checkAccess's field-path parser reads ONLY the first operation's selection
+    // set (op A: currentUser, whitelisted) and forwards the whole document, but executeGraphQL
+    // forwards no operationName. graphql-java therefore rejects the multi-op document WHOLESALE
+    // before executing anything — either at execution ("Must provide operation name if query
+    // contains multiple operations.") or, as here, at document validation (op B references the
+    // undefined field admin.jahia.isAlive). Both outcomes yield data: null with a populated
+    // errors array, proving NEITHER op A nor op B ran, so op B (admin, non-whitelisted) never
+    // reaches its resolver.
+    //
+    // The fail-closed surfaces as a GraphQL error INSIDE a non-error MCP envelope: the MCP isError
+    // flag tracks the HTTP status of the in-process dispatch (McpServlet line 332), and graphql-java
+    // returns these errors at HTTP 200, so result.isError is false. The guard therefore asserts on
+    // the real evidence that no operation executed (data === null + non-empty errors), NOT on isError.
+    // Regression guard for the latent first-op-only parser gap: if operationName forwarding is ever
+    // added so an operation could be selected and executed, op A's currentUser data (or op B's admin
+    // result/permission error) would appear and data would no longer be null — this test fails loudly.
     it('rejects a multi-operation document so the second (unchecked) operation cannot run', () => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
         executeGraphQL('query A { currentUser { name } } query B { admin { jahia { isAlive } } }')
-            .its('body.result.isError').should('eq', true);
+            .then(response => {
+                const payload = JSON.parse(response.body.result.content[0].text);
+                // No operation executed: graphql-java rejected the multi-op document wholesale.
+                expect(payload.data, 'no operation executed').to.be.null;
+                expect(payload.errors, 'document rejected with errors').to.be.an('array').and.not.be.empty;
+            });
     });
 });
