@@ -14,8 +14,10 @@ src/main/java/org/jahia/community/mcp/
         McpConfigService.java              # OSGi ManagedService — reads whitelist from .cfg
     graphql/
         McpGraphQLExtensionsProvider.java  # Registers GraphQL extensions
-        McpQueryExtension.java             # mcpSettings + mcpSkills queries
-        McpMutationExtension.java          # mcpSaveSettings + mcpSaveSkill + mcpDeleteSkill
+        McpQueryExtension.java             # Adds the `mcp` field to Query → McpQuery namespace
+        McpQuery.java                      # mcp { settings | skills } query operations
+        McpMutationExtension.java          # Adds the `mcp` field to Mutation → McpMutation namespace
+        McpMutation.java                   # mcp { saveSettings | saveSkill | deleteSkill } mutations
 
 src/javascript/CommunityMcpConfig/
     CommunityMcpConfig.jsx                 # React admin UI (lazy-loaded operation tree)
@@ -93,10 +95,10 @@ Full Markdown content here.
 - `listSkills` — returns `[{name, mcpName, description}]` JSON array
 - `getSkill(name)` — returns raw Markdown content; `name` may include sub-folder path (e.g. `default/hello-jahia`)
 
-**GraphQL API** (all require `admin` permission):
-- `mcpSkills` query: `{ name, mcpName, description, content }`
-- `mcpSaveSkill(name!, mcpName, description, content!)` mutation
-- `mcpDeleteSkill(name!)` mutation
+**GraphQL API** (namespaced under a single `mcp` container on Query/Mutation; all require `admin` permission):
+- `mcp { skills }` query: `{ name, mcpName, description, content }`
+- `mcp { saveSkill(name!, mcpName, description, content!) }` mutation
+- `mcp { deleteSkill(name!) }` mutation
 
 ### JCR node type (definitions.cnd)
 
@@ -130,7 +132,7 @@ OSGi `ManagedService` bound to PID `org.jahia.community.mcp`. Parses `whitelist`
 - Two Apollo queries on load: `GET_QUERY_FIELDS` and `GET_MUTATION_FIELDS` — deliberately split (one `__Type.fields` each) to avoid the bad-faith guard
 - Lazy-loaded tree: clicking `▸` fires `GET_TYPE_FIELDS` (one per type name), result cached in `typeFields` state by type name
 - Checkbox semantics: a node is `checked` if it or any ancestor is in the whitelist set (`isCoveredBySet`); checked-by-ancestor nodes render as disabled (opacity 0.55)
-- Save merges the checkbox set into a string array and calls `mcpSaveSettings`
+- Save merges the checkbox set into a string array and calls the `mcp { saveSettings(whitelist) }` mutation (operation `McpSaveSettings`)
 
 ## Key implementation constraints
 

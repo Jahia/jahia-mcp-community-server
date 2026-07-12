@@ -53,7 +53,7 @@ Pass the token in every request:
 Authorization: APIToken <your-token>
 ```
 
-The `mcp` permission is automatically granted to users with the `admin` role (configured in `META-INF/configurations/org.jahia.bundles.api.authorization-community-mcp.yml`).
+The `community-mcp` permission is automatically granted to users with the `admin` role (configured in `META-INF/configurations/org.jahia.bundles.api.authorization-community-mcp.yml`).
 
 ## MCP client setup (Claude Code)
 
@@ -142,30 +142,38 @@ A set of default skills is seeded into JCR on module activation. They are define
 
 ### Managing skills via GraphQL
 
+All MCP operations are grouped under a single `mcp` namespace on `Query` and `Mutation`.
+
 ```graphql
 # List all skills
 query {
-    mcpSkills {
-        name
-        mcpName
-        description
-        content
+    mcp {
+        skills {
+            name
+            mcpName
+            description
+            content
+        }
     }
 }
 
 # Create or update a skill
 mutation {
-    mcpSaveSkill(
-        name: "my-skill",
-        mcpName: "My Skill Display Name",
-        description: "What this skill does",
-        content: "# My Skill\n\nInstructions for Claude..."
-    )
+    mcp {
+        saveSkill(
+            name: "my-skill",
+            mcpName: "My Skill Display Name",
+            description: "What this skill does",
+            content: "# My Skill\n\nInstructions for Claude..."
+        )
+    }
 }
 
 # Delete a skill
 mutation {
-    mcpDeleteSkill(name: "my-skill")
+    mcp {
+        deleteSkill(name: "my-skill")
+    }
 }
 ```
 
@@ -199,6 +207,12 @@ WARN McpServlet - MCP GraphQL gate is running in ALLOW-ALL mode (whitelist is em
 Configure an explicit whitelist in **Administration → MCP Server** (or in
 `META-INF/configurations/org.jahia.community.mcp.cfg`) to restrict which operations MCP clients
 may call.
+
+**Hardening recommendation:** treat the empty (allow-all) whitelist as an out-of-box convenience,
+not a production posture. Because the `community-mcp` scope is granted to the `admin` role, a token
+in allow-all mode can run any GraphQL operation the admin user is permitted to (bounded only by JCR
+ACLs) — including administrative mutations. For least-privilege, always configure an explicit
+whitelist scoped to exactly the operations your MCP clients need.
 
 ### Named fragment spreads blocked when whitelist is active
 
@@ -256,7 +270,7 @@ WARN McpServlet - MCP operation blocked: path='admin.jahia.shutdown', reason=not
 
 ## Health check
 
-A `GET /modules/community-mcp` request returns a JSON status response for authenticated users with the `mcp` permission:
+A `GET /modules/community-mcp` request returns a JSON status response for authenticated users with the `community-mcp` permission:
 
 ```json
 {"status":"Jahia MCP server running","version":"1.0.0","tools":["executeGraphQL","introspectSchema","listSkills","getSkill"]}

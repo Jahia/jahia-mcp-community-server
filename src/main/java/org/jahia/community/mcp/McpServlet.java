@@ -376,10 +376,33 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         final Set<String> whitelist = mcpConfigService.getWhitelist();
 
         if (whitelist.isEmpty()) {
-            // SEC-3: warn loudly on every call in allow-all mode so operators notice
+            // SECURITY POSTURE (intentional current default — do NOT change the meaning here
+            // without product/maintainer sign-off): an EMPTY whitelist means ALLOW-ALL. The
+            // shipped org.jahia.community.mcp.cfg intentionally ships whitelist= empty so the
+            // module is usable out of the box without an operator first authoring a whitelist.
+            //
+            // This is a deliberate "secure once an operator opts in" tradeoff, NOT an oversight.
+            // In allow-all mode any caller holding a valid community-mcp-scoped token can run any
+            // GraphQL op via executeGraphQL. The real backstops that make this acceptable as
+            // shipped are:
+            //   (a) the community-mcp API permission is granted only to the admin role
+            //       (org.jahia.bundles.api.authorization-community-mcp.yml → user_permission: admin),
+            //       so a caller already holds broad privileges; and
+            //   (b) the forwarded caller identity + JCR ACLs still apply to every executeGraphQL
+            //       call (see executeGraphQL: setCurrentUser(user) + forwarded Authorization),
+            //       so operations remain bounded by what that user could do in Jahia anyway.
+            //
+            // KNOWN HARDENING RECOMMENDATION (deferred — flipping empty→deny-all is a BREAKING
+            // change for deployments relying on this permissive default, so it needs product
+            // buy-in and a major version): consider a fail-closed default, or shipping a sensible
+            // default whitelist, in a future major release. Operators wanting least-privilege
+            // today should configure an explicit whitelist (Administration -> MCP Server).
+            //
+            // We warn loudly on EVERY call in this mode so the posture is visible in logs.
             LOGGER.warn("MCP GraphQL gate is running in ALLOW-ALL mode (whitelist is empty). "
-                    + "All GraphQL operations are permitted. Configure a whitelist in "
-                    + "Administration -> MCP Server to restrict access.");
+                    + "All GraphQL operations are permitted for any community-mcp-scoped token. "
+                    + "This is the intentional out-of-box default; for least-privilege configure a "
+                    + "whitelist in Administration -> MCP Server to restrict access.");
             return null;
         }
 
