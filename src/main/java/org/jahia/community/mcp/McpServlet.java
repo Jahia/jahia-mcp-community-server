@@ -369,7 +369,10 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
      * "admin.jahia.shutdown" covers only that specific nested path.
      * Introspection fields (__schema, __type, __typename) always pass.
      */
-    private McpSchema.CallToolResult checkAccess(final String query, final JahiaUser user, final String clientIp) {
+    // Package-private (not private) so security unit tests can drive the REAL access-control
+    // decision with a mocked McpConfigService, instead of asserting against a re-implemented
+    // mirror. See McpServletCheckAccessTest.
+    McpSchema.CallToolResult checkAccess(final String query, final JahiaUser user, final String clientIp) {
         final Set<String> whitelist = mcpConfigService.getWhitelist();
 
         if (whitelist.isEmpty()) {
@@ -409,8 +412,12 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 .build();
     }
 
-    /** Extracts field paths from the query and removes introspection segments. */
-    private static Set<String> collectNonIntrospectionPaths(final String query, final int maxDepth) {
+    /**
+     * Extracts field paths from the query and removes introspection segments.
+     * Package-private so the {@code __}-filter regression guard tests exercise this real
+     * production method rather than a test-local copy of the filtering logic.
+     */
+    static Set<String> collectNonIntrospectionPaths(final String query, final int maxDepth) {
         final Set<String> paths = new LinkedHashSet<>(extractFieldPaths(query, maxDepth));
         paths.removeIf(p -> {
             for (final String seg : p.split("\\.", -1)) {
@@ -439,7 +446,9 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         return null;
     }
 
-    private static boolean isPathAllowed(final String path, final Set<String> whitelist) {
+    // Package-private so the case-sensitivity / dot-path coverage regression guards test the
+    // REAL matching logic (the previous test mirrored this method, defeating the guard).
+    static boolean isPathAllowed(final String path, final Set<String> whitelist) {
         for (final String entry : whitelist) {
             if (pathCoveredBy(path, entry) || pathIsContainerOf(path, entry)) {
                 return true;
