@@ -194,6 +194,14 @@ public class McpSkillService {
 
     public List<SkillEntry> listSkills() {
         try {
+            // SECURITY POSTURE (intentional, ACL-bypassing — benign as shipped): skill reads run
+            // under a SYSTEM JCR session, so unlike executeGraphQL they do NOT run as the caller
+            // and do NOT pass through the whitelist. Skills are shared instruction documents meant
+            // to be readable by every MCP client, and the community-mcp scope is admin-only, so no
+            // caller is denied anything here that their own ACLs would otherwise permit, and no
+            // restrictive per-skill ACL ships. This becomes a real ACL bypass to revisit ONLY if
+            // the community-mcp grant is broadened beyond admin, or deny-ACLs are added to skill
+            // nodes — at which point these reads should run as the caller instead of SYSTEM.
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 ensureContainer(session);
                 final Query query = session.getWorkspace().getQueryManager().createQuery(LIST_SKILLS_SQL, Query.JCR_SQL2);
@@ -219,6 +227,11 @@ public class McpSkillService {
             return null;
         }
         try {
+            // SECURITY POSTURE: see listSkills() — this read also runs as SYSTEM, intentionally
+            // bypassing the caller's ACLs and the whitelist. Benign under the admin-only
+            // community-mcp scope; revisit (run-as-caller) if the scope broadens or skills gain
+            // restrictive ACLs. The name is still validated (validateSkillName + assertDescendant)
+            // so this cannot be used for path traversal outside SKILLS_PATH.
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 final String path = SKILLS_PATH + "/" + name;
                 assertDescendant(path);

@@ -85,7 +85,7 @@ public class McpQuery {
 
         @GraphQLField
         @GraphQLName("mcpName")
-        @GraphQLDescription("Human-readable display name for the skill (mcp:name property)")
+        @GraphQLDescription("Human-readable display name for the skill (stored as the jcr:title property)")
         public String getMcpName() {
             return mcpName;
         }
