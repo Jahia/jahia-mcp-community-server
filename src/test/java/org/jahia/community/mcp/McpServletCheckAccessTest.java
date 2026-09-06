@@ -124,8 +124,8 @@ class McpServletCheckAccessTest {
     //
     // checkAccess used to read an EMPTY extracted path set as "this document requests nothing I
     // need to police", but the hand-written scanner also produced an empty set for every document
-    // it simply could not walk. Each arm below is VALID GraphQL that the old scanner mis-handled;
-    // every one of them executed the operation the whitelist had just refused.
+    // it simply could not walk. Each arm below is VALID GraphQL that the old scanner mis-handled,
+    // and every one of them executed the operation the whitelist had just refused.
     //
     // Each arm is paired with the positive control further down (a whitelisted op still passes) —
     // without that pairing a "blocked" assertion proves only that the gate blocks everything.

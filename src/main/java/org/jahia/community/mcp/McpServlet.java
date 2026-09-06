@@ -448,11 +448,16 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         return findFirstBlockedPath(paths, whitelist, user, clientIp);
     }
 
+    /** Audit-log identity for a caller: the user name, or "anonymous" when there is no user. */
+    private static String userNameOf(final JahiaUser user) {
+        return user != null ? user.getName() : "anonymous";
+    }
+
     /** Logs and returns a blocked result when a named fragment spread is detected. */
     private McpSchema.CallToolResult buildNamedFragmentBlockedResult(final JahiaUser user, final String clientIp) {
         LOGGER.warn("MCP operation blocked: named fragment spreads not permitted when "
                 + "whitelist is active, user='{}', ip='{}'",
-                user != null ? user.getName() : "anonymous", clientIp);
+                userNameOf(user), clientIp);
         return McpSchema.CallToolResult.builder()
                 .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: "
                         + "named fragment spreads are not permitted when a whitelist is active" + JSONRPC_ERROR_SUFFIX)
@@ -466,7 +471,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         // The parser message can quote document content back — keep it in the audit log only.
         LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed while a whitelist "
                 + "is active, user='{}', ip='{}', reason='{}'",
-                user != null ? user.getName() : "anonymous", clientIp, ex.getMessage());
+                userNameOf(user), clientIp, ex.getMessage());
         return McpSchema.CallToolResult.builder()
                 .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: "
                         + "the GraphQL document could not be parsed" + JSONRPC_ERROR_SUFFIX)
@@ -506,7 +511,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         for (final String path : paths) {
             if (!isPathAllowed(path, whitelist)) {
                 LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
-                        path, user != null ? user.getName() : "anonymous", clientIp);
+                        path, userNameOf(user), clientIp);
                 return McpSchema.CallToolResult.builder()
                         .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: '"
                                 + path + "' is not in the whitelist" + JSONRPC_ERROR_SUFFIX)
