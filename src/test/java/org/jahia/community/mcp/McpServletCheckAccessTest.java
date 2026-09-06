@@ -118,4 +118,146 @@ class McpServletCheckAccessTest {
         assertThat(warnMessages())
                 .anySatisfy(msg -> assertThat(msg).contains("named fragment"));
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SEC-364 / GHSA-9vrc-45qw-x759 — whitelist bypass via a document the gate could not parse
+    //
+    // checkAccess used to read an EMPTY extracted path set as "this document requests nothing I
+    // need to police", but the hand-written scanner also produced an empty set for every document
+    // it simply could not walk. Each arm below is VALID GraphQL that the old scanner mis-handled;
+    // every one of them executed the operation the whitelist had just refused.
+    //
+    // Each arm is paired with the positive control further down (a whitelisted op still passes) —
+    // without that pairing a "blocked" assertion proves only that the gate blocks everything.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("SEC-364 leading comma before the selection set → blocked (the reported PoC)")
+    void sec364_leading_comma_blocked() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        McpSchema.CallToolResult result =
+                servlet.checkAccess("query,{ jcr { nodeByPath(path:\"/\") { name } } }", user, "1.2.3.4");
+
+        assertThat(result).as("a comma is an ignored token, not an escape hatch").isNotNull();
+        assertThat(result.isError()).isTrue();
+        assertThat(warnMessages()).anySatisfy(msg -> assertThat(msg).contains("jcr"));
+    }
+
+    @Test
+    @DisplayName("SEC-364 comma before the operation keyword → blocked")
+    void sec364_comma_before_keyword_blocked() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        McpSchema.CallToolResult result =
+                servlet.checkAccess(",query { jcr { nodeByPath(path:\"/\") { name } } }", user, "1.2.3.4");
+
+        assertThat(result).isNotNull();
+        assertThat(result.isError()).isTrue();
+    }
+
+    @Test
+    @DisplayName("SEC-364 leading byte-order mark → blocked")
+    void sec364_leading_bom_blocked() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        // U+FEFF is an ignored token in the GraphQL grammar but is NOT Character.isWhitespace, so
+        // the old skipWS() stopped dead on it. Either branch may deny now (parsed-and-blocked, or
+        // refused as unparseable) — what matters is that neither permits.
+        McpSchema.CallToolResult result =
+                servlet.checkAccess("﻿{ jcr { nodeByPath(path:\"/\") { name } } }", user, "1.2.3.4");
+
+        assertThat(result).isNotNull();
+        assertThat(result.isError()).isTrue();
+    }
+
+    @Test
+    @DisplayName("SEC-364 unbalanced paren in a string argument no longer hides a sibling field")
+    void sec364_unbalanced_paren_in_string_arg_blocked() {
+        when(config.getWhitelist()).thenReturn(Set.of("jcr.nodeByPath"));
+
+        // This is the arm that "treat an empty path set as deny" would NOT have caught: the old
+        // scanner extracted {jcr, jcr.nodeByPath} — non-empty, and both whitelisted — because the
+        // '(' inside the path argument unbalanced skipBalanced()'s counter, which then ran to
+        // end-of-document and never saw the `admin` sibling.
+        String q = "{ jcr { nodeByPath(path: \"/x(\") { name } } admin { jahia { isAlive } } }";
+        McpSchema.CallToolResult result = servlet.checkAccess(q, user, "1.2.3.4");
+
+        assertThat(result).as("the hidden sibling must be seen and refused").isNotNull();
+        assertThat(result.isError()).isTrue();
+        assertThat(warnMessages()).anySatisfy(msg -> assertThat(msg).contains("admin"));
+    }
+
+    @Test
+    @DisplayName("SEC-364 multi-operation document: the second operation is inspected too")
+    void sec364_multi_operation_second_op_blocked() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        // Previously only op A was extracted; op B survived solely because executeGraphQL forwards
+        // no operationName, so graphql-java rejected the whole document. The gate now refuses op B
+        // on its own merits instead of relying on that.
+        String q = "query A { currentUser { name } } query B { admin { jahia { isAlive } } }";
+        McpSchema.CallToolResult result = servlet.checkAccess(q, user, "1.2.3.4");
+
+        assertThat(result).isNotNull();
+        assertThat(result.isError()).isTrue();
+        assertThat(warnMessages()).anySatisfy(msg -> assertThat(msg).contains("admin"));
+    }
+
+    @Test
+    @DisplayName("unparseable document under an active whitelist → blocked, WARN carries user + IP")
+    void unparseable_document_blocked_and_warns() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        McpSchema.CallToolResult result = servlet.checkAccess("{ jcr { ", user, "1.2.3.4");
+
+        assertThat(result).as("fail closed when the document cannot be accounted for").isNotNull();
+        assertThat(result.isError()).isTrue();
+        assertThat(warnMessages())
+                .anySatisfy(msg -> assertThat(msg)
+                        .contains("could not be parsed")
+                        .contains("alice")
+                        .contains("1.2.3.4"));
+    }
+
+    @Test
+    @DisplayName("parse-failure text returned to the client does not echo the document back")
+    void unparseable_result_does_not_echo_document() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        // The parser's own message quotes the offending source; that belongs in the audit log,
+        // not in a response the caller can read back.
+        McpSchema.CallToolResult result = servlet.checkAccess("{ topSecretFieldName { ", user, "1.2.3.4");
+
+        assertThat(String.valueOf(result.content())).doesNotContain("topSecretFieldName");
+    }
+
+    // ── false-positive guards: the fix must not start refusing legitimate documents ──
+
+    @Test
+    @DisplayName("commas inside a selection set remain legal separators, not a block reason")
+    void commas_inside_selection_set_allowed() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        assertThat(servlet.checkAccess("{ currentUser { name, displayName } }", user, "1.2.3.4"))
+                .as("commas are ordinary GraphQL punctuation").isNull();
+    }
+
+    @Test
+    @DisplayName("introspection-only document is still permitted under an active whitelist")
+    void introspection_only_document_allowed() {
+        when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
+
+        assertThat(servlet.checkAccess("{ __schema { types { name } } }", user, "1.2.3.4"))
+                .as("empty path set after a SUCCESSFUL parse still means 'nothing to police'").isNull();
+    }
+
+    @Test
+    @DisplayName("'#' inside a string argument still does not fracture a whitelisted path")
+    void hash_in_string_argument_still_allowed() {
+        when(config.getWhitelist()).thenReturn(Set.of("jcr"));
+
+        assertThat(servlet.checkAccess("{ jcr { nodeByPath(path: \"/sites#main\") { name } } }", user, "1.2.3.4"))
+                .isNull();
+    }
 }

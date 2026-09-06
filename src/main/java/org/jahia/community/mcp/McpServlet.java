@@ -4,6 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import graphql.language.Definition;
+import graphql.language.Document;
+import graphql.language.Field;
+import graphql.language.FragmentSpread;
+import graphql.language.InlineFragment;
+import graphql.language.OperationDefinition;
+import graphql.language.Selection;
+import graphql.language.SelectionSet;
+import graphql.parser.Parser;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
@@ -406,17 +415,33 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
             return null;
         }
 
+        // SEC-364: parse ONCE, with the real GraphQL grammar. A document the gate cannot parse
+        // is DENIED. The previous hand-written scanner returned an empty path set for anything it
+        // could not walk, and the branch below read empty as "nothing to police" — so a single
+        // leading comma (an ignored token in the grammar) executed the operation it had refused.
+        final Document document;
+        try {
+            document = Parser.parse(query);
+        } catch (RuntimeException ex) {
+            // InvalidSyntaxException, plus any ParserOptions guard trip (max tokens / characters /
+            // rule depth). Every one of them means "I cannot account for this document" → deny.
+            return buildUnparseableBlockedResult(user, clientIp, ex);
+        }
+
         // SEC-2: named fragment spreads cannot be resolved against the whitelist without
         // the full fragment definitions — fail closed rather than allowing a bypass.
-        if (containsNamedFragmentSpread(query)) {
+        if (containsNamedFragmentSpread(document)) {
             return buildNamedFragmentBlockedResult(user, clientIp);
         }
 
         int maxDepth = 1;
         for (final String e : whitelist) maxDepth = Math.max(maxDepth, segmentCount(e));
 
-        final Set<String> paths = collectNonIntrospectionPaths(query, maxDepth);
+        final Set<String> paths = collectNonIntrospectionPaths(document, maxDepth);
         if (paths.isEmpty()) {
+            // Safe to permit: the document PARSED, so an empty set can only mean it selects no
+            // non-introspection fields (collectNonIntrospectionPaths strips __-prefixed segments
+            // by design). The "extractor gave up" case no longer reaches here — it denies above.
             return null;
         }
 
@@ -435,13 +460,36 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
                 .build();
     }
 
+    /** Logs and returns a blocked result when the submitted document cannot be parsed. */
+    private McpSchema.CallToolResult buildUnparseableBlockedResult(
+            final JahiaUser user, final String clientIp, final RuntimeException ex) {
+        // The parser message can quote document content back — keep it in the audit log only.
+        LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed while a whitelist "
+                + "is active, user='{}', ip='{}', reason='{}'",
+                user != null ? user.getName() : "anonymous", clientIp, ex.getMessage());
+        return McpSchema.CallToolResult.builder()
+                .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: "
+                        + "the GraphQL document could not be parsed" + JSONRPC_ERROR_SUFFIX)
+                .isError(true)
+                .build();
+    }
+
     /**
      * Extracts field paths from the query and removes introspection segments.
      * Package-private so the {@code __}-filter regression guard tests exercise this real
      * production method rather than a test-local copy of the filtering logic.
      */
     static Set<String> collectNonIntrospectionPaths(final String query, final int maxDepth) {
-        final Set<String> paths = new LinkedHashSet<>(extractFieldPaths(query, maxDepth));
+        return withoutIntrospectionPaths(extractFieldPaths(query, maxDepth));
+    }
+
+    /** AST form of {@link #collectNonIntrospectionPaths(String, int)}. */
+    static Set<String> collectNonIntrospectionPaths(final Document doc, final int maxDepth) {
+        return withoutIntrospectionPaths(extractFieldPaths(doc, maxDepth));
+    }
+
+    private static Set<String> withoutIntrospectionPaths(final Set<String> extracted) {
+        final Set<String> paths = new LinkedHashSet<>(extracted);
         paths.removeIf(p -> {
             for (final String seg : p.split("\\.", -1)) {
                 if (seg.startsWith("__")) return true;
@@ -499,284 +547,113 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     }
 
     /**
-     * Strips GraphQL line comments ({@code # ...}) while preserving {@code #} characters that
-     * occur inside string literals ({@code "..."} and block strings {@code """..."""}). A naive
-     * regex strip would corrupt queries such as {@code nodeByPath(path: "/sites#main")} and cause
-     * false whitelist blocks.
-     */
-    static String stripComments(final String query) {
-        final StringBuilder sb = new StringBuilder(query.length());
-        final int len = query.length();
-        int i = 0;
-        while (i < len) {
-            final char c = query.charAt(i);
-            if (c == '"') {
-                i = appendStringLiteral(query, len, i, sb);
-            } else if (c == '#') {
-                sb.append(' ');
-                i = skipLineComment(query, len, i);
-            } else {
-                sb.append(c);
-                i++;
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Appends a block string ({@code """..."""}) or simple string ({@code "..."}) starting at
-     * {@code i} (which must point at the opening {@code "}) to {@code sb}.
-     * Returns the index of the first character after the closing quote(s).
-     */
-    private static int appendStringLiteral(final String query, final int len, int i, final StringBuilder sb) {
-        if (i + 2 < len && query.charAt(i + 1) == '"' && query.charAt(i + 2) == '"') {
-            return appendBlockString(query, len, i, sb);
-        }
-        return appendSimpleString(query, len, i, sb);
-    }
-
-    /** Copies a block string {@code """..."""} to {@code sb}, returns index after closing triple-quote. */
-    private static int appendBlockString(final String query, final int len, int i, final StringBuilder sb) {
-        sb.append("\"\"\"");
-        i += 3;
-        while (i < len && !(i + 2 < len && query.charAt(i) == '"'
-                && query.charAt(i + 1) == '"' && query.charAt(i + 2) == '"')) {
-            sb.append(query.charAt(i++));
-        }
-        if (i + 2 < len) {
-            sb.append("\"\"\"");
-            i += 3;
-        }
-        return i;
-    }
-
-    /** Copies a simple string {@code "..."} (with escape handling) to {@code sb}, returns index after closing quote. */
-    private static int appendSimpleString(final String query, final int len, int i, final StringBuilder sb) {
-        sb.append('"');
-        i++;
-        while (i < len && query.charAt(i) != '"') {
-            if (query.charAt(i) == '\\' && i + 1 < len) {
-                sb.append(query.charAt(i++));
-            }
-            sb.append(query.charAt(i++));
-        }
-        if (i < len) {
-            sb.append('"');
-            i++;
-        }
-        return i;
-    }
-
-    /** Advances past a line comment (from the {@code #} up to but not including the newline). */
-    private static int skipLineComment(final String query, final int len, int i) {
-        while (i < len && query.charAt(i) != '\n') {
-            i++;
-        }
-        return i;
-    }
-
-    /**
      * Returns {@code true} if the query contains a named fragment spread
-     * ({@code ...FragmentName} where {@code FragmentName} is not the {@code on} keyword).
-     * Inline fragments ({@code ... on TypeName { ... }}) are allowed.
+     * ({@code ...FragmentName}). Inline fragments ({@code ... on TypeName { ... }}) are allowed.
+     *
+     * <p>Package-private so the regression guards exercise the REAL production method. This
+     * String overload parses the document; {@link #checkAccess} uses the {@link Document}
+     * overload so a request is parsed exactly once.
+     *
+     * @throws graphql.parser.InvalidSyntaxException if the document cannot be parsed
      */
     static boolean containsNamedFragmentSpread(final String query) {
-        if (query == null || query.isBlank()) return false;
-        final String q = stripComments(query);
-        int i = 0;
-        final int len = q.length();
-        while (i < len) {
-            final int next = advancePastSpread(q, len, i);
-            if (next < 0) {
-                return true;  // named spread detected
+        if (query == null || query.isBlank()) {
+            return false;
+        }
+        return containsNamedFragmentSpread(Parser.parse(query));
+    }
+
+    /** AST form of {@link #containsNamedFragmentSpread(String)}. */
+    static boolean containsNamedFragmentSpread(final Document doc) {
+        for (final Definition<?> def : doc.getDefinitions()) {
+            if (def instanceof OperationDefinition
+                    && hasNamedSpread(((OperationDefinition) def).getSelectionSet())) {
+                return true;
             }
-            i = next;
+        }
+        return false;
+    }
+
+    private static boolean hasNamedSpread(final SelectionSet selectionSet) {
+        if (selectionSet == null) {
+            return false;
+        }
+        for (final Selection<?> selection : selectionSet.getSelections()) {
+            if (selection instanceof FragmentSpread) {
+                return true;
+            }
+            if (selection instanceof Field
+                    && hasNamedSpread(((Field) selection).getSelectionSet())) {
+                return true;
+            }
+            if (selection instanceof InlineFragment
+                    && hasNamedSpread(((InlineFragment) selection).getSelectionSet())) {
+                return true;
+            }
         }
         return false;
     }
 
     /**
-     * If position {@code i} starts a named fragment spread ({@code ...Name} where Name != "on"),
-     * returns {@code -1}. If it starts an inline fragment ({@code ... on}) or any other token,
-     * returns the next position to continue scanning from.
-     */
-    private static int advancePastSpread(final String q, final int len, final int i) {
-        if (i + 2 < len && q.charAt(i) == '.' && q.charAt(i + 1) == '.' && q.charAt(i + 2) == '.') {
-            int pos = i + 3;
-            while (pos < len && Character.isWhitespace(q.charAt(pos))) pos++;
-            if (pos < len && isIdentStart(q.charAt(pos))) {
-                final int nameStart = pos;
-                while (pos < len && isIdentChar(q.charAt(pos))) pos++;
-                final String name = q.substring(nameStart, pos);
-                if (!"on".equals(name)) {
-                    return -1;  // named spread found
-                }
-            }
-            return pos;
-        }
-        return i + 1;
-    }
-
-    /**
-     * Extracts all field paths up to {@code maxDepth} from a GraphQL query string.
-     * Segments are joined with dots: depth-3 path looks like "admin.jahia.shutdown".
-     * Handles aliases, arguments, directives, and inline fragments.
-     * Named fragment spreads are NOT expanded; {@link #containsNamedFragmentSpread(String)}
-     * must be called before this method when a whitelist is active.
+     * Extracts all field paths up to {@code maxDepth} from a GraphQL document.
+     * Segments are joined with dots: a depth-3 path looks like "admin.jahia.shutdown".
+     * Aliases resolve to the real field name, inline fragments contribute their selections to the
+     * enclosing prefix, and EVERY operation definition in the document is walked.
+     *
+     * <p>SEC-364: this used to be a hand-written scanner over the query string. Anything it could
+     * not walk yielded an empty set, which {@link #checkAccess} could not distinguish from "this
+     * document requests nothing I need to police" — so a document as ordinary as {@code query,{...}}
+     * (a comma is an ignored token in the GraphQL grammar) escaped the whitelist entirely. Parsing
+     * with the real grammar makes "cannot parse" an exception the caller must handle instead.
+     *
+     * @throws graphql.parser.InvalidSyntaxException if the document cannot be parsed
      */
     static Set<String> extractFieldPaths(final String query, final int maxDepth) {
         if (query == null || query.isBlank()) {
             return Collections.emptySet();
         }
-        final String q = stripComments(query);
-        final int len = q.length();
-        final int[] pos = {skipOperationHeader(q, len, skipWS(q, 0))};
-        if (pos[0] >= len || q.charAt(pos[0]) != '{') {
-            return Collections.emptySet();
-        }
+        return extractFieldPaths(Parser.parse(query), maxDepth);
+    }
+
+    /** AST form of {@link #extractFieldPaths(String, int)}. */
+    static Set<String> extractFieldPaths(final Document doc, final int maxDepth) {
         final Set<String> paths = new LinkedHashSet<>();
-        collectSelectionSet(q, len, pos, "", 0, maxDepth, paths);
+        for (final Definition<?> def : doc.getDefinitions()) {
+            if (def instanceof OperationDefinition) {
+                collectPaths(((OperationDefinition) def).getSelectionSet(), "", 0, maxDepth, paths);
+            }
+        }
         return paths;
     }
 
-    private static int skipOperationHeader(final String q, final int len, int pos) {
-        for (final String kw : List.of("subscription", "mutation", QUERY_ARG)) {
-            if (pos + kw.length() <= len
-                    && q.regionMatches(pos, kw, 0, kw.length())
-                    && (pos + kw.length() == len || !isIdentChar(q.charAt(pos + kw.length())))) {
-                return skipAfterKeyword(q, len, pos + kw.length());
+    private static void collectPaths(final SelectionSet selectionSet, final String prefix,
+            final int depth, final int maxDepth, final Set<String> paths) {
+        if (selectionSet == null) {
+            return;
+        }
+        for (final Selection<?> selection : selectionSet.getSelections()) {
+            if (selection instanceof Field) {
+                collectFieldPath((Field) selection, prefix, depth, maxDepth, paths);
+            } else if (selection instanceof InlineFragment) {
+                // An inline fragment is a type condition, not a field: its selections belong to the
+                // SAME path prefix and depth as the fragment's parent.
+                collectPaths(((InlineFragment) selection).getSelectionSet(), prefix, depth, maxDepth, paths);
             }
-        }
-        return pos;
-    }
-
-    private static int skipAfterKeyword(final String q, final int len, int pos) {
-        pos = skipWS(q, pos);
-        if (pos < len && isIdentStart(q.charAt(pos))) {
-            while (pos < len && isIdentChar(q.charAt(pos))) pos++;
-            pos = skipWS(q, pos);
-        }
-        if (pos < len && q.charAt(pos) == '(') {
-            pos = skipBalanced(q, pos, '(', ')');
-            pos = skipWS(q, pos);
-        }
-        return skipDirectives(q, len, pos);
-    }
-
-    private static int skipDirectives(final String q, final int len, int pos) {
-        while (pos < len && q.charAt(pos) == '@') {
-            while (pos < len && !Character.isWhitespace(q.charAt(pos))
-                    && q.charAt(pos) != '(' && q.charAt(pos) != '{') pos++;
-            pos = skipWS(q, pos);
-            if (pos < len && q.charAt(pos) == '(') {
-                pos = skipBalanced(q, pos, '(', ')');
-                pos = skipWS(q, pos);
-            }
-        }
-        return pos;
-    }
-
-    private static void collectSelectionSet(final String q, final int len, final int[] pos,
-            final String prefix, final int depth, final int maxDepth, final Set<String> paths) {
-        if (pos[0] >= len || q.charAt(pos[0]) != '{') return;
-        pos[0]++;
-        while (pos[0] < len) {
-            pos[0] = skipWS(q, pos[0]);
-            final char c = pos[0] < len ? q.charAt(pos[0]) : '}';
-            if (c == '}') { pos[0]++; break; }
-            if (c == '.' && pos[0] + 2 < len && q.charAt(pos[0] + 1) == '.' && q.charAt(pos[0] + 2) == '.') {
-                processFragmentSpread(q, len, pos, prefix, depth, maxDepth, paths);
-            } else if (isIdentStart(c)) {
-                collectField(q, len, pos, prefix, depth, maxDepth, paths);
-            } else {
-                pos[0]++;
-            }
+            // FragmentSpread is deliberately NOT expanded — checkAccess denies any document
+            // containing one before extraction runs (see containsNamedFragmentSpread).
         }
     }
 
-    private static void processFragmentSpread(final String q, final int len, final int[] pos,
-            final String prefix, final int depth, final int maxDepth, final Set<String> paths) {
-        pos[0] += 3;
-        pos[0] = skipWS(q, pos[0]);
-        final boolean isInline = pos[0] + 2 <= len
-                && q.regionMatches(pos[0], "on", 0, 2)
-                && (pos[0] + 2 >= len || !isIdentChar(q.charAt(pos[0] + 2)));
-        if (isInline) {
-            pos[0] += 2;
-            pos[0] = skipWS(q, pos[0]);
-        }
-        while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
-        pos[0] = skipWS(q, pos[0]);
-        pos[0] = skipFieldDirectives(q, len, pos[0]);
-        if (isInline && pos[0] < len && q.charAt(pos[0]) == '{') {
-            collectSelectionSet(q, len, pos, prefix, depth, maxDepth, paths);
-        }
-    }
-
-    private static void collectField(final String q, final int len, final int[] pos,
-            final String prefix, final int depth, final int maxDepth, final Set<String> paths) {
-        final int start = pos[0];
-        while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
-        String name = q.substring(start, pos[0]);
-        pos[0] = skipWS(q, pos[0]);
-        if (pos[0] < len && q.charAt(pos[0]) == ':') {
-            pos[0]++;
-            pos[0] = skipWS(q, pos[0]);
-            final int fStart = pos[0];
-            while (pos[0] < len && isIdentChar(q.charAt(pos[0]))) pos[0]++;
-            name = q.substring(fStart, pos[0]);
-            pos[0] = skipWS(q, pos[0]);
-        }
-        final String path = prefix.isEmpty() ? name : prefix + "." + name;
+    private static void collectFieldPath(final Field field, final String prefix,
+            final int depth, final int maxDepth, final Set<String> paths) {
+        // getName() is the real field name; an alias label never reaches the whitelist check.
+        final String path = prefix.isEmpty() ? field.getName() : prefix + "." + field.getName();
         paths.add(path);
-        if (pos[0] < len && q.charAt(pos[0]) == '(') {
-            pos[0] = skipBalanced(q, pos[0], '(', ')');
-            pos[0] = skipWS(q, pos[0]);
+        // Stop at maxDepth: a deeper path can only be covered by the same whitelist entry that
+        // already covers this one (see pathCoveredBy), so descending further decides nothing.
+        if (depth + 1 < maxDepth) {
+            collectPaths(field.getSelectionSet(), path, depth + 1, maxDepth, paths);
         }
-        pos[0] = skipFieldDirectives(q, len, pos[0]);
-        if (pos[0] < len && q.charAt(pos[0]) == '{') {
-            if (depth + 1 < maxDepth) {
-                collectSelectionSet(q, len, pos, path, depth + 1, maxDepth, paths);
-            } else {
-                pos[0] = skipBalanced(q, pos[0], '{', '}');
-            }
-        }
-    }
-
-    private static int skipFieldDirectives(final String q, final int len, int pos) {
-        while (pos < len && q.charAt(pos) == '@') {
-            while (pos < len && !Character.isWhitespace(q.charAt(pos))
-                    && q.charAt(pos) != '(' && q.charAt(pos) != '{' && q.charAt(pos) != '}') pos++;
-            pos = skipWS(q, pos);
-            if (pos < len && q.charAt(pos) == '(') {
-                pos = skipBalanced(q, pos, '(', ')');
-                pos = skipWS(q, pos);
-            }
-        }
-        return pos;
-    }
-
-    private static int skipWS(final String s, int i) {
-        while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
-        return i;
-    }
-
-    private static int skipBalanced(final String s, int i, final char open, final char close) {
-        int depth = 0;
-        while (i < s.length()) {
-            final char c = s.charAt(i++);
-            if (c == open) depth++;
-            else if (c == close && --depth == 0) return i;
-        }
-        return i;
-    }
-
-    private static boolean isIdentStart(final char c) {
-        return Character.isLetter(c) || c == '_';
-    }
-
-    private static boolean isIdentChar(final char c) {
-        return Character.isLetterOrDigit(c) || c == '_';
     }
 
     // Step 1: enumerate all type names + root type names — zero __Type.fields selections → always safe.

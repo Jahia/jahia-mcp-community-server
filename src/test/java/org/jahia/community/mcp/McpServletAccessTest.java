@@ -1,5 +1,6 @@
 package org.jahia.community.mcp;
 
+import graphql.parser.InvalidSyntaxException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -7,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Unit tests for McpServlet's security-critical static helpers:
@@ -26,7 +28,7 @@ class McpServletAccessTest {
         @Test
         @DisplayName("null query returns empty set")
         void null_query_returns_empty() {
-            assertThat(McpServlet.extractFieldPaths(null, 3)).isEmpty();
+            assertThat(McpServlet.extractFieldPaths((String) null, 3)).isEmpty();
         }
 
         @Test
@@ -119,18 +121,50 @@ class McpServletAccessTest {
             assertThat(paths).containsExactlyInAnyOrder("admin", "admin.jahia", "admin.jahia.isAlive");
         }
 
-        // U4 (unit) — the hand-written parser reads ONLY the first operation of a multi-operation
-        // document. This pins the latent gap: op B's fields are never collected, so the parser
-        // alone would under-check them. The e2e mitigation (graphql-java rejecting multi-op docs
-        // with no operationName) is what actually blocks op B today.
+        // SEC-364 — EVERY operation definition is walked, not just the first. This test previously
+        // pinned the opposite (op B's fields were never collected): back then op B was stopped only
+        // because executeGraphQL forwards no operationName, so graphql-java rejected the whole
+        // multi-op document. The gate now decides on op B directly rather than leaning on that.
         @Test
-        @DisplayName("multi-operation document: only the first operation's paths are extracted")
-        void multi_operation_only_first_op_parsed() {
+        @DisplayName("multi-operation document: every operation's paths are extracted")
+        void multi_operation_all_ops_parsed() {
             String q = "query A { currentUser { name } } query B { admin { jahia { isAlive } } }";
             Set<String> paths = McpServlet.extractFieldPaths(q, 3);
             assertThat(paths)
-                    .contains("currentUser")
-                    .doesNotContain("admin", "admin.jahia", "admin.jahia.isAlive");
+                    .contains("currentUser", "admin", "admin.jahia", "admin.jahia.isAlive");
+        }
+
+        // SEC-364 — commas are ignored tokens in the GraphQL grammar. The previous hand-written
+        // scanner stopped on the first one it met before the selection set and returned an empty
+        // path set, which checkAccess read as "nothing to police". They are now simply parsed.
+        @Test
+        @DisplayName("ignored tokens before the selection set do not empty the extracted paths")
+        void ignored_tokens_do_not_empty_paths() {
+            assertThat(McpServlet.extractFieldPaths("query,{ jcr { nodeByPath(path:\"/\") { name } } }", 2))
+                    .contains("jcr", "jcr.nodeByPath");
+            assertThat(McpServlet.extractFieldPaths(",query { jcr { nodeByPath(path:\"/\") { name } } }", 2))
+                    .contains("jcr", "jcr.nodeByPath");
+        }
+
+        // SEC-364 — a '(' inside a string argument used to unbalance skipBalanced()'s counter, which
+        // then ran to end-of-document and silently dropped every following sibling. The extracted set
+        // stayed NON-EMPTY and passed the whitelist, so "treat an empty set as deny" would have
+        // missed this entirely. Only real parsing closes it.
+        @Test
+        @DisplayName("unbalanced paren inside a string argument does not hide sibling fields")
+        void unbalanced_paren_in_string_arg_does_not_hide_siblings() {
+            String q = "{ jcr { nodeByPath(path: \"/x(\") { name } } admin { jahia { isAlive } } }";
+            Set<String> paths = McpServlet.extractFieldPaths(q, 2);
+            assertThat(paths).contains("jcr", "jcr.nodeByPath", "admin", "admin.jahia");
+        }
+
+        // SEC-364 regression guard — a document the parser rejects must raise, NOT return an empty
+        // set. The empty set is what checkAccess used to read as "permit".
+        @Test
+        @DisplayName("unparseable document raises rather than returning an empty set")
+        void unparseable_document_raises() {
+            assertThatThrownBy(() -> McpServlet.extractFieldPaths("{ jcr { ", 2))
+                    .isInstanceOf(InvalidSyntaxException.class);
         }
     }
 
@@ -145,7 +179,7 @@ class McpServletAccessTest {
         @Test
         @DisplayName("null returns false")
         void null_returns_false() {
-            assertThat(McpServlet.containsNamedFragmentSpread(null)).isFalse();
+            assertThat(McpServlet.containsNamedFragmentSpread((String) null)).isFalse();
         }
 
         @Test
