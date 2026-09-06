@@ -58,6 +58,8 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
     private static final String JAHIA_USER_KEY = "jahia.user";
     private static final String CLIENT_IP_KEY = "client.ip";
     private static final String MCP_ENDPOINT = "community-mcp";
+    // Audit-log identity used when a request carries no resolved JahiaUser.
+    private static final String ANONYMOUS_USER = "anonymous";
     private static final String QUERY_ARG = "query";
     private static final String VARIABLES_ARG = "variables";
     private static final McpJsonMapper JSON_MAPPER = new JacksonMcpJsonMapper(new ObjectMapper());
@@ -448,16 +450,11 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         return findFirstBlockedPath(paths, whitelist, user, clientIp);
     }
 
-    /** Audit-log identity for a caller: the user name, or "anonymous" when there is no user. */
-    private static String userNameOf(final JahiaUser user) {
-        return user != null ? user.getName() : "anonymous";
-    }
-
     /** Logs and returns a blocked result when a named fragment spread is detected. */
     private McpSchema.CallToolResult buildNamedFragmentBlockedResult(final JahiaUser user, final String clientIp) {
         LOGGER.warn("MCP operation blocked: named fragment spreads not permitted when "
                 + "whitelist is active, user='{}', ip='{}'",
-                userNameOf(user), clientIp);
+                user != null ? user.getName() : ANONYMOUS_USER, clientIp);
         return McpSchema.CallToolResult.builder()
                 .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: "
                         + "named fragment spreads are not permitted when a whitelist is active" + JSONRPC_ERROR_SUFFIX)
@@ -471,7 +468,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         // The parser message can quote document content back — keep it in the audit log only.
         LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed while a whitelist "
                 + "is active, user='{}', ip='{}', reason='{}'",
-                userNameOf(user), clientIp, ex.getMessage());
+                user != null ? user.getName() : ANONYMOUS_USER, clientIp, ex.getMessage());
         return McpSchema.CallToolResult.builder()
                 .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: "
                         + "the GraphQL document could not be parsed" + JSONRPC_ERROR_SUFFIX)
@@ -511,7 +508,7 @@ public class McpServlet extends HttpServlet implements McpStatelessServerTranspo
         for (final String path : paths) {
             if (!isPathAllowed(path, whitelist)) {
                 LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
-                        path, userNameOf(user), clientIp);
+                        path, user != null ? user.getName() : ANONYMOUS_USER, clientIp);
                 return McpSchema.CallToolResult.builder()
                         .addTextContent(JSONRPC_ERROR_PREFIX + "Operation not allowed: '"
                                 + path + "' is not in the whitelist" + JSONRPC_ERROR_SUFFIX)
