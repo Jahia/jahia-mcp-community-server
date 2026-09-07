@@ -83,31 +83,88 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         });
     });
 
-    // U4 (e2e mitigation) — a multi-operation document does not let the second (unchecked)
-    // operation run. checkAccess's field-path parser reads ONLY the first operation's selection
-    // set (op A: currentUser, whitelisted) and forwards the whole document, but executeGraphQL
-    // forwards no operationName. graphql-java therefore rejects the multi-op document WHOLESALE
-    // before executing anything — either at execution ("Must provide operation name if query
-    // contains multiple operations.") or, as here, at document validation (op B references the
-    // undefined field admin.jahia.isAlive). Both outcomes yield data: null with a populated
-    // errors array, proving NEITHER op A nor op B ran, so op B (admin, non-whitelisted) never
-    // reaches its resolver.
-    //
-    // The fail-closed surfaces as a GraphQL error INSIDE a non-error MCP envelope: the MCP isError
-    // flag tracks the HTTP status of the in-process dispatch (McpServlet line 332), and graphql-java
-    // returns these errors at HTTP 200, so result.isError is false. The guard therefore asserts on
-    // the real evidence that no operation executed (data === null + non-empty errors), NOT on isError.
-    // Regression guard for the latent first-op-only parser gap: if operationName forwarding is ever
-    // added so an operation could be selected and executed, op A's currentUser data (or op B's admin
-    // result/permission error) would appear and data would no longer be null — this test fails loudly.
-    it('rejects a multi-operation document so the second (unchecked) operation cannot run', () => {
+    // SEC-364 (was U4) — a multi-operation document is now refused by the GATE, on op B's own
+    // merits. Previously checkAccess read only op A's selection set and forwarded the whole
+    // document; op B survived solely because executeGraphQL forwards no operationName, so
+    // graphql-java rejected the document wholesale (data: null + errors, inside a NON-error MCP
+    // envelope). That was a load-bearing accident of the dispatch, not a decision by the gate.
+    // The assertion therefore moved from "no operation executed" to "the gate said no".
+    it('blocks the second operation of a multi-operation document', () => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
         executeGraphQL('query A { currentUser { name } } query B { admin { jahia { isAlive } } }')
             .then(response => {
-                const payload = JSON.parse(response.body.result.content[0].text);
-                // No operation executed: graphql-java rejected the multi-op document wholesale.
-                expect(payload.data, 'no operation executed').to.be.null;
-                expect(payload.errors, 'document rejected with errors').to.be.an('array').and.not.be.empty;
+                expect(response.body.result.isError).to.eq(true);
+                expect(response.body.result.content[0].text).to.include('not in the whitelist');
+                expect(response.body.result.content[0].text).to.include('admin');
             });
+    });
+
+    // ── SEC-364 / GHSA-9vrc-45qw-x759 ───────────────────────────────────────────────────────
+    // The gate treated a document its extractor could not walk as PERMITTED. Each arm below is
+    // valid GraphQL that the old hand-written scanner mis-handled, so the operation the whitelist
+    // had just refused executed and returned data.
+    //
+    // The three-arm shape is deliberate and mirrors the advisory's own proof: the SANITY arm shows
+    // the whitelist is loaded and permits what it should, the CONTROL arm shows it genuinely
+    // refuses, and only then does the ATTACK arm mean anything. Without the first two, a passing
+    // attack arm would be indistinguishable from a gate that blocks everything.
+
+    it('SEC-364 sanity — a whitelisted operation is permitted', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        executeGraphQL('query { currentUser { name } }')
+            .its('body.result.isError').should('eq', false);
+    });
+
+    it('SEC-364 control — the same operation is genuinely refused when not whitelisted', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        executeGraphQL('query { jcr { nodeByPath(path:"/") { name } } }').then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(response.body.result.content[0].text).to.include('not in the whitelist');
+        });
+    });
+
+    it('SEC-364 attack — one leading comma no longer escapes the whitelist', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        // A comma is an ignored token in the GraphQL grammar; the old skipWS() stopped dead on it,
+        // extractFieldPaths returned an empty set, and checkAccess read empty as "permit".
+        executeGraphQL('query,{ jcr { nodeByPath(path:"/") { name } } }').then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(response.body.result.content[0].text).to.include('not in the whitelist');
+        });
+    });
+
+    it('SEC-364 attack — a comma before the operation keyword is refused too', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        executeGraphQL(',query { jcr { nodeByPath(path:"/") { name } } }')
+            .its('body.result.isError').should('eq', true);
+    });
+
+    it('SEC-364 attack — an unbalanced paren in a string argument no longer hides a sibling', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['jcr.nodeByPath']}});
+        // This is the arm that "treat an empty path set as deny" would NOT have caught: the old
+        // scanner extracted {jcr, jcr.nodeByPath} — non-empty, and both whitelisted — because the
+        // '(' inside the path argument unbalanced skipBalanced()'s counter, which then ran to
+        // end-of-document and never saw the `admin` sibling.
+        executeGraphQL('{ jcr { nodeByPath(path: "/x(") { name } } admin { jahia { isAlive } } }')
+            .then(response => {
+                expect(response.body.result.isError).to.eq(true);
+                expect(response.body.result.content[0].text).to.include('admin');
+            });
+    });
+
+    it('SEC-364 fails closed on a document that cannot be parsed', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        executeGraphQL('{ jcr { ').then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(response.body.result.content[0].text).to.include('could not be parsed');
+        });
+    });
+
+    // False-positive guard: commas are ordinary GraphQL punctuation and must stay legal inside a
+    // selection set. A fix that refused them would break every client that formats queries that way.
+    it('SEC-364 still permits commas used as ordinary separators', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        executeGraphQL('{ currentUser { name, alias: name } }')
+            .its('body.result.isError').should('eq', false);
     });
 });
