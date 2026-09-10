@@ -87,7 +87,7 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
-            <version>3.25.3</version>
+            <version>3.27.7</version>
             <scope>test</scope>
         </dependency>
         <!-- Test-only SLF4J backend so audit-log assertions (F10) can attach a ListAppender.
