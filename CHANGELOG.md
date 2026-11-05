@@ -41,12 +41,16 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   repository error. All tools run through one template method, so none can skip the gate or the audit event.
 - **No credential forwarding.** The in-process GraphQL call carries no `Authorization` header. It runs as the
   bound caller, with JCR ACLs applied.
-- **Refused by design.** `mutation:communityMcp` (and everything under it) is always refused by the gate,
-  and `saveSettings` refuses it as an entry. The data plane cannot rewrite its own guard.
-- **Unparseable documents** are refused in every state (SEC-364). **Named fragment spreads** are refused while a
-  whitelist is active (SEC-2).
+- **Refused by design.** `mutation:communityMcp` and `mutation:admin.jahia.configuration` (each with everything
+  under it) are always refused by the gate, and `saveSettings` refuses entries for them. The data plane cannot
+  rewrite its own guard, or this module's configuration through the generic OSGi configuration mutation.
+- **Unparseable documents** are refused in every state (SEC-364). **Named fragment spreads** are refused in every
+  state, including the read-only default (SEC-2). Inline fragments are supported.
 - **Whole-document check.** Every operation in a document is checked, so a mutation cannot hide behind an
   allowed query.
+- **Intermediate mutation fields run.** A deeper mutation entry (for example `mutation:jcr.addNode.mutateProperty`)
+  also runs the mutation fields above it, because GraphQL cannot run the deeper field without them. Choose entries
+  accordingly and prefer leaf paths.
 - **Bounded introspection.** At most 25 types per call and 100,000 characters of output. Type names are passed as
   GraphQL variables, never formatted into the document.
 - **Bounded responses.** In-process GraphQL responses are capped at 5 MB.
@@ -75,9 +79,9 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   - The allow list is an accessible tree with arrow keys, Home and End, and Space or Enter to check an item.
   - Queries and mutations are separate groups, each with bulk actions.
   - Confirmation before clearing the list, clearing queries while mutations remain, and allowing all mutations.
-  - `mutation:communityMcp` is shown but locked.
+  - The never-allowed paths, `mutation:communityMcp` and `mutation:admin.jahia.configuration`, are shown but locked.
   - Entries that are unknown to the schema, or locked, are listed with a Remove action.
-  - The filter matches expanded nodes only.
+  - The filter matches all root operations and the fields already loaded.
   - An unsaved-changes indicator and a Discard action.
   - Persistent, dismissible status messages, and the server's error reason is shown on a failed save.
   - The UI targets WCAG 2.2 Level AAA.
@@ -92,6 +96,16 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   system session (the administrator-gated GraphQL operations and the module's seeding) writes skills.
 - **Build.** Built against `mcp-server` 0.5.0-SNAPSHOT. The `graphql-java-servlet` dependency is removed.
 
+### Upgrade notes
+
+- **Stale `.cfg` comments.** An installation upgraded from 1.x keeps its existing `org.jahia.community.mcp.cfg`
+  (the shipped file is a default configuration and is not overwritten). Its 1.x comment "If empty, all operations
+  are allowed" is stale. An empty whitelist is the read-only default: queries only. Unprefixed 1.x entries are
+  read as query-only, so add the `mutation:` entries you need.
+- **Clusters.** `saveSettings` writes the OSGi configuration on the node that served the request only. Set the
+  whitelist on every node, through the UI or `saveSettings` on each node, or through provisioning or the `.cfg`.
+
 ### Notes
 
 - The 2.0.0 build targets `mcp-server` 0.5.0-SNAPSHOT. Release only against a released `mcp-server` 0.5.x.
+- Until 2.0.0 is released, 1.x remains the supported line (see [SECURITY.md](SECURITY.md)).

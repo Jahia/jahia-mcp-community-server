@@ -2,10 +2,14 @@
 
 ## Supported Versions
 
+Until 2.0.0 is released, 1.x is the supported line and receives security fixes. From the release of
+2.0.0, 2.x is supported and 1.x is no longer supported. 2.x requires `mcp-server` 0.5.x; upgrade to it
+when it is released.
+
 | Version | Supported |
 |---|---|
-| 2.x | Yes |
-| 1.x | No. Upgrade to 2.x, which requires `mcp-server` 0.5.x |
+| 1.x | Yes, until 2.0.0 is released. No after that |
+| 2.x | Once 2.0.0 is released. It is not released yet |
 
 ## Reporting a Vulnerability
 
