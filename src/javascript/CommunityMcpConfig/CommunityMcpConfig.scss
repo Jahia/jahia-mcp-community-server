@@ -464,12 +464,13 @@ $target: 44px;           // WCAG 2.5.5 Target Size (Enhanced)
     font-weight: 600;
 }
 
-// ---------- Sticky action bar ----------
+// ---------- Action bar ----------
+// Deliberately NOT sticky: a sticky bar covers the focused control near the bottom of the
+// viewport, because browsers scroll focus into view without accounting for sticky boxes
+// (WCAG 2.4.12 Focus Not Obscured, Enhanced).
 
 .mcp_actions {
-    position: sticky;
-    bottom: 0;
-    z-index: 1;
+    margin-top: 16px;
     padding: 12px 0;
     background-color: #fff;
     border-top: 1px solid $border;

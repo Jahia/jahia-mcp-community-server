@@ -2,10 +2,13 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import styles from './CommunityMcpConfig.scss';
 
-// Sticky action bar: unsaved-changes indicator, Discard, Save and the save outcome.
-// Save is never `disabled` (focus would be lost when it flips, WCAG 2.4.3); a click without
-// changes reports "No changes to save" instead. Messages never time out (WCAG 2.2.3): success
-// and info stay until the next edit or until dismissed, errors until dismissed or retried.
+// Action bar at the end of the panel: unsaved-changes indicator, Discard, Save and the save
+// outcome. It is not sticky: a sticky bar would hide the focused control near the bottom of the
+// viewport (WCAG 2.4.12). Save is never `disabled` (focus would be lost when it flips, WCAG 2.4.3);
+// a click without changes reports "No changes to save" instead. Messages never time out
+// (WCAG 2.2.3): success and info stay until the next edit or until dismissed, errors until
+// dismissed or retried. Each status carries an `id`: its text is rendered in a new node, so the
+// same message shown twice is announced twice.
 export const SaveBar = ({isDirty, hasChangesToDiscard, isSaving, status, onSave, onDiscard, onDismiss, t}) => {
     const isError = status?.kind === 'error';
     const politeText = status && !isError ? status.message : '';
@@ -32,10 +35,10 @@ export const SaveBar = ({isDirty, hasChangesToDiscard, isSaving, status, onSave,
                         aria-atomic="true"
                         className={politeText ? `${styles.mcp_alert} ${styles[`mcp_alert--${status.kind}`]}` : styles.mcp_visuallyHidden}
                 >
-                    {isSaving ? t('label.saving') : politeText}
+                    {isSaving ? t('label.saving') : politeText && <span key={status.id}>{politeText}</span>}
                 </output>
                 {isError && (
-                    <div role="alert" className={`${styles.mcp_alert} ${styles['mcp_alert--error']}`}>
+                    <div key={status.id} role="alert" className={`${styles.mcp_alert} ${styles['mcp_alert--error']}`}>
                         <strong>{t('label.errorPrefix')}</strong> {status.message}
                         {status.detail && <> <span lang="en" className={styles.mcp_errorDetail}>{status.detail}</span></>}
                     </div>
@@ -54,7 +57,7 @@ SaveBar.propTypes = {
     isDirty: PropTypes.bool.isRequired,
     hasChangesToDiscard: PropTypes.bool.isRequired,
     isSaving: PropTypes.bool.isRequired,
-    status: PropTypes.shape({kind: PropTypes.string, message: PropTypes.string, detail: PropTypes.string}),
+    status: PropTypes.shape({id: PropTypes.number, kind: PropTypes.string, message: PropTypes.string, detail: PropTypes.string}),
     onSave: PropTypes.func.isRequired,
     onDiscard: PropTypes.func.isRequired,
     onDismiss: PropTypes.func.isRequired,
