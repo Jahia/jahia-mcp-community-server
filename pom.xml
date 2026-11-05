@@ -11,7 +11,7 @@
     <name>Jahia MCP Community Server</name>
     <version>2.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
-    <description>An extension of the Jahia mcp-server module that contributes generic GraphQL tools (whitelist-gated) and JCR-stored skills to its MCP endpoint, enabling AI assistants such as Claude to query and mutate Jahia content directly.</description>
+    <description>An extension of the Jahia mcp-server module that contributes administrator-only GraphQL tools (read-only by default, mutations and other operations gated by a whitelist) and JCR-stored skills to its MCP endpoint, so AI assistants such as Claude can reach Jahia GraphQL operations when an administrator allows them.</description>
 
     <scm>
         <connection>scm:git:git@github.com:Jahia/jahia-mcp-community-server.git</connection>
