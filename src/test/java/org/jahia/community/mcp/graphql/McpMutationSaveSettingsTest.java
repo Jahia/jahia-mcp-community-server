@@ -52,7 +52,9 @@ class McpMutationSaveSettingsTest {
     void rejected_entry_surfaces_reason() throws IOException {
         doThrow(new IllegalArgumentException("Malformed whitelist entry 'x y'")).when(config).saveWhitelist(List.of("x y"));
 
-        assertThatThrownBy(() -> new McpMutation().saveSettings(List.of("x y")))
+        final McpMutation mutation = new McpMutation();
+        final List<String> entries = List.of("x y");
+        assertThatThrownBy(() -> mutation.saveSettings(entries))
                 .isInstanceOf(DataFetchingException.class)
                 .hasMessageContaining("Malformed whitelist entry 'x y'");
     }
@@ -62,7 +64,9 @@ class McpMutationSaveSettingsTest {
     void storage_failure_is_generic() throws IOException {
         doThrow(new IOException("/secret/path disk full")).when(config).saveWhitelist(List.of("query:x"));
 
-        assertThatThrownBy(() -> new McpMutation().saveSettings(List.of("query:x")))
+        final McpMutation mutation = new McpMutation();
+        final List<String> entries = List.of("query:x");
+        assertThatThrownBy(() -> mutation.saveSettings(entries))
                 .isInstanceOf(DataFetchingException.class)
                 .hasMessageContaining("could not be stored")
                 .hasMessageNotContaining("/secret/path");
@@ -73,7 +77,9 @@ class McpMutationSaveSettingsTest {
     void config_service_unavailable() {
         bundleUtils.when(() -> BundleUtils.getOsgiService(McpConfigService.class, null)).thenReturn(null);
 
-        assertThatThrownBy(() -> new McpMutation().saveSettings(List.of("query:x")))
+        final McpMutation mutation = new McpMutation();
+        final List<String> entries = List.of("query:x");
+        assertThatThrownBy(() -> mutation.saveSettings(entries))
                 .isInstanceOf(DataFetchingException.class)
                 .hasMessageContaining("not available");
     }

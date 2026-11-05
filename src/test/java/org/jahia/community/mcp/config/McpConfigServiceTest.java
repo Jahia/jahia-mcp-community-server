@@ -191,7 +191,9 @@ class McpConfigServiceTest {
     @Test
     @DisplayName("a malformed entry is rejected with a message naming it, and nothing is persisted")
     void malformed_entry_rejected() throws IOException {
-        assertThatThrownBy(() -> service().saveWhitelist(List.of("query:ok", "query:not ok")))
+        final McpConfigService service = service();
+        final List<String> entries = List.of("query:ok", "query:not ok");
+        assertThatThrownBy(() -> service.saveWhitelist(entries))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("'query:not ok'");
 
@@ -203,10 +205,13 @@ class McpConfigServiceTest {
     void other_invalid_inputs_rejected() throws IOException {
         McpConfigService service = service();
 
-        assertThatThrownBy(() -> service.saveWhitelist(List.of("query:jcr", "subscription:x")))
+        final List<String> subscription = List.of("query:jcr", "subscription:x");
+        final List<String> blank = List.of(" ");
+        final List<String> withNull = java.util.Arrays.asList("query:a", null);
+        assertThatThrownBy(() -> service.saveWhitelist(subscription))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("subscription:x");
-        assertThatThrownBy(() -> service.saveWhitelist(List.of(" "))).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.saveWhitelist(java.util.Arrays.asList("query:a", null)))
+        assertThatThrownBy(() -> service.saveWhitelist(blank)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.saveWhitelist(withNull))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("null");
         assertThatThrownBy(() -> service.saveWhitelist(null)).isInstanceOf(IllegalArgumentException.class);
         verify(configAdmin, never()).getConfiguration(any(), isNull());
@@ -224,7 +229,9 @@ class McpConfigServiceTest {
     @Test
     @DisplayName("mutation:communityMcp entries are refused: the gate would always deny them")
     void never_allowed_entry_refused() throws IOException {
-        assertThatThrownBy(() -> service().saveWhitelist(List.of("mutation:communityMcp.saveSkill")))
+        final McpConfigService service = service();
+        final List<String> entries = List.of("mutation:communityMcp.saveSkill");
+        assertThatThrownBy(() -> service.saveWhitelist(entries))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("can never be run");
 

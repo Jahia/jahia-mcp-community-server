@@ -116,7 +116,8 @@ class McpGraphQLTest {
     void settings_missing_service_is_an_error() {
         bundleUtils.when(() -> BundleUtils.getOsgiService(McpConfigService.class, null)).thenReturn(null);
 
-        assertThatThrownBy(() -> new McpQuery().getSettings())
+        final McpQuery query = new McpQuery();
+        assertThatThrownBy(query::getSettings)
                 .isInstanceOf(DataFetchingException.class).hasMessageContaining("not available");
     }
 
@@ -140,7 +141,8 @@ class McpGraphQLTest {
     void skills_missing_service_is_an_error() {
         bundleUtils.when(() -> BundleUtils.getOsgiService(McpSkillService.class, null)).thenReturn(null);
 
-        assertThatThrownBy(() -> new McpQuery().getSkills()).isInstanceOf(DataFetchingException.class);
+        final McpQuery query = new McpQuery();
+        assertThatThrownBy(query::getSkills).isInstanceOf(DataFetchingException.class);
     }
 
     // ── mutations ─────────────────────────────────────────────────────────────
@@ -182,7 +184,9 @@ class McpGraphQLTest {
     void save_settings_missing_service() throws Exception {
         bundleUtils.when(() -> BundleUtils.getOsgiService(McpConfigService.class, null)).thenReturn(null);
 
-        assertThatThrownBy(() -> new McpMutation().saveSettings(List.of("query:x"))).isInstanceOf(DataFetchingException.class);
+        final McpMutation mutation = new McpMutation();
+        final List<String> entries = List.of("query:x");
+        assertThatThrownBy(() -> mutation.saveSettings(entries)).isInstanceOf(DataFetchingException.class);
         verify(config, never()).saveWhitelist(List.of("query:x"));
     }
 }

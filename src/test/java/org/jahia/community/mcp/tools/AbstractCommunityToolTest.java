@@ -48,7 +48,7 @@ class AbstractCommunityToolTest {
     }
 
     @Test
-    void should_block_non_administrators_before_doExecute_and_audit_the_denial() throws Exception {
+    void should_block_non_administrators_before_doExecute_and_audit_the_denial() {
         final Probe tool = new Probe("community.skill.list");
         final ToolContextFixture f = ToolContextFixture.nonAdministrator();
 

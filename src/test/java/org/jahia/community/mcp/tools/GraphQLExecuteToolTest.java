@@ -79,7 +79,7 @@ class GraphQLExecuteToolTest {
     @DisplayName("whitelist denial → forbidden error carrying the gate's reason, GraphQL not called")
     void whitelist_denial() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
-        when(gate.check(eq("{ admin { jahia } }"), eq("root"), eq("10.0.0.7")))
+        when(gate.check("{ admin { jahia } }", "root", "10.0.0.7"))
                 .thenReturn(Optional.of("Operation not allowed: 'admin' is not in the whitelist"));
 
         ToolResult result = tool.execute(input("{ admin { jahia } }"), f.ctx);

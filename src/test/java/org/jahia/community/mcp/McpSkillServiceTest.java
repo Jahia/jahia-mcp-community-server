@@ -179,7 +179,7 @@ class McpSkillServiceTest {
         assertThat(container).isNotNull();
         verify(container).setAclInheritanceBreak(true);
         // Same type as 1.x created, so an upgraded install needs no migration of the container.
-        assertThat(jcr.types.get(ROOT)).isEqualTo(CONTENT_LIST);
+        assertThat(jcr.types).containsEntry(ROOT, CONTENT_LIST);
         verify(jcr.session, org.mockito.Mockito.atLeastOnce()).save();
     }
 
@@ -210,8 +210,9 @@ class McpSkillServiceTest {
         assertThat(jcr.aclBreak).containsEntry(ROOT, true);
         verify(container, never()).addNode(anyString(), anyString());
         verify(legacyFolder).addNode("new-skill", "mcp:skill");
-        assertThat(jcr.types.get(ROOT)).isEqualTo(CONTENT_LIST);
-        assertThat(jcr.types.get(ROOT + "/default")).isEqualTo(CONTENT_LIST);
+        assertThat(jcr.types)
+                .containsEntry(ROOT, CONTENT_LIST)
+                .containsEntry(ROOT + "/default", CONTENT_LIST);
     }
 
     @Test
@@ -243,7 +244,7 @@ class McpSkillServiceTest {
         service.activate(bundleWith(Collections.enumeration(List.of(fresh, plain, existing))));
 
         final JCRNodeWrapper hello = jcr.nodes.get(ROOT + "/default/hello");
-        assertThat(jcr.types.get(ROOT + "/default")).isEqualTo(CONTENT_LIST);
+        assertThat(jcr.types).containsEntry(ROOT + "/default", CONTENT_LIST);
         verify(hello).setProperty("jcr:title", "Hello");
         verify(hello).setProperty("mcp:description", "Says hi");
         verify(hello).setProperty("mcp:content", "Line one\nLine two");
@@ -370,7 +371,7 @@ class McpSkillServiceTest {
         assertThat(service.saveSkill("my-skill", "My", "Does things", "# Body")).isTrue();
 
         final JCRNodeWrapper node = jcr.nodes.get(ROOT + "/my-skill");
-        assertThat(jcr.types.get(ROOT + "/my-skill")).isEqualTo("mcp:skill");
+        assertThat(jcr.types).containsEntry(ROOT + "/my-skill", "mcp:skill");
         verify(node).setProperty("jcr:title", "My");
         verify(node).setProperty("mcp:description", "Does things");
         verify(node).setProperty("mcp:content", "# Body");
@@ -384,9 +385,10 @@ class McpSkillServiceTest {
 
         assertThat(service.saveSkill("team/sub/my-skill", null, null, "# Body")).isTrue();
 
-        assertThat(jcr.types.get(ROOT + "/team")).isEqualTo(CONTENT_LIST);
-        assertThat(jcr.types.get(ROOT + "/team/sub")).isEqualTo(CONTENT_LIST);
-        assertThat(jcr.types.get(ROOT + "/team/sub/my-skill")).isEqualTo("mcp:skill");
+        assertThat(jcr.types)
+                .containsEntry(ROOT + "/team", CONTENT_LIST)
+                .containsEntry(ROOT + "/team/sub", CONTENT_LIST)
+                .containsEntry(ROOT + "/team/sub/my-skill", "mcp:skill");
         final JCRNodeWrapper node = jcr.nodes.get(ROOT + "/team/sub/my-skill");
         verify(node, never()).setProperty(eq("jcr:title"), anyString());
         verify(node, never()).setProperty(eq("mcp:description"), anyString());

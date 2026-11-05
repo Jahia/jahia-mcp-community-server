@@ -177,7 +177,8 @@ class InternalGraphQLClientTest {
                 }
             };
 
-            assertThatThrownBy(() -> clientFor(servlet).execute(caller.ctx, "{ x }", null)).isInstanceOf(IOException.class);
+            final InternalGraphQLClient client = clientFor(servlet);
+            assertThatThrownBy(() -> client.execute(caller.ctx, "{ x }", null)).isInstanceOf(IOException.class);
 
             org.mockito.Mockito.verify(caller.sessionFactory, org.mockito.Mockito.times(2)).setCurrentUser(caller.user);
         }
@@ -196,7 +197,8 @@ class InternalGraphQLClientTest {
                 }
             };
 
-            assertThatThrownBy(() -> clientFor(servlet).execute(caller.ctx, "{ x }", null))
+            final InternalGraphQLClient client = clientFor(servlet);
+            assertThatThrownBy(() -> client.execute(caller.ctx, "{ x }", null))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(called.get()).isFalse();
             org.mockito.Mockito.verify(caller.sessionFactory, org.mockito.Mockito.never())
