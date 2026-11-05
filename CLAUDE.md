@@ -122,13 +122,17 @@ state (`JCRSessionFactory` current user, locale) and cleans up after the call.
   `SkillEntry.name` is the JCR node name and is not a key.
 - Names: `SKILL_NAME_PATTERN` (segments of `[A-Za-z0-9_-]` separated by single `/`), no empty, `.` or `..`
   segments, then `assertDescendant` on the resolved path.
+- `saveSkill` and `deleteSkill` (GraphQL) return `true` or throw a client-safe `DataFetchingException`
+  (invalid name, content over `MAX_CONTENT_CHARS` = 200,000, unknown skill, folder or non-skill node,
+  repository failure). They never return `false` and never echo the key.
 - `saveSkill` creates missing intermediate `jnt:contentList` folders. A segment that is already a skill
   node cannot become a folder. An existing node must be `mcp:skill`, otherwise the call is refused.
 - Reads, writes and seeding run in a system session (`doExecuteWithSystemSession`). The container
   `mcp-skills` has its ACL inheritance broken, so no ordinary role can write it through generic paths.
   Only the admin-gated GraphQL operations and the module's own seeding write skills. `ensureContainer` runs
   on every activation and breaks the inheritance of an existing (1.x) container too. It also removes the local
-  role grants (ACL entries) on the container and every node below it (1.x upgrade hardening); it is idempotent.
+  role grants (ACL entries) on the container and every node below it (`purgeLocalGrants`, 1.x upgrade hardening,
+  activation only); it is idempotent.
   It never changes skill content: 1.x skills must be reviewed by an administrator (README upgrade notes).
 - Listing uses JCR-SQL2 `ISDESCENDANTNODE` under the skills root.
 - The `mcp:` CND prefix is generic. It is kept for compatibility (ARCH-18 deferred); a rename is a

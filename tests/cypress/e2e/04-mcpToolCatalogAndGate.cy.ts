@@ -1,7 +1,7 @@
 import {createUser, deleteUser} from '@jahia/cypress';
 import {
     MCP_URL, TOOL, callTool, callToolAs, createApiToken, deleteApiToken, deleteSkill, expectWhitelistUnchanged, getSkills, graphqlAs,
-    listTools, saveSkill, setWhitelist, toolPayload
+    listTools, removeSkill, saveSkill, setWhitelist, toolPayload
 } from '../support/mcp';
 
 // The community module contributes its tools to mcp-server's /modules/mcp endpoint. mcp-server
@@ -21,11 +21,11 @@ describe('MCP Community tools — catalog and administrator gate', () => {
         });
         createUser(EDITOR, EDITOR_PASSWORD);
         setWhitelist(['query:currentUser']);
-        deleteSkill(PROBE_SKILL);
+        removeSkill(PROBE_SKILL);
     });
 
     after(() => {
-        deleteSkill(PROBE_SKILL);
+        removeSkill(PROBE_SKILL);
         setWhitelist([]);
         deleteUser(EDITOR);
         deleteApiToken(TOKEN_NAME);

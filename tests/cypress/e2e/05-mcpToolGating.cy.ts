@@ -1,4 +1,4 @@
-import {createApiToken, deleteApiToken, callTool as callToolRaw, deleteSkill, saveSkill, setWhitelist} from '../support/mcp';
+import {createApiToken, deleteApiToken, callTool as callToolRaw, removeSkill, saveSkill, setWhitelist} from '../support/mcp';
 
 describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
     const TOKEN_NAME = 'mcp-cypress-gating-token';
@@ -21,7 +21,7 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
     });
 
     after(() => {
-        deleteSkill(GATING_SKILL);
+        removeSkill(GATING_SKILL);
         setWhitelist([]);
         deleteApiToken(TOKEN_NAME);
     });

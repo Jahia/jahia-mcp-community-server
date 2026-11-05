@@ -152,8 +152,30 @@ export const deleteApiToken = (name: string) => {
 export const saveSkill = (name: string, content: string, mcpName = '', description = '') =>
     cy.apollo({mutation: saveSkillDoc, variables: {name, mcpName, description, content}});
 
-/** Delete a skill as the logged-in administrator (false when it does not exist). */
+/** Delete a skill as the logged-in administrator; a refusal (for example no such skill) fails the test. */
 export const deleteSkill = (name: string) => cy.apollo({mutation: deleteSkillDoc, variables: {name}});
+
+/** Delete a skill if it exists, for cleanup: a refusal (no such skill) is ignored. */
+export const removeSkill = (name: string) =>
+    cy.apollo({mutation: deleteSkillDoc, variables: {name}, errorPolicy: 'all'});
+
+/** Assert that a skill mutation was refused with a GraphQL error whose message includes `expected`. */
+const expectRefused = (field: 'saveSkill' | 'deleteSkill', expected: string) =>
+    (result: {data?: {communityMcp?: Record<string, unknown> | null} | null; errors?: readonly {message: string}[]}) => {
+        expect(result.errors, `GraphQL errors of ${field}`).to.have.length.greaterThan(0);
+        expect(result.errors[0].message).to.include(expected);
+        expect(result.data?.communityMcp?.[field] ?? null, `${field} returns no value`).to.eq(null);
+    };
+
+/** Call saveSkill and assert it is refused with a GraphQL error whose message includes `expected`. */
+export const saveSkillRefused = (name: string, content: string, expected: string) =>
+    cy.apollo({mutation: saveSkillDoc, variables: {name, mcpName: '', description: '', content}, errorPolicy: 'all'})
+        .then(expectRefused('saveSkill', expected));
+
+/** Call deleteSkill and assert it is refused with a GraphQL error whose message includes `expected`. */
+export const deleteSkillRefused = (name: string, expected: string) =>
+    cy.apollo({mutation: deleteSkillDoc, variables: {name}, errorPolicy: 'all'})
+        .then(expectRefused('deleteSkill', expected));
 
 /** The skills as the logged-in administrator sees them. */
 export const getSkills = () => cy.apollo({query: getSkillsDoc});

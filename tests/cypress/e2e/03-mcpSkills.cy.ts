@@ -1,5 +1,8 @@
 import {DocumentNode} from 'graphql';
-import {TOOL, callTool, createApiToken, deleteApiToken, deleteSkill, getSkills, saveSkill, toolPayload, toolText} from '../support/mcp';
+import {
+    TOOL, callTool, createApiToken, deleteApiToken, deleteSkill, deleteSkillRefused, getSkills, removeSkill, saveSkill,
+    saveSkillRefused, toolPayload, toolText
+} from '../support/mcp';
 
 describe('MCP Server — Skills', () => {
     const TOKEN_NAME = 'mcp-cypress-skills-token';
@@ -35,11 +38,18 @@ describe('MCP Server — Skills', () => {
     };
 
     const cleanup = () => {
-        deleteSkill(NESTED_SKILL);
+        removeSkill(NESTED_SKILL);
         removeNestedFolder();
-        deleteSkill(TEST_SKILL);
-        deleteSkill(OWN_SKILL);
+        removeSkill(TEST_SKILL);
+        removeSkill(OWN_SKILL);
     };
+
+    // Client-safe messages of the GraphQL errors that saveSkill and deleteSkill raise (McpMutation).
+    const NOT_DELETED = 'The skill was not deleted';
+    const INVALID_NAME = 'Invalid skill name';
+    const TOO_LONG = 'The skill content is too long';
+    const NOT_SAVED = 'The skill could not be saved';
+    const MAX_CONTENT_CHARS = 200000;
 
     before(() => {
         cy.login();
@@ -100,8 +110,17 @@ describe('MCP Server — Skills', () => {
         });
     });
 
-    it('deleteSkill returns false for a non-existent skill', () => {
-        deleteSkill('does-not-exist').its('data.communityMcp.deleteSkill').should('eq', false);
+    it('deleteSkill fails with a GraphQL error for a non-existent skill', () => {
+        deleteSkillRefused('does-not-exist', NOT_DELETED);
+    });
+
+    it('saveSkill accepts a body of the maximum length and refuses a longer one with a GraphQL error', () => {
+        saveSkill(TEST_SKILL, 'x'.repeat(MAX_CONTENT_CHARS)).its('data.communityMcp.saveSkill').should('eq', true);
+        saveSkillRefused(TEST_SKILL, 'y'.repeat(MAX_CONTENT_CHARS + 1), TOO_LONG);
+        getSkills().then(result => {
+            const skill = result.data.communityMcp.skills.find((s: {name: string}) => s.name === TEST_SKILL);
+            expect(skill.content, 'the refused body is not stored').to.eq('x'.repeat(MAX_CONTENT_CHARS));
+        });
     });
 
     it('stores skills in jnt:contentList folders, as 1.x did, with a type hidden from content pickers', () => {
@@ -134,7 +153,10 @@ describe('MCP Server — Skills', () => {
             expect(skillNames(result.data.communityMcp.skills)).not.to.include(NESTED_SKILL);
         });
         // The deleteSkill mutation never removes a folder: the folder stays until it is removed as root.
-        deleteSkill(NESTED_FOLDER).its('data.communityMcp.deleteSkill').should('eq', false);
+        deleteSkillRefused(NESTED_FOLDER, NOT_DELETED);
+        skillsRootChildren(NESTED_FOLDER).should('deep.equal', [NESTED_FOLDER]);
+        // A folder cannot be overwritten by a skill of the same name either.
+        saveSkillRefused(NESTED_FOLDER, 'must not replace the folder', NOT_SAVED);
         skillsRootChildren(NESTED_FOLDER).should('deep.equal', [NESTED_FOLDER]);
     });
 
@@ -142,8 +164,8 @@ describe('MCP Server — Skills', () => {
 
     ['../escape', 'a/../b', '/leading', 'trailing/', 'a//b', './x', '..', 'a b', 'a\\b'].forEach(name => {
         it(`refuses the unsafe skill name '${name}' through saveSkill, deleteSkill and community.skill.get`, () => {
-            saveSkill(name, 'must not be stored').its('data.communityMcp.saveSkill').should('eq', false);
-            deleteSkill(name).its('data.communityMcp.deleteSkill').should('eq', false);
+            saveSkillRefused(name, 'must not be stored', INVALID_NAME);
+            deleteSkillRefused(name, INVALID_NAME);
             callTool(apiToken, TOOL.getSkill, {name}).then(response => {
                 expect(response.body.result.isError).to.eq(true);
                 expect(toolText(response)).not.to.include(OWN_CONTENT);

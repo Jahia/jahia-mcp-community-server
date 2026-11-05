@@ -244,7 +244,12 @@ Rules for `saveSkill` and `deleteSkill`:
   empty segments and `.` or `..` are refused.
 - Missing intermediate folders are created. A segment that is already a skill cannot become a folder.
 - An existing node at the key must be an `mcp:skill` node. Anything else is refused.
-- A refused call returns `false`; the reason is written to the server log.
+- `content` holds at most 200,000 characters.
+- Both return `true` on success. A refused call fails with a GraphQL error (in the `errors` array, with a
+  `null` result) whose message gives the reason: `Invalid skill name: …`, `The skill content is too long: …`,
+  `The skill could not be saved: …` (a folder or another node uses the key, or the repository failed) or
+  `The skill was not deleted: …` (no skill with that key). The key is never echoed back; details are in
+  the server log.
 
 ### Adding a bundled default skill
 
@@ -471,7 +476,7 @@ through `communityMcp { saveSettings }`.
 |---|---|---|
 | `The community tools are restricted to server administrators.` (`forbidden`) | The caller does not hold `admin` on the repository root | Use an administrator's token, or use the built-in `mcp-server` tools |
 | `Operation not allowed: mutations require an explicit mutation:<path> whitelist entry …` | Read-only default: the whitelist is empty and the call is a mutation | Add the mutation as `mutation:<path>` in Administration → MCP Server, or use a query |
-| A denial of a query under `admin` that names `query:admin` | Read-only default: the whitelist is empty, and the `admin` query namespace is not part of it | Add an explicit entry, for example `query:admin.jahia.isAlive`, or `query:admin` for the whole namespace |
+| `Operation not allowed: queries under 'admin' require an explicit query:admin<.path> whitelist entry …; '<path>' is not allowed` | Read-only default: the whitelist is empty, and the `admin` query namespace is not part of it | Add an explicit entry, for example `query:admin.jahia.isAlive`, or `query:admin` for the whole namespace |
 | `Operation not allowed: '<path>' is not in the whitelist` | The operation is not covered by an entry | Add an exact `query:<path>` or `mutation:<path>` entry |
 | Every query refused after adding one `mutation:` entry | The list is no longer empty, so the read-only default no longer applies: only listed operations run | Add `query:` entries for the queries you need |
 | A denial saying the operation can never be run through `community.graphql.execute` | The operation is a never-allowed path: `mutation:communityMcp` or `mutation:admin.jahia.configuration`, or anything under them | Not allowed; by design. Change the settings in the UI, not through the MCP tool |
@@ -486,7 +491,10 @@ through `communityMcp { saveSettings }`.
 | `The MCP configuration service is not available: check that the org.jahia.community.mcp configuration exists` | The `org.jahia.community.mcp` configuration is missing. The gated tool and the settings API are disabled, and the UI cannot save | Restore `org.jahia.community.mcp.cfg` in `karaf/etc` (or re-deploy the bundle). The UI works again once the configuration exists |
 | `community.graphql.execute` missing from `tools/list` | The whitelist configuration is missing, or the GraphQL servlet is not available | Restore the configuration; check that `graphql-dxm-provider` is started |
 | `Community MCP caller identity is not bound … denying` (WARN) | The caller is not bound on the thread, or the bound user differs from the request user. Usually a version mismatch with `mcp-server` | Use `mcp-server` 0.5.x |
-| `saveSkill` returns `false` | Name is invalid, a segment is an existing skill, or the key holds a non-skill node | Check the name rules and the server log |
+| `Invalid skill name: …` (GraphQL error of `saveSkill` or `deleteSkill`) | The key breaks the name rules | Use `[A-Za-z0-9_-]` segments separated by single `/` |
+| `The skill content is too long: …` | `content` exceeds 200,000 characters | Split the skill |
+| `The skill could not be saved: …` | A segment is an existing skill, the key holds a folder or another non-skill node, or the repository failed | Choose another key; check the server log |
+| `The skill was not deleted: …` | No skill has that key, or the key names a folder | Use the `name` returned by `skills` or `community.skill.list` |
 | `Skill '…' not found.` (`not_found`) | Wrong key | Use the `name` returned by `community.skill.list` |
 | Edit to a bundled `.md` file has no effect | Default skills are seeded only when absent | Update with `saveSkill`, or delete the node and restart the module |
 | A deleted default skill came back | Default skills are re-seeded on module activation | Delete it again after the restart, or remove the bundled file |

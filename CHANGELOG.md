@@ -30,6 +30,9 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
 - **Skill key.** `skills { name }` and `community.skill.list` return the path relative to the skills root
   (for example `default/hello-jahia`), the same key that `saveSkill`, `deleteSkill` and
   `community.skill.get` accept. Before, the name was the bare node name.
+- **Skill mutations fail with GraphQL errors.** `saveSkill` and `deleteSkill` no longer return `false` on a
+  refusal (invalid key, unknown skill, a key that holds a folder or another node, content over 200,000
+  characters). They fail with a GraphQL error whose message gives the reason, and return `true` on success.
 - **Removed.** The `GET /modules/community-mcp` health check, the 2 MB request cap of the 1.x endpoint, and
   the `community-mcp` API scope.
 - **Dependencies.** Requires `mcp-server` 0.5.x (`[0.5,0.6)`) and Declarative Services 1.4 (Felix SCR 2.1 or later).
