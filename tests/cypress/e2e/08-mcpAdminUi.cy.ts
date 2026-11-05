@@ -20,46 +20,63 @@ describe('MCP Server — Admin panel smoke test', () => {
         setWhitelist([]);
     });
 
+    // Selectors are ids, roles, ARIA state and data attributes: no CSS-module class (hashed at build
+    // time) and no localized text, so the spec runs under any admin language.
+    const treeItem = (path: string) => cy.get(`[role="treeitem"][data-path="${path}"]`, {timeout: 60000}).first();
+    // The visible row is the mouse target; its label (aria-labelledby) sits inside it, so a click on
+    // the label reaches the row's click handler as a user's click would.
+    const clickRow = (path: string) => treeItem(path).invoke('attr', 'aria-labelledby')
+        .then(labelId => cy.get(`[id="${labelId}"]`).click());
+    const saveBar = () => cy.get('#mcp-save').closest('[role="region"]');
+
     it('loads at the admin route and shows the Queries and Mutations groups', () => {
-        cy.get('#mcp-title', {timeout: 60000}).should('be.visible').and('contain.text', 'MCP Server');
-        cy.get('#mcp-group-queries', {timeout: 60000}).should('contain.text', 'Queries');
-        cy.get('#mcp-group-mutations').should('contain.text', 'Mutations');
+        cy.get('#mcp-title', {timeout: 60000}).should('be.visible').and('not.be.empty');
+        cy.get('section[aria-labelledby="mcp-group-queries"]', {timeout: 60000}).find('[role="tree"]').should('exist');
+        cy.get('section[aria-labelledby="mcp-group-mutations"]').find('[role="tree"]').should('exist');
         cy.get('[role="tree"]').should('have.length.at.least', 2);
     });
 
     it('persists a checked entry when saved', () => {
-        cy.get(`[role="treeitem"][data-path="${ENTRY}"]`, {timeout: 60000}).first().as('item');
-        cy.get('@item').find('[class*="mcp_treeRow"]').first().click();
-        cy.get('@item').should('have.attr', 'aria-checked', 'true');
+        clickRow(ENTRY);
+        treeItem(ENTRY).should('have.attr', 'aria-checked', 'true');
         cy.get('#mcp-save').click();
-        cy.contains('Settings saved successfully.', {timeout: 30000}).should('be.visible');
+        // The save outcome is announced in the polite <output>, and no error alert is shown.
+        saveBar().find('output', {timeout: 30000}).should('not.be.empty');
+        saveBar().find('[role="alert"]').should('not.exist');
         // The server applies the saved configuration asynchronously: wait for it before reloading.
         waitForWhitelist([ENTRY]);
         // ...and the panel shows it after a reload.
         cy.reload();
-        cy.get(`[role="treeitem"][data-path="${ENTRY}"]`, {timeout: 60000}).first()
-            .should('have.attr', 'aria-checked', 'true');
+        treeItem(ENTRY).should('have.attr', 'aria-checked', 'true');
     });
 
     // The admin.jahia.configuration mutation could rewrite this module's own configuration: the tree shows it,
     // locked, under Mutations > admin > jahia, and checking it changes nothing.
     it('shows mutation:admin.jahia.configuration as locked and does not let it be checked', () => {
-        const node = (path: string) => cy.get(`[role="treeitem"][data-path="${path}"]`, {timeout: 60000}).first();
+        const LOCKED = 'mutation:admin.jahia.configuration';
         const expand = (path: string) => {
-            node(path).find('[data-testid="mcp-toggle"]').first().click();
-            node(path).should('have.attr', 'aria-expanded', 'true');
+            treeItem(path).find('[data-testid="mcp-toggle"]').first().click();
+            treeItem(path).should('have.attr', 'aria-expanded', 'true');
         };
 
         expand('mutation:admin');
         expand('mutation:admin.jahia');
-        node('mutation:admin.jahia.configuration').as('locked');
-        cy.get('@locked').should('have.attr', 'aria-checked', 'false')
+        // Locked: unchecked, not expandable, and described by its lock note.
+        treeItem(LOCKED).should('have.attr', 'aria-checked', 'false')
             .and('not.have.attr', 'aria-expanded');
-        cy.get('@locked').find('[class*="mcp_treeRow"]').first()
-            .should('contain.text', 'the server always refuses changes to Jahia\'s OSGi configuration')
-            .click();
-        cy.get('@locked').should('have.attr', 'aria-checked', 'false');
-        cy.get('[class*="mcp_unsaved"]').should('not.exist');
+        // The lock note's id ends in '-locked' (OperationTree.jsx); its text is localized, so only its presence is checked.
+        treeItem(LOCKED).invoke('attr', 'id').then(itemId => {
+            treeItem(LOCKED).should('have.attr', 'aria-describedby').and('include', `${itemId}-locked`);
+            cy.get(`[id="${itemId}-locked"]`).should('not.be.empty');
+        });
+        clickRow(LOCKED);
+        treeItem(LOCKED).should('have.attr', 'aria-checked', 'false');
+        // Nothing to discard: the click left the list unchanged, so the save bar holds Save alone.
+        saveBar().find('button:not(#mcp-save)').should('not.exist');
+        // Saving now must store nothing: the stored and served list stay empty.
+        cy.get('#mcp-save').click();
+        saveBar().find('output', {timeout: 30000}).should('not.be.empty');
+        saveBar().find('[role="alert"]').should('not.exist');
         expectWhitelistUnchanged([]);
     });
 });

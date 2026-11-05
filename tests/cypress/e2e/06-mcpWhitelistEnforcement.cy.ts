@@ -171,8 +171,14 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
 
     it('SEC-364 attack — a comma before the operation keyword is refused too', () => {
         setWhitelist(['currentUser']);
-        executeGraphQL(',query { jcr { nodeByPath(path:"/") { name } } }')
-            .its('body.result.isError').should('eq', true);
+        // The comma is skipped by the parser, so the gate extracts the jcr selection and refuses it on
+        // its own merits; a parse error would be a different reason.
+        executeGraphQL(',query { jcr { nodeByPath(path:"/") { name } } }').then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(toolPayload(response).error.code).to.eq('forbidden');
+            expect(toolPayload(response).error.message).to.include('\'query:jcr');
+            expect(toolPayload(response).error.message).to.include('is not in the whitelist');
+        });
     });
 
     it('SEC-364 attack — an unbalanced paren in a string argument no longer hides a sibling', () => {

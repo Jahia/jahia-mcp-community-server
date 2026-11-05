@@ -1,4 +1,4 @@
-import {MCP_URL, TOOL, callTool, createApiToken, deleteApiToken, expectWhitelistUnchanged, setWhitelist, toolText} from '../support/mcp';
+import {MCP_URL, McpResponse, TOOL, callTool, createApiToken, deleteApiToken, expectWhitelistUnchanged, setWhitelist, toolPayload, toolText} from '../support/mcp';
 
 describe('MCP Server — Endpoint Access Control', () => {
     const TOKEN_NAME = 'mcp-cypress-test-token';
@@ -28,20 +28,44 @@ describe('MCP Server — Endpoint Access Control', () => {
     const PROBE_MUTATION = 'mutation { jcr { mutateNode(pathOrId: "/") { node { path } } } }';
     const PROBE_ENTRY = 'mutation:jcr.mutateNode';
 
+    // A read under the privileged admin namespace: this module's own configuration values.
+    const ADMIN_QUERY = '{ admin { jahia { configuration(pid: "org.jahia.community.mcp") { flatProperties { name value } } } } }';
+
+    /** The call was refused by the whitelist gate (code forbidden), with a reason that holds every `fragments`. */
+    const expectGateDenial = (response: McpResponse, ...fragments: string[]) => {
+        expect(response.body.result.isError).to.eq(true);
+        const error = toolPayload(response).error;
+        expect(error.code).to.eq('forbidden');
+        fragments.forEach(fragment => expect(error.message).to.include(fragment));
+    };
+
     // --- Read-only default (empty whitelist) ---
 
-    it('allows every query when the whitelist is empty', () => {
+    it('allows queries outside the admin namespace when the whitelist is empty', () => {
         executeGraphQL('{ currentUser { name } }').its('body.result.isError').should('eq', false);
-        executeGraphQL('{ admin { jahia { isAlive } } }').its('body.result.isError').should('eq', false);
+        executeGraphQL('{ jcr { nodeByPath(path: "/") { path } } }').its('body.result.isError').should('eq', false);
+    });
+
+    // The admin namespace exposes server state (OSGi configuration values, secrets included), so the
+    // read-only default does not cover it: it takes an explicit query:admin… entry.
+    it('refuses admin queries when the whitelist is empty', () => {
+        executeGraphQL(ADMIN_QUERY).then(response => expectGateDenial(response, 'admin', 'query:admin'));
+        executeGraphQL('{ admin { jahia { isAlive } } }').then(response => expectGateDenial(response, 'admin', 'query:admin'));
+    });
+
+    it('allows admin queries once query:admin is whitelisted', () => {
+        setWhitelist(['query:admin']);
+        executeGraphQL(ADMIN_QUERY).then(response => {
+            expect(response.body.result.isError).to.eq(false);
+            const properties: {name: string}[] = toolPayload(response).data.admin.jahia.configuration.flatProperties;
+            expect(properties.map(p => p.name)).to.include('whitelist');
+        });
     });
 
     it('denies every mutation when the whitelist is empty (read-only default)', () => {
-        executeGraphQL(PROBE_MUTATION).then(response => {
-            expect(response.body.result.isError).to.eq(true);
-            const text = toolText(response);
-            expect(text).to.include('mutations require an explicit mutation:<path> whitelist entry');
-            expect(text).to.include('the whitelist is empty, which allows queries only');
-        });
+        executeGraphQL(PROBE_MUTATION).then(response => expectGateDenial(response,
+            'mutations require an explicit mutation:<path> whitelist entry',
+            'the whitelist is empty, which allows queries only'));
     });
 
     // --- Whitelist enforcement ---
@@ -110,15 +134,12 @@ describe('MCP Server — Endpoint Access Control', () => {
         setWhitelist(['jcr']);
         executeGraphQL('{ jcr { nodeByPath(path: "/") { path } } }')
             .its('body.result.isError').should('eq', false);
-        executeGraphQL(PROBE_MUTATION).then(response => {
-            expect(response.body.result.isError).to.eq(true);
-            expect(toolText(response)).to.include('mutation:jcr');
-        });
+        executeGraphQL(PROBE_MUTATION).then(response => expectGateDenial(response, '\'mutation:jcr', 'is not in the whitelist'));
     });
 
     it('query:<path> does not allow the same-named mutation', () => {
         setWhitelist(['query:jcr']);
-        executeGraphQL(PROBE_MUTATION).its('body.result.isError').should('eq', true);
+        executeGraphQL(PROBE_MUTATION).then(response => expectGateDenial(response, '\'mutation:jcr', 'is not in the whitelist'));
     });
 
     it('mutation:<path> allows exactly that mutation and nothing on the query side', () => {
@@ -129,12 +150,16 @@ describe('MCP Server — Endpoint Access Control', () => {
         });
         // The whitelist is no longer empty, so queries are no longer open by default.
         executeGraphQL('{ jcr { nodeByPath(path: "/") { path } } }')
-            .its('body.result.isError').should('eq', true);
+            .then(response => expectGateDenial(response, '\'query:jcr', 'is not in the whitelist'));
     });
 
+    // The gate, not graphql-java validation, refuses the subscription: the reason is the gate's.
     it('subscriptions are never allowed', () => {
         executeGraphQL('subscription { currentUser { name } }')
-            .its('body.result.isError').should('eq', true);
+            .then(response => expectGateDenial(response, 'subscriptions are not supported'));
+        setWhitelist(['currentUser']);
+        executeGraphQL('subscription { currentUser { name } }')
+            .then(response => expectGateDenial(response, '\'subscription:currentUser', 'is not in the whitelist'));
     });
 
     // --- mutation:communityMcp is always denied ---
@@ -154,7 +179,7 @@ describe('MCP Server — Endpoint Access Control', () => {
     it('never lets a community mutation rewrite the whitelist: it stays unchanged', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('mutation { communityMcp { saveSettings(whitelist: ["admin"]) } }')
-            .its('body.result.isError').should('eq', true);
+            .then(response => expectGateDenial(response, 'can never be run through community.graphql.execute'));
         expectWhitelistUnchanged(['currentUser']);
     });
 
