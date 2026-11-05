@@ -14,6 +14,8 @@
     "policyRestricted": "Only the checked operations are allowed. Every other query and mutation is refused.",
     "policyNoQuery": "No query is checked: every query will be refused. Only the checked mutations are allowed.",
     "policyDenyAll": "The allow list only holds entries the server ignores or always refuses, so every query and every mutation is refused. Removing them all restores the read-only default.",
+    "policyPendingPrefix": "After you save:",
+    "policyInForce": "In force now, until you save:",
     "migrated": "Some saved entries used the old format and were converted to “query:” entries. Save to keep the new format.",
     "problemEntriesTitle": "Entries that need your attention",
     "problemEntriesHint": "These entries are in the allow list but are not shown in the lists below. Entries refused or ignored by the server must be removed before you can save. Remove the others unless you expect them to come back.",

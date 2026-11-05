@@ -14,6 +14,8 @@
     "policyRestricted": "Seules les opérations cochées sont autorisées. Toutes les autres requêtes et mutations sont refusées.",
     "policyNoQuery": "Aucune requête n'est cochée : toutes les requêtes seront refusées. Seules les mutations cochées sont autorisées.",
     "policyDenyAll": "La liste d'autorisation ne contient que des entrées ignorées ou toujours refusées par le serveur : toutes les requêtes et toutes les mutations sont refusées. Les supprimer toutes rétablit la règle par défaut en lecture seule.",
+    "policyPendingPrefix": "Après l'enregistrement :",
+    "policyInForce": "En vigueur maintenant, jusqu'à l'enregistrement :",
     "migrated": "Certaines entrées enregistrées utilisaient l'ancien format et ont été converties en entrées « query: ». Enregistrez pour conserver le nouveau format.",
     "problemEntriesTitle": "Entrées à vérifier",
     "problemEntriesHint": "Ces entrées sont dans la liste d'autorisation mais n'apparaissent pas dans les listes ci-dessous. Les entrées refusées ou ignorées par le serveur doivent être supprimées avant d'enregistrer. Supprimez les autres, sauf si vous attendez leur retour.",

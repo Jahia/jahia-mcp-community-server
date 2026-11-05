@@ -80,6 +80,22 @@ const Help = ({t}) => (
     </details>
 );
 
+// The policy of the edited list, and, while it is not saved, the policy the server still applies
+// (UX-4): an unsaved restriction must never read as if it were already in force.
+const PolicyBanner = ({policy, savedPolicy, t}) => {
+    const alertClass = kind => `${styles.mcp_alert} ${styles[`mcp_alert--${kind}`]}`;
+    if (!savedPolicy) {
+        return <p className={alertClass(policy.kind)}>{t(policy.key)}</p>;
+    }
+
+    return (
+        <>
+            <p className={alertClass(policy.kind)}><strong>{t('label.policyPendingPrefix')}</strong> {t(policy.key)}</p>
+            <p className={alertClass(savedPolicy.kind)}><strong>{t('label.policyInForce')}</strong> {t(savedPolicy.key)}</p>
+        </>
+    );
+};
+
 const OperationGroup = ({id, heading, count, note, roots, actions, treeProps}) => (
     <section className={styles.mcp_group} aria-labelledby={`mcp-group-${id}`}>
         <div className={styles.mcp_groupHeader}>
@@ -402,6 +418,7 @@ export const CommunityMcpConfigAdmin = () => {
         }
 
         const policy = policyOf(whitelist);
+        const hasPendingEdits = !setsEqual(whitelist, saved);
         const treeProps = {
             selected: whitelist, typeFields, expanded, filter, t,
             onToggle: togglePath,
@@ -424,7 +441,7 @@ export const CommunityMcpConfigAdmin = () => {
                         )}
                     </div>
                     {/* Not a live region: a change of policy is announced once by applyEdit. */}
-                    <p className={`${styles.mcp_alert} ${styles[`mcp_alert--${policy.kind}`]}`}>{t(policy.key)}</p>
+                    <PolicyBanner policy={policy} savedPolicy={hasPendingEdits ? policyOf(saved) : null} t={t}/>
                     {isClustered && <p className={`${styles.mcp_alert} ${styles['mcp_alert--warning']}`}>{t('label.clusterNote')}</p>}
                     {isMigrated && <p className={`${styles.mcp_alert} ${styles['mcp_alert--info']}`}>{t('label.migrated')}</p>}
                     <ProblemEntries problems={findProblemEntries(whitelist, operations)} t={t} onRemove={removeOne}/>
@@ -467,7 +484,7 @@ export const CommunityMcpConfigAdmin = () => {
                     <AllEntries entries={[...whitelist].sort()} t={t} onRemove={removeOne}/>
                 </section>
                 <SaveBar isDirty={isDirty}
-                         hasChangesToDiscard={!setsEqual(whitelist, saved)}
+                         hasChangesToDiscard={hasPendingEdits}
                          isSaving={isSaving}
                          status={status}
                          t={t}

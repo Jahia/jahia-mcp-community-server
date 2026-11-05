@@ -445,6 +445,33 @@ describe('save feedback', () => {
     });
 });
 
+describe('policy in force and pending policy (UX-4)', () => {
+    test('without edits, the banner states the policy in force only', () => {
+        installApolloMock();
+        render(<CommunityMcpConfigAdmin/>);
+
+        expect(screen.getByText('label.policyReadOnly')).toBeInTheDocument();
+        expect(screen.queryByText('label.policyPendingPrefix')).not.toBeInTheDocument();
+        expect(screen.queryByText(/label\.policyInForce/)).not.toBeInTheDocument();
+    });
+
+    test('with unsaved edits, the banner shows the pending policy and the one the server still applies', async () => {
+        installApolloMock();
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
+        const pending = policyText('label.policyRestricted');
+        expect(pending).toHaveTextContent('label.policyPendingPrefix label.policyRestricted');
+        expect(screen.getByText('label.policyInForce')).toBeInTheDocument();
+        expect(screen.getByText('label.policyReadOnly')).toBeInTheDocument();
+
+        fireEvent.click(saveButton());
+        await screen.findByText('label.saveSuccess');
+        expect(screen.queryByText('label.policyPendingPrefix')).not.toBeInTheDocument();
+        expect(screen.queryByText('label.policyReadOnly')).not.toBeInTheDocument();
+    });
+});
+
 describe('cluster (UX-2)', () => {
     test('on a single server, no cluster note and the plain success message', async () => {
         installApolloMock();
