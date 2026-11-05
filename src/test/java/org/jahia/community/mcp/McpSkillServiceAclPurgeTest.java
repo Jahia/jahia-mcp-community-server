@@ -36,7 +36,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** PRB2-2 and PRB2-8: activation removes 1.x local ACL grants below the skills container. */
+/** Activation removes 1.x local ACL grants below the skills container. */
 class McpSkillServiceAclPurgeTest {
 
     private static final String ROOT = McpSkillService.SKILLS_PATH;
@@ -257,7 +257,7 @@ class McpSkillServiceAclPurgeTest {
     }
 
     @Test
-    @DisplayName("PRB2-8: a failed ACL break is an ERROR, never a mere WARN")
+    @DisplayName("a failed ACL break is an ERROR, never a mere WARN")
     void acl_break_failure_is_error() throws Exception {
         when(container.getAclInheritanceBreak()).thenReturn(false);
         doThrow(new InvalidItemStateException("constraint")).when(container).setAclInheritanceBreak(true);

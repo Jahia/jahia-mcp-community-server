@@ -3,11 +3,13 @@ package org.jahia.community.mcp.graphql;
 import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
+import graphql.annotations.annotationTypes.GraphQLNonNull;
 import org.jahia.community.mcp.McpSkillService;
 import org.jahia.community.mcp.config.McpConfigService;
 import org.jahia.modules.graphql.provider.dxm.DataFetchingException;
 import org.jahia.modules.graphql.provider.dxm.security.GraphQLRequiresPermission;
 import org.jahia.osgi.BundleUtils;
+import org.jahia.settings.SettingsBean;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,7 +21,7 @@ public class McpQuery {
 
     @GraphQLField
     @GraphQLName("settings")
-    @GraphQLDescription("Returns the current MCP operation whitelist configuration")
+    @GraphQLDescription("Returns the current MCP operation whitelist configuration of this node (and whether Jahia is clustered)")
     @GraphQLRequiresPermission("admin")
     public GqlMcpSettings getSettings() {
         final McpConfigService config = BundleUtils.getOsgiService(McpConfigService.class, null);
@@ -28,7 +30,8 @@ public class McpQuery {
             throw new DataFetchingException("The MCP configuration service is not available: "
                     + "check that the org.jahia.community.mcp configuration exists");
         }
-        return new GqlMcpSettings(new ArrayList<>(config.getWhitelist()));
+        return new GqlMcpSettings(new ArrayList<>(config.getWhitelist()),
+                SettingsBean.getInstance().isClusterActivated());
     }
 
     @GraphQLField
@@ -50,9 +53,20 @@ public class McpQuery {
     public static class GqlMcpSettings {
 
         private final List<String> whitelist;
+        private final boolean clustered;
 
-        public GqlMcpSettings(List<String> whitelist) {
+        public GqlMcpSettings(List<String> whitelist, boolean clustered) {
             this.whitelist = whitelist;
+            this.clustered = clustered;
+        }
+
+        @GraphQLField
+        @GraphQLName("clustered")
+        @GraphQLNonNull
+        @GraphQLDescription("True when Jahia clustering is activated: the whitelist is stored per node and is "
+                + "NOT replicated, so it must be saved on every node")
+        public Boolean getClustered() {
+            return clustered;
         }
 
         @GraphQLField
@@ -64,7 +78,7 @@ public class McpQuery {
     }
 
     @GraphQLName("CommunityMcpSkill")
-    @GraphQLDescription("A named skill providing instructions to an MCP client such as Claude Code")
+    @GraphQLDescription("A named skill: editor-authored guidance served to an MCP client such as Claude Code")
     public static class GqlMcpSkill {
 
         private final String name;
@@ -88,7 +102,7 @@ public class McpQuery {
 
         @GraphQLField
         @GraphQLName("mcpName")
-        @GraphQLDescription("Human-readable display name for the skill (stored as the jcr:title property)")
+        @GraphQLDescription("Human-readable display title only (stored as the jcr:title property); NOT the key, use 'name' to refer to a skill")
         public String getMcpName() {
             return mcpName;
         }
@@ -102,7 +116,7 @@ public class McpQuery {
 
         @GraphQLField
         @GraphQLName("content")
-        @GraphQLDescription("Full Markdown content of the skill — instructions the AI should follow")
+        @GraphQLDescription("Full Markdown content of the skill: editor-authored guidance for an AI client to evaluate, not commands to obey")
         public String getContent() {
             return content;
         }

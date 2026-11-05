@@ -9,10 +9,12 @@ import org.osgi.service.component.annotations.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.jcr.InvalidItemStateException;
 import javax.jcr.ItemExistsException;
 import javax.jcr.Node;
 import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
+import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.Value;
 import javax.jcr.query.Query;
 import javax.jcr.query.QueryResult;
@@ -105,9 +107,14 @@ public class McpSkillService {
                         importSkillEntry(session, url);
                     } catch (IOException ex) {
                         LOGGER.error("Cannot read skill file {}", url, ex);
-                    } catch (ItemExistsException ex) {
-                        // another cluster node seeded it first
+                    } catch (ItemExistsException | InvalidItemStateException | ConstraintViolationException ex) {
+                        // another cluster node seeded it first (or is saving the same folder)
                         session.refresh(false);
+                    } catch (RepositoryException ex) {
+                        // one skill failing must not abort the seeding of the others
+                        session.refresh(false);
+                        LOGGER.warn("Could not import default skill {}; it is retried at the next activation",
+                                url, ex);
                     }
                 }
                 return null;
@@ -346,18 +353,31 @@ public class McpSkillService {
     }
 
     /**
-     * Creates the skills container if missing and breaks its ACL inheritance (idempotent): with no
-     * role granted on it, only the system session can write skills, so a content author cannot
-     * plant instructions that an administrator's AI client would later read and follow.
+     * Creates the skills container if missing and breaks its ACL inheritance (idempotent). With no
+     * role granted on it, ordinary users and roles cannot write skills through generic JCR paths, so
+     * a content author cannot plant text that an administrator's AI client would later read. The
+     * {@code root} user bypasses ACLs and can still write (accepted: it can also whitelist
+     * {@code mutation:jcr}); this module itself writes skills only through the system session.
+     *
+     * <p>Only the default workspace is hardened: skills are read from it exclusively, so a copy of
+     * the container that a 1.x install published to the live workspace is never served by the
+     * tools and needs no hardening there.</p>
+     *
+     * <p>Cluster-safe: every node runs this at activation, so a concurrent creation or ACL change
+     * by another node is tolerated (the session is refreshed and the state re-read).</p>
      */
     private void ensureContainer(JCRSessionWrapper session) throws RepositoryException {
         if (!session.nodeExists(SKILLS_PATH)) {
             try {
                 session.getNode("/sites/systemsite/contents").addNode("mcp-skills", FOLDER_NODE_TYPE);
                 session.save();
-            } catch (ItemExistsException ex) {
-                // created concurrently by another cluster node
+            } catch (ItemExistsException | InvalidItemStateException | ConstraintViolationException ex) {
+                // created concurrently by another cluster node (Jackrabbit reports the race under
+                // either name); keep going if the container exists now, fail otherwise.
                 session.refresh(false);
+                if (!session.nodeExists(SKILLS_PATH)) {
+                    throw ex;
+                }
             }
         }
         final JCRNodeWrapper container = session.getNode(SKILLS_PATH);
@@ -365,7 +385,7 @@ public class McpSkillService {
             try {
                 container.setAclInheritanceBreak(true);
                 session.save();
-                LOGGER.info("Broke ACL inheritance on {}: only the system session may write skills", SKILLS_PATH);
+                LOGGER.info("Broke ACL inheritance on {}: no inherited role may write skills", SKILLS_PATH);
             } catch (RepositoryException ex) {
                 // Cluster activation race, or a real failure: either way the container is still open to
                 // inherited roles, so this is an ERROR. Idempotent: the next activation checks again.
@@ -390,7 +410,7 @@ public class McpSkillService {
             if (!removed.isEmpty()) {
                 session.save();
                 for (final String grant : removed) {
-                    LOGGER.info("Removed local ACL grant {} (skills must only be writable by the system session)",
+                    LOGGER.info("Removed local ACL grant {} (no role may hold a grant on the skills container)",
                             grant);
                 }
                 LOGGER.info("Removed {} local ACL grant(s) under {}; review the existing skills, they may have "

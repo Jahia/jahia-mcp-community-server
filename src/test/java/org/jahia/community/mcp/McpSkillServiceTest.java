@@ -501,4 +501,51 @@ class McpSkillServiceTest {
         assertThat(McpSkillService.relativePath(ROOT + "/a/b")).isEqualTo("a/b");
         assertThat(McpSkillService.relativePath("/elsewhere/a")).isEqualTo("/elsewhere/a");
     }
+
+    @Test
+    @DisplayName("activate tolerates a concurrent container creation reported as an invalid item state")
+    void activate_tolerates_invalid_item_state_on_creation() throws Exception {
+        final JCRNodeWrapper contents = jcr.nodes.get("/sites/systemsite/contents");
+        org.mockito.Mockito.doAnswer(inv -> {
+            jcr.container();
+            return null;
+        }).when(jcr.session).refresh(false);
+        org.mockito.Mockito.doThrow(new javax.jcr.InvalidItemStateException("raced"))
+                .when(contents).addNode("mcp-skills", CONTENT_LIST);
+
+        service.activate(bundleWith(null));
+
+        verify(jcr.nodes.get(ROOT)).setAclInheritanceBreak(true);
+    }
+
+    @Test
+    @DisplayName("a creation failure that leaves no container is not swallowed: logged, nothing imported")
+    void activate_reports_a_creation_failure_without_container() throws Exception {
+        final JCRNodeWrapper contents = jcr.nodes.get("/sites/systemsite/contents");
+        org.mockito.Mockito.doThrow(new javax.jcr.nodetype.ConstraintViolationException("no"))
+                .when(contents).addNode("mcp-skills", CONTENT_LIST);
+
+        service.activate(bundleWith(null));
+
+        assertThat(jcr.nodes).doesNotContainKey(ROOT);
+    }
+
+    @Test
+    @DisplayName("one skill failing with a repository error does not stop the others from being seeded")
+    void activate_keeps_seeding_after_one_skill_fails(@TempDir final Path dir) throws Exception {
+        final java.net.URL bad = skillFile(dir, "a-bad.md", "x");
+        final java.net.URL good = skillFile(dir, "b-good.md", "ok");
+        final JCRNodeWrapper container = jcr.container();
+        jcr.aclBreak.put(ROOT, true);
+        org.mockito.Mockito.doThrow(new javax.jcr.InvalidItemStateException("concurrent save"))
+                .when(container).addNode("a-bad", "mcp:skill");
+        org.mockito.Mockito.doThrow(new javax.jcr.RepositoryException("storage hiccup"))
+                .when(container).addNode("a-bad2", "mcp:skill");
+        final java.net.URL bad2 = skillFile(dir, "a-bad2.md", "x");
+
+        service.activate(bundleWith(Collections.enumeration(List.of(bad, bad2, good))));
+
+        verify(jcr.nodes.get(ROOT + "/b-good")).setProperty("mcp:content", "ok");
+        verify(jcr.session, org.mockito.Mockito.times(2)).refresh(false);
+    }
 }

@@ -10,6 +10,7 @@ import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.modules.graphql.provider.dxm.DataFetchingException;
 import org.jahia.modules.graphql.provider.dxm.security.GraphQLRequiresPermission;
 import org.jahia.osgi.BundleUtils;
+import org.jahia.settings.SettingsBean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,6 +37,8 @@ class McpGraphQLTest {
     private MockedStatic<BundleUtils> bundleUtils;
     private McpConfigService config;
     private McpSkillService skills;
+    private MockedStatic<SettingsBean> settingsStatic;
+    private SettingsBean settingsBean;
 
     @BeforeEach
     void setUp() {
@@ -44,11 +47,15 @@ class McpGraphQLTest {
         bundleUtils = mockStatic(BundleUtils.class);
         bundleUtils.when(() -> BundleUtils.getOsgiService(McpConfigService.class, null)).thenReturn(config);
         bundleUtils.when(() -> BundleUtils.getOsgiService(McpSkillService.class, null)).thenReturn(skills);
+        settingsBean = mock(SettingsBean.class);
+        settingsStatic = mockStatic(SettingsBean.class);
+        settingsStatic.when(SettingsBean::getInstance).thenReturn(settingsBean);
     }
 
     @AfterEach
     void tearDown() {
         bundleUtils.close();
+        settingsStatic.close();
     }
 
     // ── access annotations ────────────────────────────────────────────────────
@@ -101,6 +108,37 @@ class McpGraphQLTest {
         when(config.getWhitelist()).thenReturn(Set.of("query:jcr"));
 
         assertThat(new McpQuery().getSettings().getWhitelist()).containsExactly("query:jcr");
+    }
+
+    @Test
+    @DisplayName("settings report whether Jahia is clustered (the whitelist is per node)")
+    void settings_report_clustering() throws Exception {
+        when(config.getWhitelist()).thenReturn(Set.of());
+        when(settingsBean.isClusterActivated()).thenReturn(true);
+        assertThat(new McpQuery().getSettings().getClustered()).isTrue();
+        when(settingsBean.isClusterActivated()).thenReturn(false);
+        assertThat(new McpQuery().getSettings().getClustered()).isFalse();
+
+        final Method getter = McpQuery.GqlMcpSettings.class.getMethod("getClustered");
+        assertThat(getter.getAnnotation(GraphQLName.class).value()).isEqualTo("clustered");
+        assertThat(getter.isAnnotationPresent(graphql.annotations.annotationTypes.GraphQLNonNull.class)).isTrue();
+    }
+
+    @Test
+    @DisplayName("skill and settings descriptions present skill text as guidance, never as instructions to follow")
+    void descriptions_do_not_tell_the_ai_to_obey_skill_text() throws Exception {
+        final String content = McpQuery.GqlMcpSkill.class.getMethod("getContent")
+                .getAnnotation(graphql.annotations.annotationTypes.GraphQLDescription.class).value();
+        assertThat(content).contains("guidance").contains("not commands").doesNotContain("should follow");
+        final Method save = McpMutation.class.getMethod("saveSkill", String.class, String.class, String.class,
+                String.class);
+        final String param = java.util.Arrays.stream(save.getParameters()).filter(p -> "content".equals(
+                p.getAnnotation(GraphQLName.class).value())).findFirst().orElseThrow()
+                .getAnnotation(graphql.annotations.annotationTypes.GraphQLDescription.class).value();
+        assertThat(param).contains("guidance").doesNotContain("should follow");
+        final String saveSettings = McpMutation.class.getMethod("saveSettings", List.class)
+                .getAnnotation(graphql.annotations.annotationTypes.GraphQLDescription.class).value();
+        assertThat(saveSettings).contains("never-allowed").contains("grantRoles").contains("personalApiTokens");
     }
 
     @Test

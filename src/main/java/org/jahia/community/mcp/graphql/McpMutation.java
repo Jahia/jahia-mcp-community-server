@@ -25,9 +25,11 @@ public class McpMutation {
 
     @GraphQLField
     @GraphQLName("saveSettings")
-    @GraphQLDescription("Saves the MCP operation whitelist. Returns true on success; fails with a GraphQL error "
-            + "naming the offending entry when an entry is malformed, and with a generic error when the "
-            + "configuration cannot be stored.")
+    @GraphQLDescription("Saves the MCP operation whitelist on this cluster node only (it is not replicated). "
+            + "Returns true on success; fails with a GraphQL error naming the offending entry when an entry is "
+            + "malformed or names a never-allowed path (mutation:communityMcp, mutation:admin.jahia.configuration, "
+            + "mutation:admin.personalApiTokens, or any mutation path with a grantRoles or revokeRoles segment), "
+            + "and with a generic error when the configuration is missing or cannot be stored.")
     @GraphQLRequiresPermission("admin")
     public Boolean saveSettings(
             @GraphQLName("whitelist") @GraphQLNonNull @GraphQLDescription("Operations to allow, as 'query:<path>' or "
@@ -63,9 +65,9 @@ public class McpMutation {
     public Boolean saveSkill(
             @GraphQLName("name") @GraphQLNonNull @GraphQLDescription("Skill key: the path relative to the skills root, "
                     + "e.g. 'my-skill' or 'team/my-skill' (intermediate folders are created)") String name,
-            @GraphQLName("mcpName") @GraphQLDescription("Human-readable display name for the skill") String mcpName,
+            @GraphQLName("mcpName") @GraphQLDescription("Human-readable display title for the skill (the key is 'name')") String mcpName,
             @GraphQLName("description") @GraphQLDescription("Short description of what the skill does") String description,
-            @GraphQLName("content") @GraphQLNonNull @GraphQLDescription("Full Markdown content — instructions the AI should follow") String content) {
+            @GraphQLName("content") @GraphQLNonNull @GraphQLDescription("Full Markdown content: guidance for an AI client to evaluate, not commands to obey") String content) {
         final McpSkillService service = BundleUtils.getOsgiService(McpSkillService.class, null);
         if (service == null) {
             LOGGER.error(SKILL_SERVICE_UNAVAILABLE);
