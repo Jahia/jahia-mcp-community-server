@@ -55,4 +55,25 @@ class WhitelistEntriesTest {
         assertThat(WhitelistEntries.display("mutation.jcr.deleteNode")).isEqualTo("mutation:jcr.deleteNode");
         assertThat(WhitelistEntries.display("query.currentUser")).isEqualTo("query:currentUser");
     }
+
+    @Test
+    @DisplayName("the communityMcp mutation namespace is never allowed, queries and siblings are")
+    void never_allowed_namespace() {
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.communityMcp")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.communityMcp.saveSkill")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.communityMcpX")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed("query.communityMcp")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed(null)).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:communityMcp.saveSettings")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("query:communityMcp")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("garbage entry")).isFalse();
+    }
+
+    @Test
+    @DisplayName("a pathological entry is rejected in linear time (possessive regex)")
+    void regex_is_linear() {
+        String evil = "a".repeat(50_000) + "!";
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2),
+                () -> assertThat(WhitelistEntries.isValid(evil)).isFalse());
+    }
 }

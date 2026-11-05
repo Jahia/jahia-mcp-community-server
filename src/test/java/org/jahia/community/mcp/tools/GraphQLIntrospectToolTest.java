@@ -14,6 +14,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -98,7 +99,7 @@ class GraphQLIntrospectToolTest {
         assertThat(result.payload().path("types").has("JCRNode")).isTrue();
         assertThat(result.payload().has("schema")).isFalse();
         verify(client, never()).execute(contains("__schema"), any(), any());
-        verify(client, times(1)).execute(any(), any(), any());
+        verify(client, times(1)).execute(anyString(), any(), any());
     }
 
     @Test
@@ -112,7 +113,7 @@ class GraphQLIntrospectToolTest {
         ToolResult result = tool.execute(withTypeNames(names), ToolContextFixture.administrator().ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_VALIDATION);
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(anyString(), any(), any());
     }
 
     @Test
@@ -121,7 +122,7 @@ class GraphQLIntrospectToolTest {
         ToolResult result = tool.execute(withTypeNames("Query\") { x } #"), ToolContextFixture.administrator().ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_VALIDATION);
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(anyString(), any(), any());
     }
 
     @Test

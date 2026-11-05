@@ -7,7 +7,7 @@ import graphql.annotations.annotationTypes.GraphQLTypeExtension;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 
 @GraphQLTypeExtension(DXGraphQLProvider.Query.class)
-@GraphQLDescription("MCP queries")
+@GraphQLDescription("Community MCP queries")
 public class McpQueryExtension {
 
     private McpQueryExtension() {
