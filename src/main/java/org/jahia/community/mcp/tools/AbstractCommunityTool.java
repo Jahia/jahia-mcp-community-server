@@ -53,18 +53,22 @@ abstract class AbstractCommunityTool implements JahiaMcpTool {
         if (denied.isPresent()) {
             return ToolSupport.audited(ctx, name, denied.get(), Map.of());
         }
-        ToolResult result;
+        ToolResult result = null;
+        boolean completed = false;
         try {
             result = doExecute(input, ctx);
+            completed = true;
         } catch (StackOverflowError overflow) {
             LOGGER.error("{} exhausted the stack for user='{}'", name, LogSupport.clean(ctx.username()), overflow);
             result = ToolResult.error(ToolError.CODE_INTERNAL, "The request could not be processed.",
                     "Simplify the request (less nesting) and retry once, then report the failure.");
-        } catch (Error error) {
-            // Never swallowed: record the failed call, then let the Error propagate.
-            ToolSupport.audited(ctx, name,
-                    ToolResult.error(ToolError.CODE_INTERNAL, "The tool failed.", "See the Jahia logs."), Map.of());
-            throw error;
+            completed = true;
+        } finally {
+            if (!completed) {
+                // Any other throwable is never swallowed: record the failed call, and let it propagate.
+                ToolSupport.audited(ctx, name,
+                        ToolResult.error(ToolError.CODE_INTERNAL, "The tool failed.", "See the Jahia logs."), Map.of());
+            }
         }
         return ToolSupport.audited(ctx, name, result, auditDetails(input));
     }

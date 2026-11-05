@@ -38,15 +38,17 @@ final class ToolSupport {
     private ToolSupport() {
     }
 
-    /** Loads {@code schemas/<toolName>.json} from this bundle. */
     /** The explicit refusal of a GraphQL tool while the GraphQL servlet is not bound. */
     static ToolResult graphQLUnavailable(final String toolName, final String username) {
-        LOGGER.warn("{} refused for user='{}': the GraphQL servlet is not available", toolName,
-                LogSupport.clean(username));
+        if (LOGGER.isWarnEnabled()) {
+            LOGGER.warn("{} refused for user='{}': the GraphQL servlet is not available", toolName,
+                    LogSupport.clean(username));
+        }
         return ToolResult.error(ToolError.CODE_UNAVAILABLE,
                 MESSAGE_GRAPHQL_UNAVAILABLE, HINT_GRAPHQL_UNAVAILABLE);
     }
 
+    /** Loads {@code schemas/<toolName>.json} from this bundle. */
     static JsonNode loadSchema(final String toolName) {
         return loadSchema(toolName, ToolSupport.class::getResourceAsStream);
     }

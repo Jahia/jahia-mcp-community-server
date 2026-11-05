@@ -113,10 +113,13 @@ class McpConfigServiceConsistencyTest {
     void should_refuse_to_save_entries_that_can_only_grant_privileges() {
         final McpConfigService service = new McpConfigService(mock(ConfigurationAdmin.class), config());
 
-        assertThatThrownBy(() -> service.saveWhitelist(java.util.List.of("mutation:jcr.mutateNode.grantRoles")))
+        final java.util.List<String> grant = java.util.List.of("mutation:jcr.mutateNode.grantRoles");
+        final java.util.List<String> token = java.util.List.of("mutation:admin.personalApiTokens.createToken");
+
+        assertThatThrownBy(() -> service.saveWhitelist(grant))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("can never be run")
                 .hasMessageContaining("grantRoles");
-        assertThatThrownBy(() -> service.saveWhitelist(java.util.List.of("mutation:admin.personalApiTokens.createToken")))
+        assertThatThrownBy(() -> service.saveWhitelist(token))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("personalApiTokens");
     }
 }

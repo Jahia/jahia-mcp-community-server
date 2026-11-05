@@ -65,9 +65,11 @@ class WhitelistSnapshotTest {
         source.add("query:other");
 
         assertThat(s.raw()).containsExactly("query:jcr");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> s.raw().add("x"))
+        final Set<String> raw = s.raw();
+        final Set<String> normalized = s.normalized();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> raw.add("x"))
                 .isInstanceOf(UnsupportedOperationException.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> s.normalized().add("x"))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> normalized.add("x"))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 }

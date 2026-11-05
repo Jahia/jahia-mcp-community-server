@@ -34,6 +34,7 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
     static final String NAME = "community.graphql.execute";
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphQLExecuteTool.class);
     private static final String ERRORS = "errors";
+    private static final String FIELD_MESSAGE = "message";
     private static final int MAX_ERROR_MESSAGE_CHARS = 500;
     private static final int HTTP_BAD_REQUEST = 400;
     private static final int HTTP_UNAUTHORIZED = 401;
@@ -204,9 +205,9 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         }
         final JsonNode copy = json.deepCopy();
         for (final JsonNode error : copy.path(ERRORS)) {
-            if (error instanceof ObjectNode && error.path("message").isTextual()) {
-                ((ObjectNode) error).put("message",
-                        ToolSupport.sanitize(error.path("message").asText(), MAX_ERROR_MESSAGE_CHARS));
+            if (error instanceof ObjectNode && error.path(FIELD_MESSAGE).isTextual()) {
+                ((ObjectNode) error).put(FIELD_MESSAGE,
+                        ToolSupport.sanitize(error.path(FIELD_MESSAGE).asText(), MAX_ERROR_MESSAGE_CHARS));
             }
         }
         return copy;
@@ -223,7 +224,7 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
             if (sb.length() > 0) {
                 sb.append("; ");
             }
-            sb.append(error.path("message").asText("unknown error"));
+            sb.append(error.path(FIELD_MESSAGE).asText("unknown error"));
         }
         return ToolSupport.sanitize(sb.toString(), ToolSupport.MAX_ECHO_CHARS);
     }

@@ -100,8 +100,10 @@ public final class CommunityMcpAccess {
         if (present) {
             return Optional.empty();
         }
-        LOGGER.warn("Community MCP tool refused: user='{}' sent no Authorization header (session-only call), "
-                + "ip='{}'", LogSupport.clean(ctx.username()), clientIp(ctx));
+        if (LOGGER.isWarnEnabled()) {
+            LOGGER.warn("Community MCP tool refused: user='{}' sent no Authorization header (session-only call), "
+                    + "ip='{}'", LogSupport.clean(ctx.username()), clientIp(ctx));
+        }
         return Optional.of(ToolResult.error(ToolError.CODE_FORBIDDEN, MESSAGE_NO_CREDENTIALS, HINT_NO_CREDENTIALS));
     }
 

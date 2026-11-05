@@ -67,6 +67,7 @@ public class GraphQLWhitelistGate {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphQLWhitelistGate.class);
     private static final String ANONYMOUS_USER = "anonymous";
+    private static final String UNKNOWN_POSITION = "unknown";
     private static final String QUERY_PREFIX = "query.";
     private static final String MUTATION_PREFIX = "mutation.";
     private static final String SUBSCRIPTION_PREFIX = "subscription.";
@@ -133,7 +134,7 @@ public class GraphQLWhitelistGate {
             LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed, "
                     + "user='{}', ip='{}', at={}", who, ip, position);
             return Optional.of(new Denial(Denial.Kind.PARSE, PARSE_REASON
-                    + ("unknown".equals(position) ? "" : " (syntax error at " + position + ")")));
+                    + (UNKNOWN_POSITION.equals(position) ? "" : " (syntax error at " + position + ")")));
         }
 
         // Named fragment spreads are never expanded, so the fields behind one would escape every
@@ -177,9 +178,9 @@ public class GraphQLWhitelistGate {
     private static String position(final RuntimeException ex) {
         if (ex instanceof graphql.parser.InvalidSyntaxException) {
             final graphql.language.SourceLocation loc = ((graphql.parser.InvalidSyntaxException) ex).getLocation();
-            return loc == null ? "unknown" : "line " + loc.getLine() + ", column " + loc.getColumn();
+            return loc == null ? UNKNOWN_POSITION : "line " + loc.getLine() + ", column " + loc.getColumn();
         }
-        return "unknown";
+        return UNKNOWN_POSITION;
     }
 
     /** Denial (message without the common prefix) for one operation-qualified path, if any. */
