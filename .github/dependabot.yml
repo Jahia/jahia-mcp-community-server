@@ -4,11 +4,6 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    ignore:
-      # Provided by Jahia at runtime. The version we build against sets the bundle's
-      # Import-Package range, so a bump raises the minimum Jahia version the module can
-      # start on. Bump it deliberately, together with the supported Jahia versions.
-      - dependency-name: "org.jahia.modules:graphql-dxm-provider"
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
