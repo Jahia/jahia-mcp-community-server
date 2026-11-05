@@ -1,0 +1,11 @@
+query McpGetSkillsChildren($names: [String]) {
+    jcr {
+        nodeByPath(path: "/sites/systemsite/contents/mcp-skills") {
+            children(names: $names) {
+                nodes {
+                    name
+                }
+            }
+        }
+    }
+}

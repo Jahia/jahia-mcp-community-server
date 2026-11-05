@@ -12,14 +12,31 @@ describe('MCP Server — Skills', () => {
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const getSkillStorage: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSkillStorage.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const getSkillsChildren: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSkillsChildren.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const deleteNodeByPath: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteNodeByPath.graphql');
+    const SKILLS_ROOT = '/sites/systemsite/contents/mcp-skills';
 
     let apiToken: string;
 
     const skillNames = (skills: {name: string}[]) => skills.map(s => s.name);
 
+    /** The nodes named `name` directly under the skills root, read as root outside the module. */
+    const skillsRootChildren = (name: string) => cy.apollo({query: getSkillsChildren, variables: {names: [name]}})
+        .then(result => result.data.jcr.nodeByPath.children.nodes.map((n: {name: string}) => n.name));
+
+    // The deleteSkill mutation refuses any node that is not an mcp:skill, so the jnt:contentList folder that
+    // saveSkill(NESTED_SKILL) creates is removed as root through the generic JCR mutation, and the
+    // removal is checked: a leftover folder would survive from one run to the next.
+    const removeNestedFolder = () => {
+        cy.apollo({mutation: deleteNodeByPath, variables: {path: `${SKILLS_ROOT}/${NESTED_FOLDER}`}, errorPolicy: 'all'});
+        skillsRootChildren(NESTED_FOLDER).should('deep.equal', []);
+    };
+
     const cleanup = () => {
         deleteSkill(NESTED_SKILL);
-        deleteSkill(NESTED_FOLDER);
+        removeNestedFolder();
         deleteSkill(TEST_SKILL);
         deleteSkill(OWN_SKILL);
     };
@@ -116,6 +133,9 @@ describe('MCP Server — Skills', () => {
         getSkills().then(result => {
             expect(skillNames(result.data.communityMcp.skills)).not.to.include(NESTED_SKILL);
         });
+        // The deleteSkill mutation never removes a folder: the folder stays until it is removed as root.
+        deleteSkill(NESTED_FOLDER).its('data.communityMcp.deleteSkill').should('eq', false);
+        skillsRootChildren(NESTED_FOLDER).should('deep.equal', [NESTED_FOLDER]);
     });
 
     // --- Traversal-style names are refused end to end ---
