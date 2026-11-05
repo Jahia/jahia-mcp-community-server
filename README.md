@@ -53,7 +53,7 @@ administrator who called the tool, so JCR ACLs apply normally.
 | Component | Version | Notes |
 |---|---|---|
 | Jahia | 8.2+ | Built against the Jahia 8.2.2.1 parent POM |
-| `graphql-dxm-provider` | **3.4.0 or later**, below 4.0 (`[3.4,4)`) | Built against 3.4.0 and declared in `jahia-depends`. The tools bind its servlet component by name (`graphql.kickstart.servlet.OsgiGraphQLHttpServlet`); if a later version renames it, `community.graphql.execute` and `community.graphql.introspect` disappear from `tools/list` |
+| `graphql-dxm-provider` | **3.4.0 or later**, below 4.0 (`[3.4,4)`) | Built against 3.4.0 and declared in `jahia-depends`. The tools bind its servlet component by name (`graphql.kickstart.servlet.OsgiGraphQLHttpServlet`). If it is missing (the provider is stopped, or a later version renames it), `community.graphql.execute` and `community.graphql.introspect` stay listed but refuse every call with an `unavailable` error, and the module logs a WARN naming the component |
 | `mcp-server` | **0.5.x** (`[0.5,0.6)`) | Provides the tool SPI. The SPI is pre-1.0, so the import range is kept tight |
 | Declarative Services | 1.4 (Felix SCR 2.1 or later) | Required for the configuration-driven components |
 | `personal-api-tokens` | optional | Only needed for API-token authentication |
@@ -130,7 +130,7 @@ that user.
 
 Results follow `mcp-server`'s contract: a JSON text block on success, and
 `{"error":{"code","message","hint"}}` with `isError: true` on failure. Codes used by the community
-tools: `forbidden`, `validation`, `not_found` and `internal`.
+tools: `forbidden`, `validation`, `not_found`, `unavailable` and `internal`.
 
 ### `community.graphql.execute`
 
@@ -371,6 +371,10 @@ whitelist=query:jcr,query:currentUser,mutation:jcr.deleteNode
 `saveSettings` validates the list before storing it. A malformed or refused entry makes the call fail
 with a GraphQL error that names the entry, and nothing is stored.
 
+If a configuration update cannot be read at all (for example a hand-edited `.cfg` with a value of the
+wrong type), the module logs an `ERROR` and keeps enforcing the previous whitelist. If the configuration
+cannot be read when the module starts, every operation is refused until it is fixed.
+
 **Clusters.** `saveSettings` writes the OSGi configuration on the node that served the request only. In a
 cluster, set the whitelist on every node: through the administration UI or `saveSettings` on each node, or
 through provisioning or the `.cfg` file. Until then the other nodes keep their previous list.
@@ -406,18 +410,21 @@ through `communityMcp { saveSettings }`.
 
 - **Two groups.** Queries and mutations are listed separately, each with bulk actions: allow all,
   clear. **Allow all queries** checks every query root except `admin`, which exposes configuration values,
-  secrets included: check `admin` yourself only if the AI client needs it. The operation tree is loaded
-  lazily, one type at a time.
+  secrets included: check `admin` yourself only if the AI client needs it. Checking `query:admin`, or a
+  field under it, asks for confirmation every time. The operation tree is loaded lazily, one type at a
+  time.
 - **Keyboard.** The tree follows the WAI-ARIA tree pattern: Up and Down move between items, Home and
   End go to the first and last item, Right expands or enters the children, Left collapses or moves to
   the parent, Space or Enter checks or unchecks an item.
 - **Confirmations.** Any edit that empties a non-empty list asks for confirmation first, because an
   empty list restores the read-only default, which allows every query outside `admin`: Clear, Clear queries or Clear
   mutations, unchecking the last checked item, and removing the last entry. Clearing queries while
-  mutations remain, and allowing all mutations, are confirmed too. Discard changes is never confirmed:
-  it restores the saved list.
-- **Locked operations.** The never-allowed paths, `mutation:communityMcp` and `mutation:admin.jahia.configuration`,
-  are shown but cannot be checked.
+  mutations remain, allowing all mutations, and checking an `admin` query are confirmed too. Discard
+  changes is never confirmed: it restores the saved list. While a confirmation dialog is open, the rest
+  of the page is inert: it cannot be focused or used.
+- **Locked operations.** The never-allowed paths are shown but cannot be checked:
+  `mutation:communityMcp`, `mutation:admin.jahia.configuration`, `mutation:admin.personalApiTokens`, and
+  every mutation path with a `grantRoles` or `revokeRoles` segment.
 - **Entries that need your attention.** Entries whose root operation is missing from the current
   schema, entries that are locked, and entries the server ignores (another operation type such as
   `subscription:`, or a malformed entry) are kept in the list and shown there as such, each with a
@@ -433,10 +440,17 @@ through `communityMcp { saveSettings }`.
 - **Focus.** Focus never gets lost. After a confirmed edit whose control disappears, it goes to the
   allow-list heading; after Discard changes or Dismiss, to Save; after Remove, to the next entry of the
   same list (the previous one at the end), else to the list summary or the allow-list heading.
+- **Policy banner.** The banner states the policy the list gives. With unsaved changes it shows both the
+  policy in force now and the policy that applies after you save.
 - **Clusters.** On a cluster, the page warns that saving changes the allow list of the node that serves
-  the page only.
+  the page only, and the success message after a save repeats that the other nodes are unchanged.
 - **Messages.** Status messages never time out. A success or info message clears on the next edit; an
   error stays until it is dismissed or the save is retried. A failed save shows the server's reason.
+- **Expired session.** If the Jahia session has expired (HTTP 401 or 403) when the page saves or loads,
+  it says so instead of showing a generic error. Unsaved changes are kept in the browser tab
+  (`sessionStorage`). After you log in again and reload the page, they are restored only if the saved
+  list on the server has not changed in the meantime; otherwise they are dropped and the server's list
+  is shown.
 - The UI targets WCAG 2.2 Level AAA.
 
 ## Security notes
@@ -524,8 +538,9 @@ through `communityMcp { saveSettings }`.
 | A denial that mentions a named fragment | The document contains a `...Name` spread. Refused in every state | Inline the fields, or use `... on Type { … }` |
 | `Operation not allowed: subscriptions are not supported` | A subscription was sent while the whitelist is empty (read-only default) | Subscriptions are not available through this tool. With a whitelist, the message is `'subscription:<path>' is not in the whitelist` |
 | `Malformed whitelist entry '…': expected query:<path> or mutation:<path>` | `saveSettings` rejected an entry | Correct the entry; `<path>` is dot-separated GraphQL names |
-| `Whitelist entry '…' is refused: …` | The entry names a never-allowed path (`mutation:communityMcp` or `mutation:admin.jahia.configuration`, or anything under them) | Not allowed; by design |
-| `The GraphQL schema could not be introspected.` (`internal`) | The GraphQL servlet is not available | Check that `graphql-dxm-provider` is started, then the Jahia log |
+| `Whitelist entry '…' is refused: …` | The entry names a never-allowed path (`mutation:communityMcp`, `mutation:admin.jahia.configuration`, `mutation:admin.personalApiTokens`, a path with a `grantRoles` or `revokeRoles` segment, or anything under them) | Not allowed; by design |
+| `The Jahia GraphQL service is not available on this node.` (`unavailable`) | The GraphQL servlet of `graphql-dxm-provider` is not available (WARN: `The GraphQL servlet (component.name=…) is not available`) | Check that `graphql-dxm-provider` is started and that its servlet component still has that name |
+| `The GraphQL schema could not be introspected.` (`internal`) | The GraphQL servlet returned no schema | Check that `graphql-dxm-provider` is started, then the Jahia log |
 | `The GraphQL operation could not be executed.` (`internal`) | The servlet failed | Check the Jahia log |
 | A `validation` error saying the response exceeds the 5 MB limit | The query selects too much | Do not retry the same document: select fewer fields, paginate, or query a narrower path |
 | `GraphQL endpoint returned HTTP <n>: …` | `graphql-dxm-provider` rejected the request: 400 → `validation`, 401 or 403 → `forbidden`, anything else → `internal` | For 400, fix the document; for 401 or 403, check the caller's permissions; otherwise check the Jahia log |
@@ -534,7 +549,8 @@ through `communityMcp { saveSettings }`.
 | `The MCP whitelist could not be stored, see the server log` | ConfigurationAdmin failed to store the list | Check the Jahia log and the write permissions on `karaf/etc` |
 | `The MCP skill service is not available` | The skill component is not active | Check the bundle state and the Jahia log |
 | `The MCP configuration service is not available: check that the org.jahia.community.mcp configuration exists` | The `org.jahia.community.mcp` configuration is missing. The gated tool and the settings API are disabled, and the UI cannot save | Restore `org.jahia.community.mcp.cfg` in `karaf/etc` (or re-deploy the bundle). The UI works again once the configuration exists |
-| `community.graphql.execute` missing from `tools/list` | The whitelist configuration is missing, or the GraphQL servlet is not available | Restore the configuration; check that `graphql-dxm-provider` is started |
+| `community.graphql.execute` missing from `tools/list` | The whitelist configuration is missing | Restore the configuration |
+| ERROR: `Unreadable MCP configuration update; keeping the previous whitelist` | The updated `org.jahia.community.mcp` configuration could not be read | Correct the `.cfg`; until then the previous whitelist stays in force |
 | `Community MCP caller identity is not bound … denying` (WARN) | The caller is not bound on the thread, or the bound user differs from the request user. Usually a version mismatch with `mcp-server` | Use `mcp-server` 0.5.x |
 | `Invalid skill name: …` (GraphQL error of `saveSkill` or `deleteSkill`) | The key breaks the name rules | Use `[A-Za-z0-9_-]` segments separated by single `/` |
 | `The skill content is too long: …` | `content` exceeds 200,000 characters | Split the skill |
@@ -551,6 +567,7 @@ through `communityMcp { saveSettings }`.
 | UI: `Entries that need your attention` | The entry's root operation is not in the schema, it is locked, or the server ignores it (malformed, or another operation type such as `subscription:`) | Remove it, unless it is expected to come back. Locked and ignored entries block Save |
 | UI: `The settings were not saved. The server said: …` | The server rejected the list | Read the reason and correct the entry |
 | UI: browser warning when reloading or closing the page | The list changed and was not saved | Save, or use **Discard changes**. Moving to another administration page does not warn |
+| UI: a message that the Jahia session has expired | The session ended before a save or load | Log in again, then save again or reload the page. Unsaved changes are restored unless the server's list changed meanwhile |
 
 ## Migrating from 1.x
 
@@ -596,9 +613,13 @@ written only through the administrator-gated `saveSkill` and `deleteSkill` opera
 ## Testing
 
 ```bash
-mvn clean install              # Java unit tests + React (webpack) build + bundle
+mvn clean install              # Java unit tests + JaCoCo check + React (webpack) build + bundle
 yarn test                      # Jest tests of the administration UI: not run by Maven
 ```
+
+Coverage is enforced. `mvn verify` (and so `install`) fails when JaCoCo line coverage of the bundle is
+below 90%. `yarn test` fails below the Jest thresholds set in `jest.config.js` (95% of statements, lines
+and functions, 90% of branches).
 
 Docker-based Cypress integration tests live in `tests/`. They provision `mcp-server` 0.5.0-SNAPSHOT. The
 suite needs a Jahia instance of its own: the whitelist is one server-wide configuration, and the token,

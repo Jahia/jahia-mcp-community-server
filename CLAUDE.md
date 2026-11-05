@@ -107,8 +107,11 @@ community tool denies (fail closed). Check it on every mcp-server upgrade (`07-m
 - The buffer is capped at `MAX_RESPONSE_BYTES` = 5 MB. Beyond it the bytes are dropped, the overflow flag
   is set, and `execute` fails. The tool returns `validation` with a hint to narrow the query (select fewer
   fields, paginate), never "retry": the same document would overflow again.
-- The servlet is injected with a target on `(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)`.
-  If that name changes, execute and introspect silently disappear from `tools/list`.
+- The servlet is injected with a target on `(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)`,
+  as an OPTIONAL, GREEDY reference. When it is missing (provider stopped, component renamed), the client logs a
+  WARN naming the target and `execute` throws `ServletUnavailableException`; execute and introspect stay in
+  `tools/list` and answer `unavailable` (`ToolSupport.graphQLUnavailable`), never an NPE or a "retry" hint.
+  The component is reactivated when the servlet appears.
 
 ### introspect — bounded discovery
 
@@ -156,6 +159,9 @@ Configuration (`McpConfigService`, PID `org.jahia.community.mcp`):
 - A CSV value and an array both arrive as `String[]` and are joined and parsed as one list.
 - The current state is one immutable `WhitelistSnapshot` (`raw`, `normalized`, `maxDepth`), replaced
   atomically on `@Modified`. The gate reads one snapshot per call.
+- A configuration update that cannot be read keeps the previous snapshot (ERROR log). One that cannot be
+  read at activation installs a deny-everything snapshot until it is fixed. Never fall back to empty: that
+  is the read-only default, wider than most explicit lists.
 - `saveWhitelist` validates every entry first. A malformed or never-allowed entry throws
   `IllegalArgumentException` naming the entry, and nothing is written. Otherwise it writes the
   `whitelist` key through `ConfigurationAdmin`.
@@ -224,13 +230,26 @@ with the denial texts of `GraphQLWhitelistGate`, or the hints go wrong.
   (`edit()` in `CommunityMcpConfig.jsx`), because an empty list restores the read-only default. Clearing
   queries while mutations remain and allowing all mutations are confirmed too. Discard is never confirmed.
   "Allow all queries" checks every query root except `admin` (it exposes configuration values, secrets
-  included), matching the read-only default.
-- `communityMcp { settings { clustered } }` tells the UI whether Jahia runs as a cluster; it then warns that
-  saving changes the allow list of the serving node only.
+  included), matching the read-only default. Checking `query:admin` or a field under it is confirmed every
+  time.
+- While a `ConfirmDialog` is open, the rest of the page is `inert`; the attribute is removed before focus
+  returns to the opener.
+- `communityMcp { settings { clustered } }` tells the UI whether Jahia runs as a cluster; it then shows
+  `clusterNote` (saving changes the allow list of the serving node only) and, after a save,
+  `saveSuccessCluster` instead of the plain success message.
+- The policy banner (`policyOf`) shows the policy in force (`policyInForce`, the saved list) and, with
+  unsaved changes, the policy after save (`policyPendingPrefix`).
+- Session expiry: a 401 or 403 on load or save shows `loadSessionExpired` / `saveSessionExpired` instead of
+  the generic error. Unsaved edits are kept in `sessionStorage` (`draft.js`) with the server list they were
+  made against, and restored after re-login only if the server still holds that list; otherwise the draft
+  is dropped.
 - Operation paths are `query:<name>…` / `mutation:<name>…` (`operationTree.js`). Legacy entries are shown
   as `query:` entries and the form starts dirty, so it can be saved in the new form.
-- Locked: the never-allowed paths `mutation:communityMcp` and `mutation:admin.jahia.configuration` cannot
-  be checked. Problem entries (`findProblemEntries`), each with Remove: locked, root not in the schema, and
+- Locked: the never-allowed paths cannot be checked: `mutation:communityMcp`,
+  `mutation:admin.jahia.configuration`, `mutation:admin.personalApiTokens`, and any mutation path with a
+  `grantRoles` or `revokeRoles` segment. The rules live in `policyRules.js`, which mirrors `WhitelistEntries`:
+  keep both in sync.
+- Problem entries (`findProblemEntries`), each with Remove: locked, root not in the schema, and
   invalid (another operation type or malformed: the server ignores them). Invalid entries are kept, never
   dropped. A list holding only invalid entries shows the "everything refused" banner (`policyOf`).
 - Save calls `communityMcp { saveSettings(whitelist) }`. It is blocked client-side, with a message naming
@@ -277,9 +296,13 @@ with the denial texts of `GraphQLWhitelistGate`, or the hints go wrong.
 ## Build
 
 ```bash
-mvn clean install          # Java unit tests (JUnit 5) + React (webpack) build + bundle
+mvn clean install          # Java unit tests (JUnit 5) + JaCoCo check + React (webpack) build + bundle
 yarn test                  # Jest: NOT run by Maven (the frontend plugin only runs yarn build:production)
 ```
+
+Coverage gates: JaCoCo `check` is bound to `verify` and fails below 90% line coverage of the bundle (pom.xml).
+Jest fails below the `coverageThreshold` of `jest.config.js` (95% statements, lines, functions; 90% branches).
+Add tests with the code, never lower a threshold to pass.
 
 Requires `org.jahia.modules:mcp-server:0.5.0-SNAPSHOT` in a reachable Maven repository (Jahia public or
 snapshot Nexus, or `mvn install` of mcp-server locally). The `jahia-depends` value is

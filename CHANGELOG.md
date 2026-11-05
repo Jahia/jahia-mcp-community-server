@@ -14,7 +14,7 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
 - **Tool names.** `executeGraphQL` → `community.graphql.execute`; `introspectSchema` →
   `community.graphql.introspect`; `listSkills` → `community.skill.list`; `getSkill` → `community.skill.get`.
 - **Error envelope.** Errors are `{"error":{"code","message","hint"}}` with `isError: true`, using the codes
-  `forbidden`, `validation`, `not_found` and `internal`. The 1.x text format is gone.
+  `forbidden`, `validation`, `not_found`, `unavailable` and `internal`. The 1.x text format is gone.
 - **Authentication.** The token scopes `graphql` and `community-mcp` are gone. Any token accepted by
   `mcp-server` works, and the caller must hold `admin` on the repository root. The community tools need an
   explicit `Authorization` header (API token or HTTP Basic): a call authenticated only by a session cookie
@@ -78,6 +78,9 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   GraphQL variables, never formatted into the document.
 - **Bounded responses.** In-process GraphQL responses are capped at 5 MB. A larger response is refused with
   `validation` and a hint to narrow the query.
+- **Unreadable configuration.** A configuration update that cannot be read keeps the whitelist in force and
+  logs an ERROR; one that cannot be read at startup refuses every operation until it is fixed. Neither falls
+  back to the read-only default.
 - **Skill container.** The skills container has its ACL inheritance broken. Skills are written only through the
   administrator-gated operations and the module's own seeding, which run as the system session. Skill node
   types are checked before reads, updates and deletes.
@@ -102,7 +105,12 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   request the rest.
 - **Skill management.** `saveSkill` creates intermediate folders for nested keys.
 - **Cluster flag.** `communityMcp { settings { clustered } }` reports whether Jahia runs as a cluster; the
-  administration UI then warns that saving affects this node only.
+  administration UI then warns that saving affects this node only, and says so again after a save.
+- **Missing GraphQL servlet.** When `graphql-dxm-provider`'s servlet is not available, `community.graphql.execute`
+  and `community.graphql.introspect` stay listed and refuse each call with `unavailable` and a hint naming
+  `graphql-dxm-provider`, instead of disappearing from `tools/list`.
+- **Coverage gates.** `mvn verify` fails below 90% JaCoCo line coverage, and `yarn test` fails below the
+  Jest thresholds of `jest.config.js`.
 - **Troubleshooting guide** in the README.
 
 ### Changed
@@ -111,8 +119,15 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   - The allow list is an accessible tree with arrow keys, Home and End, and Space or Enter to check an item.
   - Queries and mutations are separate groups, each with bulk actions. "Allow all queries" leaves the `admin`
     namespace unchecked.
-  - Confirmation before clearing the list, clearing queries while mutations remain, and allowing all mutations.
-  - The never-allowed paths, `mutation:communityMcp` and `mutation:admin.jahia.configuration`, are shown but locked.
+  - Confirmation before clearing the list, clearing queries while mutations remain, allowing all mutations,
+    and each time `query:admin` or a field under it is checked. The rest of the page is inert while a
+    confirmation is open.
+  - The never-allowed paths are shown but locked: `mutation:communityMcp`, `mutation:admin.jahia.configuration`,
+    `mutation:admin.personalApiTokens`, and every mutation path with a `grantRoles` or `revokeRoles` segment.
+  - The policy banner shows the policy in force and, with unsaved changes, the policy after save.
+  - An expired Jahia session (HTTP 401 or 403) on save or load is reported as such. Unsaved changes are kept
+    in the browser tab and restored after logging in again, only if the saved list on the server has not
+    changed meanwhile.
   - Entries that are unknown to the schema, locked, or ignored by the server (malformed, or another operation
     type such as `subscription:`) are listed with a Remove action. Locked and ignored entries block Save.
   - The filter matches all root operations and the fields already loaded.
