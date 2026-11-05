@@ -21,7 +21,7 @@ LiveRegion.propTypes = {
     className: PropTypes.string
 };
 
-const isFocusLost = () => {
+export const isFocusLost = () => {
     const active = document.activeElement;
     return !active || active === document.body || !active.isConnected;
 };

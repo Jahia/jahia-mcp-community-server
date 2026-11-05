@@ -3,7 +3,8 @@ import PropTypes from 'prop-types';
 import styles from './CommunityMcpConfig.scss';
 
 // Modal confirmation (role=alertdialog). Focus starts on Cancel (the safe choice), Tab stays
-// inside the dialog, Escape cancels, and focus returns to the control that opened it.
+// inside the dialog (also against mouse clicks outside it), Escape cancels, and focus returns
+// to the control that opened it.
 export const ConfirmDialog = ({title, body, confirmLabel, cancelLabel, onConfirm, onCancel}) => {
     const dialogRef = useRef(null);
     const cancelRef = useRef(null);
@@ -11,12 +12,29 @@ export const ConfirmDialog = ({title, body, confirmLabel, cancelLabel, onConfirm
     useEffect(() => {
         const opener = document.activeElement;
         cancelRef.current.focus();
+        // The page behind is not inert: focus that still reaches it (a click outside the
+        // dialog, assistive technology) is sent back to Cancel, the safe choice.
+        const keepFocusInside = e => {
+            if (dialogRef.current && !dialogRef.current.contains(e.target)) {
+                cancelRef.current?.focus();
+            }
+        };
+
+        document.addEventListener('focusin', keepFocusInside);
         return () => {
+            document.removeEventListener('focusin', keepFocusInside);
             if (opener && typeof opener.focus === 'function') {
                 opener.focus();
             }
         };
     }, []);
+
+    // A mouse-down on the backdrop would move focus to <body>: swallow it.
+    const handleBackdropMouseDown = e => {
+        if (e.target === e.currentTarget) {
+            e.preventDefault();
+        }
+    };
 
     const handleKeyDown = e => {
         if (e.key === 'Escape') {
@@ -42,7 +60,7 @@ export const ConfirmDialog = ({title, body, confirmLabel, cancelLabel, onConfirm
     };
 
     return (
-        <div className={styles.mcp_backdrop}>
+        <div className={styles.mcp_backdrop} onMouseDown={handleBackdropMouseDown}>
             <div ref={dialogRef}
                  role="alertdialog"
                  aria-modal="true"

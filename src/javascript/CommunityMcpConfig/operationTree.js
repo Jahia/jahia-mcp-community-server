@@ -134,17 +134,19 @@ const countEntriesOfType = (set, isQuery) =>
     [...set].filter(e => isValidEntry(e) && e.startsWith(typePrefix(isQuery))).length;
 
 // The policy the server applies to this list (GraphQLWhitelistGate): an empty list is the
-// read-only default; a non-empty list whose entries are all ignored refuses everything.
+// read-only default; a non-empty list whose entries are all ignored (malformed) or never
+// allowed (locked) refuses everything.
 const policyOf = set => {
     if (set.size === 0) {
         return {kind: 'info', key: 'label.policyReadOnly'};
     }
 
-    if (![...set].some(isValidEntry)) {
+    const effective = new Set([...set].filter(e => isValidEntry(e) && !isLockedPath(e)));
+    if (effective.size === 0) {
         return {kind: 'warning', key: 'label.policyDenyAll'};
     }
 
-    return countEntriesOfType(set, true) === 0 ?
+    return countEntriesOfType(effective, true) === 0 ?
         {kind: 'warning', key: 'label.policyNoQuery'} :
         {kind: 'info', key: 'label.policyRestricted'};
 };

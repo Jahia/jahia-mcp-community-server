@@ -25,6 +25,25 @@ describe('locales', () => {
         keys.split(' ').forEach(key => expect(en.label[key]).toEqual(expect.any(String)));
     });
 
+    test('the serverChanged key exists in both languages', () => {
+        expect(en.label.serverChanged).toEqual(expect.any(String));
+        expect(fr.label.serverChanged).toEqual(expect.any(String));
+    });
+
+    test('every locked-entry reason says the entry blocks Save', () => {
+        ['problemLocked', 'problemLockedConfiguration'].forEach(key => {
+            expect(en.label[key]).toContain('Remove it before saving.');
+            expect(fr.label[key]).toContain('Supprimez-la avant d\'enregistrer.');
+        });
+    });
+
+    test('the empty-list texts say the admin query namespace is refused too', () => {
+        ['policyReadOnly', 'helpDefault', 'queriesNoteDefault', 'confirmClearBody'].forEach(key => {
+            expect(en.label[key]).toContain('except the admin namespace');
+            expect(fr.label[key]).toContain('sauf l\'espace de noms admin');
+        });
+    });
+
     test('field counts use plural forms in English and French', async () => {
         const tEn = await instance('en');
         expect(tEn('label.fieldsLoaded', {count: 1, name: 'admin'})).toBe('admin: 1 field loaded.');

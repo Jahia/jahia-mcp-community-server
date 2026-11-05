@@ -23,7 +23,7 @@ import {OperationTree} from './OperationTree';
 import {ConfirmDialog} from './ConfirmDialog';
 import {AllEntries, ProblemEntries} from './AllowListEntries';
 import {SaveBar} from './SaveBar';
-import {LiveRegion, useAnnouncer, useFocusRecovery} from './a11y';
+import {isFocusLost, LiveRegion, useAnnouncer, useFocusRecovery} from './a11y';
 import {useMcpTranslation} from './i18n';
 
 const EMPTY = new Set();
@@ -129,18 +129,35 @@ export const CommunityMcpConfigAdmin = () => {
     };
 
     const settingsData = settingsResult.data;
+    // Read by the sync effect below without re-running it on every edit.
+    const editState = useRef({isDirty: false, saved: EMPTY});
     // Sync server settings into local state via an effect rather than `onCompleted`, which
     // fires on unrelated cache writes and would clobber unsaved edits.
     useEffect(() => {
-        if (settingsData?.communityMcp?.settings) {
-            // Legacy unprefixed entries are shown as the query-only entries the server enforces;
-            // if any were rewritten, the form starts dirty so the new form can be saved. Entries
-            // the server ignores are kept as written and listed as problems (never dropped).
-            const {entries, migrated} = normalizeWhitelist(settingsData.communityMcp.settings.whitelist);
-            setWhitelist(entries);
-            setSaved(entries);
-            setMigrated(migrated);
+        if (!settingsData?.communityMcp?.settings) {
+            return;
         }
+
+        // Legacy unprefixed entries are shown as the query-only entries the server enforces;
+        // if any were rewritten, the form starts dirty so the new form can be saved. Entries
+        // the server ignores are kept as written and listed as problems (never dropped).
+        const {entries, migrated} = normalizeWhitelist(settingsData.communityMcp.settings.whitelist);
+        const {isDirty: hasPendingEdits, saved: current} = editState.current;
+        if (hasPendingEdits) {
+            // A refetch or cache reset by the shell must never overwrite pending edits: keep them,
+            // compare them with what the server holds now, and say that it changed.
+            if (!setsEqual(entries, current)) {
+                setSaved(entries);
+                setStatus({kind: 'info', message: t('label.serverChanged')});
+            }
+
+            return;
+        }
+
+        setWhitelist(entries);
+        setSaved(entries);
+        setMigrated(migrated);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [settingsData]);
 
     const isLoading = queryFieldsResult.loading || mutationFieldsResult.loading || settingsResult.loading;
@@ -151,6 +168,32 @@ export const CommunityMcpConfigAdmin = () => {
     } else if (failedResults.length > 0) {
         loadErrorKey = 'label.schemaLoadError';
     }
+
+    // "Try again" disappears while loading and once the data arrives. When the retry settles,
+    // focus goes to the panel heading, or back to "Try again" if it failed again after a loading
+    // state removed it (WCAG 2.4.3). Focus left on a control that still exists is never moved.
+    const retry = useRef(null);
+    useEffect(() => {
+        if (!retry.current) {
+            return;
+        }
+
+        if (isLoading) {
+            retry.current.sawLoading = true;
+            return;
+        }
+
+        if (loadErrorKey && !retry.current.sawLoading) {
+            return;
+        }
+
+        retry.current = null;
+        const root = rootRef.current;
+        const target = loadErrorKey ? root.querySelector('#mcp-retry') : focusPanelHeading(root);
+        if (target && isFocusLost()) {
+            target.focus();
+        }
+    });
 
     const wasLoading = useRef(isLoading);
     useEffect(() => {
@@ -163,6 +206,7 @@ export const CommunityMcpConfigAdmin = () => {
 
     const filter = filterInput.trim();
     const isDirty = isMigrated || !setsEqual(whitelist, saved);
+    editState.current = {isDirty, saved};
     useUnsavedChangesGuard(isDirty);
 
     const operations = buildOperationMap(
@@ -310,6 +354,14 @@ export const CommunityMcpConfigAdmin = () => {
         requestFocus(focusSave);
     };
 
+    // A failed refetch is shown from the query's own error state, so its rejection is only logged.
+    const retryLoad = () => {
+        retry.current = {sawLoading: false};
+        failedResults.forEach(r => {
+            Promise.resolve(r.refetch?.()).catch(err => console.error('Failed to reload MCP settings:', err));
+        });
+    };
+
     const renderBody = () => {
         if (isLoading) {
             return (
@@ -324,9 +376,10 @@ export const CommunityMcpConfigAdmin = () => {
             return (
                 <div role="alert" className={`${styles.mcp_alert} ${styles['mcp_alert--error']}`}>
                     <p className={styles.mcp_alertText}><strong>{t('label.errorPrefix')}</strong> {t(loadErrorKey)}</p>
-                    <button type="button"
+                    <button id="mcp-retry"
+                            type="button"
                             className={`${styles.mcp_btn} ${styles['mcp_btn--small']}`}
-                            onClick={() => failedResults.forEach(r => r.refetch && r.refetch())}
+                            onClick={retryLoad}
                     >
                         {t('label.retry')}
                     </button>
