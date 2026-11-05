@@ -34,7 +34,7 @@ public class SkillListTool extends AbstractSkillTool {
     protected ToolResult doExecute(final JsonNode input, final ToolContext ctx) {
         final ObjectNode result = ToolSupport.MAPPER.createObjectNode();
         final ArrayNode skills = result.putArray("skills");
-        for (final McpSkillService.SkillEntry e : skillService.listSkills()) {
+        for (final McpSkillService.SkillEntry e : skillService.listSkillHeaders()) {
             skills.addObject()
                     .put("name", e.path)
                     .put("mcpName", e.mcpName)

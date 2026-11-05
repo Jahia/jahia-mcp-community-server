@@ -69,7 +69,7 @@ class GraphQLWhitelistGateTest {
     void empty_whitelist_allows_queries_without_warning() {
         whitelist(Collections.emptySet());
 
-        Optional<String> result = gate.check("{ admin { jahia } }", "alice", "1.2.3.4");
+        Optional<String> result = gate.check("{ jcr { nodeByPath(path: \"/\") { name } } }", "alice", "1.2.3.4");
 
         assertThat(result).isEmpty();
         assertThat(warnMessages()).as("read-only mode is logged on config change, not per call").isEmpty();
@@ -113,9 +113,9 @@ class GraphQLWhitelistGateTest {
         whitelist(Collections.emptySet());
 
         assertThat(gate.check("{ __schema { types { name } } }", "alice", "1.2.3.4")).isEmpty();
-        assertThat(gate.check("{ admin { ...F } } fragment F on AdminQueries { jahia { isAlive } }", "alice", "1.2.3.4"))
+        assertThat(gate.check("{ jcr { ...F } } fragment F on JCRQuery { nodeByPath(path: \"/\") { name } }", "alice", "1.2.3.4"))
                 .hasValueSatisfying(msg -> assertThat(msg).contains("named fragment spreads are not permitted"));
-        assertThat(gate.check("{ admin { ... on AdminQueries { jahia { isAlive } } } }", "alice", "1.2.3.4")).isEmpty();
+        assertThat(gate.check("{ jcr { ... on JCRQuery { nodeByPath(path: \"/\") { name } } } }", "alice", "1.2.3.4")).isEmpty();
     }
 
     @Test

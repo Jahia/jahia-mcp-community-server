@@ -311,6 +311,28 @@ class McpSkillServiceTest {
     }
 
     @Test
+    @DisplayName("listSkillHeaders returns the same skills without loading their body")
+    void list_headers_has_no_content() throws Exception {
+        jcr.container();
+        jcr.queryReturns(jcr.skill("default/hello", "Hello", "Says hi", "# Hi"));
+
+        final List<McpSkillService.SkillEntry> skills = service.listSkillHeaders();
+
+        assertThat(skills).extracting(s -> s.path).containsExactly("default/hello");
+        assertThat(skills.get(0).mcpName).isEqualTo("Hello");
+        assertThat(skills.get(0).content).isEmpty();
+    }
+
+    @Test
+    @DisplayName("saveSkill refuses a body longer than MAX_CONTENT_CHARS and writes nothing")
+    void save_refuses_oversized_content() throws Exception {
+        jcr.container();
+
+        assertThat(service.saveSkill("big", "n", "d", "x".repeat(McpSkillService.MAX_CONTENT_CHARS + 1))).isFalse();
+        assertThat(service.saveSkill("ok", "n", "d", "x".repeat(McpSkillService.MAX_CONTENT_CHARS))).isTrue();
+    }
+
+    @Test
     @DisplayName("listSkills returns nothing when the repository fails")
     void list_repository_failure() throws Exception {
         when(template.doExecuteWithSystemSession(any(JCRCallback.class))).thenThrow(new RepositoryException("down"));
@@ -478,16 +500,5 @@ class McpSkillServiceTest {
     void relative_path() {
         assertThat(McpSkillService.relativePath(ROOT + "/a/b")).isEqualTo("a/b");
         assertThat(McpSkillService.relativePath("/elsewhere/a")).isEqualTo("/elsewhere/a");
-    }
-
-    @Test
-    @DisplayName("both SkillEntry constructors are kept; the 4-arg form is a root-level skill")
-    void skill_entry_constructors() {
-        final McpSkillService.SkillEntry four = new McpSkillService.SkillEntry("n", "m", "d", "c");
-        final McpSkillService.SkillEntry five = new McpSkillService.SkillEntry("n", "p/n", "m", "d", "c");
-
-        assertThat(four.path).isEqualTo("n");
-        assertThat(five.path).isEqualTo("p/n");
-        assertThat(five.name).isEqualTo("n");
     }
 }

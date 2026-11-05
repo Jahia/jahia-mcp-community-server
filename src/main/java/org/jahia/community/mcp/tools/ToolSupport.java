@@ -2,6 +2,7 @@ package org.jahia.community.mcp.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
 import org.slf4j.Logger;
@@ -48,11 +49,6 @@ final class ToolSupport {
         }
     }
 
-    /** Records the mandatory audit event for {@code result} and returns it unchanged. */
-    static ToolResult audited(final ToolContext ctx, final String toolName, final ToolResult result) {
-        return audited(ctx, toolName, result, Map.of());
-    }
-
     /**
      * Records the mandatory audit event, with {@code extra} details, and returns {@code result}
      * unchanged. An audit backend failure is logged, never propagated: the operation has already
@@ -62,7 +58,7 @@ final class ToolSupport {
             final Map<String, Object> extra) {
         final Map<String, Object> details = new LinkedHashMap<>();
         details.put("tool", toolName);
-        details.put("user", ctx.username());
+        details.put("user", LogSupport.clean(ctx.username()));
         if (result.isError()) {
             details.put("code", result.error().code());
         }

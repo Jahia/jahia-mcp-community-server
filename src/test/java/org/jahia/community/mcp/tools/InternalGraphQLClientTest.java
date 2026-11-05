@@ -65,6 +65,33 @@ class InternalGraphQLClientTest {
     }
 
     @Test
+    @DisplayName("request attributes round-trip (the dxm provider stores variables and fragments there)")
+    void attributes_round_trip() throws Exception {
+        final AtomicReference<Object> read = new AtomicReference<>();
+        final AtomicReference<Object> afterRemove = new AtomicReference<>("untouched");
+        final AtomicReference<java.util.List<String>> names = new AtomicReference<>();
+        HttpServlet servlet = new HttpServlet() {
+            @Override
+            protected void service(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+                req.setAttribute("graphQLVariables", Map.of("a", 1));
+                req.setAttribute("dropped", null);
+                req.setAttribute("tmp", "x");
+                names.set(java.util.Collections.list(req.getAttributeNames()));
+                req.removeAttribute("tmp");
+                read.set(req.getAttribute("graphQLVariables"));
+                afterRemove.set(req.getAttribute("tmp"));
+                resp.getWriter().write("{\"data\":{}}");
+            }
+        };
+
+        run(servlet, "{ x }", null);
+
+        assertThat(read.get()).isEqualTo(Map.of("a", 1));
+        assertThat(afterRemove.get()).isNull();
+        assertThat(names.get()).containsExactlyInAnyOrder("graphQLVariables", "tmp");
+    }
+
+    @Test
     @DisplayName("multi-byte UTF-8 written through the output stream is decoded intact")
     void utf8_output_stream_is_decoded() throws Exception {
         HttpServlet servlet = new HttpServlet() {

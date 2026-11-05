@@ -257,4 +257,43 @@ class McpConfigServiceTest {
 
         assertThatThrownBy(() -> service().saveWhitelist(List.of("query:x"))).isInstanceOf(IOException.class);
     }
+
+    @Test
+    @DisplayName("PRB2-14: the component fails closed, its configuration is REQUIRED")
+    void component_requires_its_configuration() throws IOException {
+        // @Component has CLASS retention (invisible to reflection): read the annotation values from the
+        // class file's constant pool, where the enum constant name is stored.
+        final String constants;
+        try (java.io.InputStream in = McpConfigService.class.getResourceAsStream("McpConfigService.class")) {
+            constants = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.ISO_8859_1);
+        }
+
+        assertThat(constants).contains("Lorg/osgi/service/component/annotations/ConfigurationPolicy;")
+                .contains("REQUIRE")
+                .doesNotContain("OPTIONAL").doesNotContain("IGNORE");
+    }
+
+    @Test
+    @DisplayName("PRB2-4: CR/LF in a rejected entry cannot forge log lines nor leak into the client message")
+    void rejected_entry_is_cleaned() {
+        final ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(McpConfigService.class);
+        final ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            final McpConfigService service = service();
+            final List<String> hostile = List.of("x\nINFO forged line");
+            assertThatThrownBy(() -> service.saveWhitelist(hostile))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageNotContaining("\n");
+            service("bad\rentry\n");
+
+            assertThat(appender.list).isNotEmpty().allSatisfy(e -> assertThat(e.getFormattedMessage())
+                    .doesNotContain("\n").doesNotContain("\r"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
 }

@@ -57,7 +57,7 @@ public class McpQuery {
 
         @GraphQLField
         @GraphQLName("whitelist")
-        @GraphQLDescription("Whitelist entries (query:<path> / mutation:<path>). Empty is the read-only default: every query is allowed, no mutation and no subscription")
+        @GraphQLDescription("Whitelist entries (query:<path> / mutation:<path>). Empty is the read-only default: every query is allowed except those under 'admin' (needs query:admin), no mutation and no subscription")
         public List<String> getWhitelist() {
             return whitelist;
         }

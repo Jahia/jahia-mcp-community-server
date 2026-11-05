@@ -12,7 +12,7 @@ import java.util.Set;
  * operation-qualified form ({@code normalized}, malformed entries dropped) and the deepest path
  * the gate has to extract to decide every entry ({@code maxDepth}).
  *
- * <p>An empty {@code raw} set is the read-only default: every query is allowed, no mutation and
+ * <p>An empty {@code raw} set is the read-only default: every query is allowed except those under {@code admin}, no mutation and
  * no subscription is.</p>
  */
 public final class WhitelistSnapshot {

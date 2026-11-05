@@ -52,8 +52,8 @@ class SkillToolsTest {
         @DisplayName("returns name, mcpName and description — not the content")
         void lists_skills() {
             ToolContextFixture f = ToolContextFixture.administrator();
-            when(skills.listSkills()).thenReturn(List.of(
-                    new McpSkillService.SkillEntry("hello-jahia", "Hello Jahia", "Greeting", "BODY")));
+            when(skills.listSkillHeaders()).thenReturn(List.of(
+                    new McpSkillService.SkillEntry("hello-jahia", "hello-jahia", "Hello Jahia", "Greeting", "BODY")));
 
             ToolResult result = tool.execute(MAPPER.createObjectNode(), f.ctx);
 
@@ -67,7 +67,7 @@ class SkillToolsTest {
         @DisplayName("a skill in a sub-folder is listed by its relative path, the key skill.get expects")
         void nested_skill_listed_by_relative_path() {
             ToolContextFixture f = ToolContextFixture.administrator();
-            when(skills.listSkills()).thenReturn(List.of(
+            when(skills.listSkillHeaders()).thenReturn(List.of(
                     new McpSkillService.SkillEntry("hello-jahia", "default/hello-jahia", "Hello Jahia", "Greeting", "BODY")));
 
             ToolResult result = tool.execute(MAPPER.createObjectNode(), f.ctx);
@@ -116,7 +116,7 @@ class SkillToolsTest {
         @DisplayName("returns the full skill including Markdown content")
         void returns_skill() {
             when(skills.getSkill("default/hello-jahia")).thenReturn(
-                    new McpSkillService.SkillEntry("hello-jahia", "Hello Jahia", "Greeting", "# Hi"));
+                    new McpSkillService.SkillEntry("hello-jahia", "hello-jahia", "Hello Jahia", "Greeting", "# Hi"));
 
             ToolResult result = tool.execute(input("default/hello-jahia"), ToolContextFixture.administrator().ctx);
 

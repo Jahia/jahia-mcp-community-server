@@ -16,6 +16,12 @@ import java.util.regex.Pattern;
  * <p>Internal form: the operation type is the first path segment ({@code mutation.jcr.deleteNode}),
  * matching the paths {@code org.jahia.community.mcp.access.GraphQLWhitelistGate} extracts from a document. Malformed entries and
  * other operation types (e.g. {@code subscription:}) normalize to nothing — they grant no access.</p>
+ *
+ * <p>Threat model note (PRB2-3, PRB2-12): the never-allowed list is deliberately short. A root caller
+ * can still rewrite skills through a whitelisted {@code mutation:jcr...}, and any other mutation that
+ * changes module state, configuration or code (from another module) is protected only by the
+ * administrator's choice of entries; prefer exact leaf paths over broad roots such as
+ * {@code mutation:jcr} or {@code mutation:admin}.</p>
  */
 public final class WhitelistEntries {
 
@@ -29,6 +35,12 @@ public final class WhitelistEntries {
      * whitelist PID, so it is denied too.
      */
     public static final String NEVER_ALLOWED_CONFIGURATION = "mutation.admin.jahia.configuration";
+    /**
+     * Internal path of the privileged {@code admin} query namespace (OSGi configuration values,
+     * secrets included). Refused in the read-only default; an explicit {@code query:admin...}
+     * entry re-enables it.
+     */
+    public static final String READ_ONLY_PROTECTED_QUERY = "query.admin";
     private static final java.util.List<String> NEVER_ALLOWED_ROOTS =
             java.util.List.of(NEVER_ALLOWED, NEVER_ALLOWED_CONFIGURATION);
     // Possessive quantifiers: no backtracking, linear on any input (S5998).
@@ -95,6 +107,12 @@ public final class WhitelistEntries {
             }
         }
         return false;
+    }
+
+    /** True if the internal {@code path} is, or lies under, a query namespace the read-only default refuses. */
+    public static boolean isReadOnlyProtected(final String path) {
+        return path != null && (path.equals(READ_ONLY_PROTECTED_QUERY)
+                || path.startsWith(READ_ONLY_PROTECTED_QUERY + "."));
     }
 
     /** User-facing form of an internal path: {@code mutation.jcr.x} → {@code mutation:jcr.x}. */
