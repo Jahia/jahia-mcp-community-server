@@ -29,7 +29,7 @@ describe('MCP Server — Endpoint Access Control', () => {
     const PROBE_ENTRY = 'mutation:jcr.mutateNode';
 
     // A read under the privileged admin namespace: this module's own configuration values.
-    const ADMIN_QUERY = '{ admin { jahia { configuration(pid: "org.jahia.community.mcp") { flatProperties { name value } } } } }';
+    const ADMIN_QUERY = '{ admin { jahia { configuration(pid: "org.jahia.community.mcp") { flatProperties { key value } } } } }';
 
     /** The call was refused by the whitelist gate (code forbidden), with a reason that holds every `fragments`. */
     const expectGateDenial = (response: McpResponse, ...fragments: string[]) => {
@@ -57,8 +57,10 @@ describe('MCP Server — Endpoint Access Control', () => {
         setWhitelist(['query:admin']);
         executeGraphQL(ADMIN_QUERY).then(response => {
             expect(response.body.result.isError).to.eq(false);
-            const properties: {name: string}[] = toolPayload(response).data.admin.jahia.configuration.flatProperties;
-            expect(properties.map(p => p.name)).to.include('whitelist');
+            const payload = toolPayload(response);
+            expect(payload.errors || [], 'GraphQL errors').to.have.length(0);
+            const properties: {key: string}[] = payload.data.admin.jahia.configuration.flatProperties;
+            expect(properties.map(p => p.key)).to.include('whitelist');
         });
     });
 
