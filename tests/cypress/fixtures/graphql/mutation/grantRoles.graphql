@@ -1,0 +1,7 @@
+mutation McpGrantRoles($path: String!, $principalName: String!, $roleNames: [String]!) {
+    jcr {
+        mutateNode(pathOrId: $path) {
+            grantRoles(principalType: USER, principalName: $principalName, roleNames: $roleNames)
+        }
+    }
+}
