@@ -210,4 +210,24 @@ class GraphQLIntrospectToolTest {
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_FORBIDDEN);
     }
+
+    @Test
+    @DisplayName("the per-type query unwraps [[X!]!]! fully: five ofType levels for args, fields and inputFields")
+    void type_query_unwraps_deeply_wrapped_types() throws Exception {
+        final org.mockito.ArgumentCaptor<String> query = org.mockito.ArgumentCaptor.forClass(String.class);
+        stubType("Q", typeResponse("Q", 1));
+
+        tool.execute(withTypeNames("Q"), ToolContextFixture.administrator().ctx);
+
+        verify(client).execute(any(), query.capture(), any());
+        final String doc = query.getValue();
+        // "type { name kind ofType { name kind ofType { name kind ofType { name kind ofType { name kind } } } } }"
+        final String deepest = "type { name kind ofType { name kind ofType { name kind ofType { name kind "
+                + "ofType { name kind } } } } }";
+        assertThat(doc).contains("args { name description " + deepest + " }")
+                .contains("inputFields { name description " + deepest + " }")
+                .contains(" " + deepest + " } inputFields");
+        assertThat(doc.split("fields\\(includeDeprecated", -1).length - 1)
+                .as("still exactly one __Type.fields selection").isEqualTo(1);
+    }
 }

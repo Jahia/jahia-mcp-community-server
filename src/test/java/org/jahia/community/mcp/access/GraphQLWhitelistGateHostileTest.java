@@ -50,16 +50,16 @@ class GraphQLWhitelistGateHostileTest {
         return new GraphQLWhitelistGate(config).check(query, "alice", "1.2.3.4");
     }
 
-    // ── PRB-1: named fragment spreads ─────────────────────────────────────────
+    // ── named fragment spreads ─────────────────────────────────────────
 
     @Test
-    @DisplayName("PRB-1: the exact bypass, mutation { ...F } in read-only mode, is denied")
+    @DisplayName("the exact bypass, mutation { ...F } in read-only mode, is denied")
     void read_only_mutation_spread_denied() {
         assertThat(check("mutation { ...F } fragment F on Mutation { " + DELETE + " }")).contains(SPREAD_DENIAL);
     }
 
     @Test
-    @DisplayName("PRB-1: communityMcp reached through a spread is denied, read-only and with a broad whitelist")
+    @DisplayName("communityMcp reached through a spread is denied, read-only and with a broad whitelist")
     void community_mcp_through_spread_denied() {
         final String q = "mutation { ...F } fragment F on Mutation { communityMcp { saveSettings(whitelist: [\"mutation:jcr\"]) } }";
 
@@ -68,7 +68,7 @@ class GraphQLWhitelistGateHostileTest {
     }
 
     @Test
-    @DisplayName("PRB-1: a spread next to __typename or inside nested fields and inline fragments is denied")
+    @DisplayName("a spread next to __typename or inside nested fields and inline fragments is denied")
     void nested_spreads_denied() {
         assertThat(check("mutation { __typename ...F } fragment F on Mutation { " + DELETE + " }")).contains(SPREAD_DENIAL);
         assertThat(check("mutation { jcr { mutateNode(pathOrId: \"/x\") { ...F } } } fragment F on M { delete }",
@@ -77,7 +77,7 @@ class GraphQLWhitelistGateHostileTest {
     }
 
     @Test
-    @DisplayName("PRB-1: spreads are refused in queries too, in read-only mode and under a whitelist")
+    @DisplayName("spreads are refused in queries too, in read-only mode and under a whitelist")
     void query_spreads_denied() {
         final String q = "{ admin { ...F } } fragment F on AdminQueries { jahia { isAlive } }";
 
@@ -87,13 +87,13 @@ class GraphQLWhitelistGateHostileTest {
     }
 
     @Test
-    @DisplayName("PRB-1: a subscription made only of a spread is denied")
+    @DisplayName("a subscription made only of a spread is denied")
     void subscription_spread_denied() {
         assertThat(check("subscription { ...S } fragment S on Subscription { x }")).contains(SPREAD_DENIAL);
     }
 
     @Test
-    @DisplayName("PRB-1: aliases do not hide a spread, nor the field behind an alias")
+    @DisplayName("aliases do not hide a spread, nor the field behind an alias")
     void aliases_and_spreads() {
         assertThat(check("mutation { safe: __typename x: ...F } fragment F on Mutation { " + DELETE + " }")).isPresent();
         assertThat(check("mutation { safe: ...F } fragment F on Mutation { " + DELETE + " }")).isPresent();
@@ -109,13 +109,13 @@ class GraphQLWhitelistGateHostileTest {
         "mutation { ...F @include(if: false) } fragment F on Mutation { jcr { deleteNode(pathOrId: \"/x\") } }",
         "mutation { ...F @skip(if: true) } fragment F on Mutation { jcr { deleteNode(pathOrId: \"/x\") } }",
         "mutation { ... @include(if: false) { ...F } } fragment F on Mutation { jcr { deleteNode(pathOrId: \"/x\") } }"})
-    @DisplayName("PRB-1: directives never hide a spread")
+    @DisplayName("directives never hide a spread")
     void directives_do_not_hide_spreads(final String q) {
         assertThat(check(q)).contains(SPREAD_DENIAL);
     }
 
     @Test
-    @DisplayName("PRB-1: directives never hide a field either")
+    @DisplayName("directives never hide a field either")
     void directives_do_not_hide_fields() {
         assertThat(check("mutation { jcr @include(if: false) { deleteNode(pathOrId: \"/x\") @skip(if: true) } }")).isPresent();
         assertThat(check("mutation { communityMcp @skip(if: true) { saveSettings(whitelist: []) } }",
@@ -123,14 +123,14 @@ class GraphQLWhitelistGateHostileTest {
     }
 
     @Test
-    @DisplayName("PRB-1: a fragment definition that is never used is harmless")
+    @DisplayName("a fragment definition that is never used is harmless")
     void unused_fragment_definition_allowed() {
         assertThat(check("{ currentUser { name } } fragment F on User { name }")).isEmpty();
         assertThat(check("mutation { __typename } fragment F on Mutation { " + DELETE + " }")).isEmpty();
     }
 
     @Test
-    @DisplayName("PRB-1: with several operations, one spread or one denied field denies the document")
+    @DisplayName("with several operations, one spread or one denied field denies the document")
     void multiple_operations() {
         assertThat(check("query A { currentUser { name } } query B { ...F } fragment F on Query { x }"))
                 .contains(SPREAD_DENIAL);
@@ -138,10 +138,10 @@ class GraphQLWhitelistGateHostileTest {
         assertThat(check("query A { currentUser { name } } query B { jcr { nodeByPath(path: \"/\") { name } } }")).isEmpty();
     }
 
-    // ── PRB-2: admin.jahia.configuration ──────────────────────────────────────
+    // ── admin.jahia.configuration ──────────────────────────────────────
 
     @Test
-    @DisplayName("PRB-2: mutation:admin.jahia.configuration is denied whatever the whitelist says")
+    @DisplayName("mutation:admin.jahia.configuration is denied whatever the whitelist says")
     void configuration_mutation_never_allowed() {
         final String q = "mutation { admin { jahia { configuration(pid: \"org.jahia.community.mcp\") "
                 + "{ value(name: \"whitelist\", value: \"mutation:jcr\") } } } }";
@@ -155,7 +155,7 @@ class GraphQLWhitelistGateHostileTest {
     }
 
     @Test
-    @DisplayName("PRB-2: a sibling admin mutation is not caught by the configuration deny rule")
+    @DisplayName("a sibling admin mutation is not caught by the configuration deny rule")
     void sibling_admin_mutation_still_whitelistable() {
         assertThat(check("mutation { admin { jahia { project { __typename } } } }", "mutation:admin.jahia.project"))
                 .isEmpty();

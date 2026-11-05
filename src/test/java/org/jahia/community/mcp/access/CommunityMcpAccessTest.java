@@ -116,4 +116,60 @@ class CommunityMcpAccessTest {
         when(noRequest.request()).thenReturn(Optional.empty());
         assertThat(CommunityMcpAccess.clientIp(noRequest)).isEqualTo("unknown");
     }
+
+    @Test
+    @DisplayName("a request without an Authorization header (session cookie only) is refused with an actionable hint")
+    void session_only_call_is_refused() {
+        final ToolContextFixture f = ToolContextFixture.administrator();
+        when(f.request.getHeader("Authorization")).thenReturn(null);
+
+        final Optional<ToolResult> denied = CommunityMcpAccess.requireExplicitCredentials(f.ctx);
+
+        assertForbidden(denied);
+        assertThat(denied.get().error().message()).isEqualTo("The community tools require an explicit "
+                + "Authorization header (API token or Basic): a call authenticated only by a session cookie is refused.");
+        assertThat(denied.get().error().hint()).contains("Authorization: APIToken <token>").contains("Basic");
+    }
+
+    @Test
+    @DisplayName("a blank Authorization header counts as missing")
+    void blank_authorization_is_refused() {
+        final ToolContextFixture f = ToolContextFixture.administrator();
+        when(f.request.getHeader("Authorization")).thenReturn("   ");
+
+        assertForbidden(CommunityMcpAccess.requireExplicitCredentials(f.ctx));
+    }
+
+    @Test
+    @DisplayName("no HTTP request at all fails closed")
+    void missing_request_is_refused() {
+        final ToolContextFixture f = ToolContextFixture.administrator();
+        when(f.ctx.request()).thenReturn(Optional.empty());
+
+        assertForbidden(CommunityMcpAccess.requireExplicitCredentials(f.ctx));
+    }
+
+    @Test
+    @DisplayName("API token and Basic Authorization headers are accepted")
+    void token_and_basic_are_accepted() {
+        final ToolContextFixture f = ToolContextFixture.administrator();
+        when(f.request.getHeader("Authorization")).thenReturn("APIToken abc");
+        assertThat(CommunityMcpAccess.requireExplicitCredentials(f.ctx)).isEmpty();
+        when(f.request.getHeader("Authorization")).thenReturn("Basic cm9vdDpyb290");
+        assertThat(CommunityMcpAccess.requireExplicitCredentials(f.ctx)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("requireAccess: a non-administrator gets the administrator refusal first, an administrator needs the header too")
+    void require_access_combines_both_checks() {
+        final ToolContextFixture editor = ToolContextFixture.nonAdministrator();
+        assertThat(CommunityMcpAccess.requireAccess(editor.ctx).get().error().message())
+                .contains("restricted to server administrators");
+
+        final ToolContextFixture admin = ToolContextFixture.administrator();
+        assertThat(CommunityMcpAccess.requireAccess(admin.ctx)).isEmpty();
+        when(admin.request.getHeader("Authorization")).thenReturn(null);
+        assertThat(CommunityMcpAccess.requireAccess(admin.ctx).get().error().message())
+                .contains("explicit Authorization header");
+    }
 }

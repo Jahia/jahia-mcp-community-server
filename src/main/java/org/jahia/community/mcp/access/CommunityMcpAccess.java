@@ -30,6 +30,11 @@ public final class CommunityMcpAccess {
     static final String REQUIRED_PERMISSION = "admin";
     private static final Logger LOGGER = LoggerFactory.getLogger(CommunityMcpAccess.class);
     private static final String UNKNOWN_IP = "unknown";
+    private static final String AUTHORIZATION_HEADER = "Authorization";
+    static final String MESSAGE_NO_CREDENTIALS = "The community tools require an explicit Authorization header "
+            + "(API token or Basic): a call authenticated only by a session cookie is refused.";
+    static final String HINT_NO_CREDENTIALS = "Configure the MCP client to send 'Authorization: APIToken <token>' "
+            + "(or Basic credentials) with every request instead of relying on a browser session, then retry.";
 
     private CommunityMcpAccess() {
     }
@@ -76,6 +81,39 @@ public final class CommunityMcpAccess {
         return Optional.of(ToolResult.error(ToolError.CODE_FORBIDDEN,
                 "The community tools are restricted to server administrators.",
                 "Use the built-in mcp-server tools instead, or ask an administrator to run this operation."));
+    }
+
+    /**
+     * Requires the calling HTTP request to carry an explicit {@code Authorization} header (API token
+     * or Basic). A call authenticated only by a session cookie is refused: a browser attaches
+     * cookies to cross-site requests on its own, an {@code Authorization} header it never does, so
+     * this keeps a malicious web page from driving the tools with an administrator's session.
+     * Fails closed when there is no request at all.
+     *
+     * @return empty when the credential header is present, otherwise a {@code forbidden} result
+     */
+    public static Optional<ToolResult> requireExplicitCredentials(final ToolContext ctx) {
+        final boolean present = ctx.request()
+                .map(request -> request.getHeader(AUTHORIZATION_HEADER))
+                .filter(value -> !value.isBlank())
+                .isPresent();
+        if (present) {
+            return Optional.empty();
+        }
+        LOGGER.warn("Community MCP tool refused: user='{}' sent no Authorization header (session-only call), "
+                + "ip='{}'", LogSupport.clean(ctx.username()), clientIp(ctx));
+        return Optional.of(ToolResult.error(ToolError.CODE_FORBIDDEN, MESSAGE_NO_CREDENTIALS, HINT_NO_CREDENTIALS));
+    }
+
+    /**
+     * The gate every community tool passes: administrator permission first, then an explicit
+     * {@code Authorization} header.
+     *
+     * @return empty when the call may proceed, otherwise the {@code forbidden} result to return
+     */
+    public static Optional<ToolResult> requireAccess(final ToolContext ctx) {
+        final Optional<ToolResult> notAdmin = requireAdministrator(ctx);
+        return notAdmin.isPresent() ? notAdmin : requireExplicitCredentials(ctx);
     }
 
     /**

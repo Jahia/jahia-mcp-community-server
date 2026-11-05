@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/** PRB2-1: the read-only default must not expose the privileged {@code admin} query namespace. */
+/** The read-only default must not expose the privileged {@code admin} query namespace. */
 class GraphQLWhitelistGateProtectedQueryTest {
 
     private static final String MESSAGE_START =

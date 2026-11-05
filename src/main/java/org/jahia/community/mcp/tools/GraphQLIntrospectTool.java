@@ -52,14 +52,31 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
     private static final String SCHEMA_QUERY = "{ __schema { queryType { name } mutationType { name } "
             + "subscriptionType { name } types { name kind } } }";
 
+    /** {@code type { name kind ofType { ... } }} unwrapped deep enough for {@code [[X!]!]!}. */
+    private static final int TYPE_REF_LEVELS = 5;
+    private static final String TYPE_REF = typeRef(TYPE_REF_LEVELS);
+
     // One type — exactly one __Type.fields selection; the name is a variable, never formatted in.
     private static final String TYPE_QUERY = "query($name: String!) { __type(name: $name) { name kind description "
             + "fields(includeDeprecated: false) { name description "
-            + "args { name description type { name kind ofType { name kind ofType { name kind } } } } "
-            + "type { name kind ofType { name kind ofType { name kind } } } } "
-            + "inputFields { name description type { name kind ofType { name kind ofType { name kind } } } } "
+            + "args { name description type " + TYPE_REF + " } "
+            + "type " + TYPE_REF + " } "
+            + "inputFields { name description type " + TYPE_REF + " } "
             + "enumValues(includeDeprecated: false) { name description } "
             + "interfaces { name kind } possibleTypes { name kind } } }";
+
+    private static String typeRef(final int levels) {
+        final StringBuilder open = new StringBuilder();
+        final StringBuilder close = new StringBuilder();
+        for (int i = 0; i < levels; i++) {
+            open.append("{ name kind ");
+            close.append("} ");
+            if (i < levels - 1) {
+                open.append("ofType ");
+            }
+        }
+        return open.append(close).toString().trim();
+    }
 
     private final InternalGraphQLClient graphQLClient;
 

@@ -259,7 +259,7 @@ class McpConfigServiceTest {
     }
 
     @Test
-    @DisplayName("PRB2-14: the component fails closed, its configuration is REQUIRED")
+    @DisplayName("the component fails closed, its configuration is REQUIRED")
     void component_requires_its_configuration() throws IOException {
         // @Component has CLASS retention (invisible to reflection): read the annotation values from the
         // class file's constant pool, where the enum constant name is stored.
@@ -274,7 +274,7 @@ class McpConfigServiceTest {
     }
 
     @Test
-    @DisplayName("PRB2-4: CR/LF in a rejected entry cannot forge log lines nor leak into the client message")
+    @DisplayName("CR/LF in a rejected entry cannot forge log lines nor leak into the client message")
     void rejected_entry_is_cleaned() {
         final ch.qos.logback.classic.Logger logger =
                 (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(McpConfigService.class);

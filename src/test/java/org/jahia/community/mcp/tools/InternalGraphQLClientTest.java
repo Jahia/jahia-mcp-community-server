@@ -251,7 +251,7 @@ class InternalGraphQLClientTest {
         };
 
         assertThatThrownBy(() -> run(servlet, "{ x }", null))
-                .isInstanceOf(IOException.class).hasMessageContaining("exceeds");
+                .isInstanceOf(InternalGraphQLClient.ResponseTooLargeException.class).hasMessageContaining("exceeds");
     }
 
     @Test
@@ -272,7 +272,7 @@ class InternalGraphQLClientTest {
     }
 
     @Test
-    @DisplayName("PRB-4: a writer that crosses the cap only in the final flush still fails, never truncated success")
+    @DisplayName("a writer that crosses the cap only in the final flush still fails, never truncated success")
     void unflushed_writer_overflow_rejected() {
         HttpServlet servlet = new HttpServlet() {
             @Override
@@ -352,5 +352,12 @@ class InternalGraphQLClientTest {
         };
 
         assertThat(run(servlet, "{ x }", null).status()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("without the GraphQL servlet the client fails with an explicit IOException, never an NPE")
+    void missing_servlet_is_an_explicit_failure() {
+        assertThatThrownBy(() -> run(null, "{ x }", null))
+                .isInstanceOf(IOException.class).hasMessageContaining("servlet is not available");
     }
 }
