@@ -1,5 +1,17 @@
 // Pure helpers for the MCP operation tree / whitelist logic.
-// Extracted from CommunityMcpConfig.jsx so they can be unit-tested in isolation.
+// Extracted from CommunityMcpConfig.jsx so they can be unit-tested in isolation. The server's
+// rules (entry grammar, never-allowed paths, protected queries) live in policyRules.js.
+
+import {
+    canonicalEntry,
+    isLockedPath,
+    isReadOnlyProtected,
+    isValidEntry,
+    lockOf,
+    MUTATION_PREFIX,
+    parseEntry,
+    QUERY_PREFIX
+} from './policyRules';
 
 const MAX_TREE_DEPTH = 5;
 
@@ -15,9 +27,6 @@ const getNamedType = typeObj => {
 
     return getNamedType(typeObj.ofType);
 };
-
-const QUERY_PREFIX = 'query:';
-const MUTATION_PREFIX = 'mutation:';
 
 // Build the root operation entries. A field present in both Query and Mutation becomes TWO
 // entries: whitelist paths carry the operation type ('query:admin' vs 'mutation:admin'), so
@@ -40,13 +49,6 @@ const buildOperationMap = (queryFields, mutationFields) => {
     ];
 };
 
-const OPERATION_PREFIX = /^(query|mutation):/i;
-// Same syntax as the server (config/WhitelistEntries.java): a lower-cased operation type and a
-// dot-separated path of GraphQL names.
-const VALID_ENTRY = /^(query|mutation):[_A-Za-z]\w*(\.[_A-Za-z]\w*)*$/;
-
-const isValidEntry = entry => VALID_ENTRY.test(entry);
-
 // Mirror the server's reading of stored entries (config/WhitelistEntries.java):
 // - prefixes are case-insensitive ('MUTATION:x' is a mutation entry) → lower-cased;
 // - an unprefixed (legacy) entry is query-only → 'query:' added.
@@ -59,15 +61,8 @@ const normalizeWhitelist = entries => {
     const normalized = new Set();
     let migrated = false;
     (entries || []).map(e => e.trim()).filter(Boolean).forEach(e => {
-        const match = e.match(OPERATION_PREFIX);
-        let candidate = e;
-        if (match) {
-            candidate = match[1].toLowerCase() + ':' + e.slice(match[0].length);
-        } else if (!e.includes(':')) {
-            candidate = QUERY_PREFIX + e;
-        }
-
-        const next = isValidEntry(candidate) ? candidate : e;
+        const candidate = e.includes(':') ? canonicalEntry(e) : canonicalEntry(QUERY_PREFIX + e);
+        const next = candidate || e;
         migrated = migrated || next !== e;
         normalized.add(next);
     });
@@ -92,25 +87,8 @@ const toggleWhitelistPath = (set, path) => {
     return next;
 };
 
-// The server always refuses these mutations and everything under them: the allow list can never
-// open write access to its own settings ('settings') nor to Jahia's OSGi configuration
-// ('configuration'). The UI shows them, but they cannot be checked.
-const LOCKED_PATHS = [
-    {path: MUTATION_PREFIX + 'communityMcp', lock: 'settings'},
-    {path: MUTATION_PREFIX + 'admin.jahia.configuration', lock: 'configuration'}
-];
-const lockOf = path => {
-    const found = LOCKED_PATHS.find(l => path === l.path || path.startsWith(l.path + '.'));
-    return found ? found.lock : null;
-};
-
-const isLockedPath = path => lockOf(path) !== null;
-
 // 'query:jcr.nodeByPath' -> 'jcr.nodeByPath' (the form shown to people).
-const displayPath = path => {
-    const match = path.match(OPERATION_PREFIX);
-    return match ? path.slice(match[0].length) : path;
-};
+const displayPath = path => parseEntry(path)?.path ?? path;
 
 // True if a strictly deeper entry exists under `path` (drives the "mixed" checkbox state).
 const hasSelectedDescendant = (path, set) => [...set].some(e => e.startsWith(path + '.'));
@@ -128,10 +106,9 @@ const findCoveringAncestor = (path, set) => {
     return null;
 };
 
-const typePrefix = isQuery => (isQuery ? QUERY_PREFIX : MUTATION_PREFIX);
+const isOfType = (entry, isQuery) => parseEntry(entry)?.type === (isQuery ? 'query' : 'mutation');
 
-const countEntriesOfType = (set, isQuery) =>
-    [...set].filter(e => isValidEntry(e) && e.startsWith(typePrefix(isQuery))).length;
+const countEntriesOfType = (set, isQuery) => [...set].filter(e => isOfType(e, isQuery)).length;
 
 // The policy the server applies to this list (GraphQLWhitelistGate): an empty list is the
 // read-only default; a non-empty list whose entries are all ignored (malformed) or never
@@ -154,23 +131,25 @@ const policyOf = set => {
 // Entries the server refuses on save: malformed or locked. They must be removed first.
 const findBlockingEntries = set => [...set].filter(e => !isValidEntry(e) || isLockedPath(e)).sort();
 
-// Allow every root operation of one type (never a locked one). Returns a NEW Set.
+// Allow every root operation of one type, never a locked one nor a protected query namespace
+// (query:admin exposes configuration values: allowing it is a deliberate, confirmed action).
+// Protected entries already in the list are kept. Returns a NEW Set.
 const allowAllOfType = (set, operations, isQuery) => {
     const roots = operations
-        .filter(op => op.isQuery === isQuery && !isLockedPath(op.path))
+        .filter(op => op.isQuery === isQuery && !isLockedPath(op.path) && !isReadOnlyProtected(op.path))
         .map(op => op.path);
     const kept = [...set].filter(e => !roots.some(root => e.startsWith(root + '.')));
     return new Set([...kept, ...roots]);
 };
 
-const clearAllOfType = (set, isQuery) =>
-    new Set([...set].filter(e => !e.startsWith(typePrefix(isQuery))));
+const clearAllOfType = (set, isQuery) => new Set([...set].filter(e => !isOfType(e, isQuery)));
 
 const removeEntry = (set, entry) => new Set([...set].filter(e => e !== entry));
 
 // Entries that the tree cannot show or that the server refuses or ignores: malformed or of
 // another operation type ('invalid', reported even before the schema is known), locked, or whose
 // root operation is missing from the current schema ('unknown'). Sorted for a stable display.
+const LOCK_REASONS = {settings: 'locked', configuration: 'lockedConfiguration', privilege: 'lockedPrivilege'};
 const problemOf = (entry, roots) => {
     if (!isValidEntry(entry)) {
         return 'invalid';
@@ -178,7 +157,7 @@ const problemOf = (entry, roots) => {
 
     const lock = lockOf(entry);
     if (lock) {
-        return lock === 'configuration' ? 'lockedConfiguration' : 'locked';
+        return LOCK_REASONS[lock];
     }
 
     return roots && !roots.has(entry.split('.')[0]) ? 'unknown' : null;
@@ -252,6 +231,7 @@ export {
     buildChildNodes,
     isExpandableKind,
     isLockedPath,
+    isReadOnlyProtected,
     lockOf,
     policyOf,
     findBlockingEntries,

@@ -86,7 +86,7 @@ describe('tree rendering and selection', () => {
         expect(item(queriesTree(), 'currentUser')).toBeInTheDocument();
         expect(item(mutationsTree(), 'admin')).toBeInTheDocument();
         // Descriptions are visible text and announced as the item description.
-        expect(item(queriesTree(), 'admin')).toHaveAccessibleDescription('Admin queries');
+        expect(item(queriesTree(), 'admin')).toHaveAccessibleDescription('label.adminQueryNode Admin queries');
     });
 
     test('allowing the query does not allow the same-named mutation', () => {
@@ -337,7 +337,7 @@ describe('save feedback', () => {
         installApolloMock({saveSpy: jest.fn().mockResolvedValue({data: {communityMcp: {saveSettings: false}}})});
         render(<CommunityMcpConfigAdmin/>);
 
-        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
         await act(async () => {
             fireEvent.click(saveButton());
         });
@@ -357,7 +357,7 @@ describe('save feedback', () => {
         jest.spyOn(console, 'error').mockImplementation(() => {});
         render(<CommunityMcpConfigAdmin/>);
 
-        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: 'Enter'});
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: 'Enter'});
         fireEvent.click(saveButton());
 
         const alert = await screen.findByRole('alert');
@@ -370,7 +370,7 @@ describe('save feedback', () => {
         jest.spyOn(console, 'error').mockImplementation(() => {});
         render(<CommunityMcpConfigAdmin/>);
 
-        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
         fireEvent.click(saveButton());
 
         expect(await screen.findByText('Forbidden')).toBeInTheDocument();
@@ -382,7 +382,7 @@ describe('save feedback', () => {
         jest.spyOn(console, 'error').mockImplementation(() => {});
         render(<CommunityMcpConfigAdmin/>);
 
-        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
         fireEvent.click(saveButton());
 
         expect(await screen.findByRole('alert')).toHaveTextContent('label.saveNetworkError');
@@ -405,7 +405,7 @@ describe('save feedback', () => {
         installApolloMock();
         render(<CommunityMcpConfigAdmin/>);
 
-        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
         await act(async () => {
             fireEvent.click(saveButton());
         });
@@ -414,7 +414,7 @@ describe('save feedback', () => {
         });
         expect(screen.getByText('label.saveSuccess')).toBeInTheDocument();
 
-        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
+        fireEvent.keyDown(item(mutationsTree(), 'admin'), {key: ' '});
         expect(screen.queryByText('label.saveSuccess')).not.toBeInTheDocument();
     });
 
@@ -438,7 +438,7 @@ describe('save feedback', () => {
         window.dispatchEvent(clean);
         expect(clean.defaultPrevented).toBe(false);
 
-        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
         const dirty = new Event('beforeunload', {cancelable: true});
         window.dispatchEvent(dirty);
         expect(dirty.defaultPrevented).toBe(true);
@@ -541,7 +541,8 @@ describe('bulk actions and confirmation', () => {
         render(<CommunityMcpConfigAdmin/>);
 
         fireEvent.click(screen.getByRole('button', {name: 'label.allowAllQueries'}));
-        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'true');
+        // The admin entry chosen deliberately is kept; the namespace itself is not added (UX-1).
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'mixed');
         expect(item(queriesTree(), 'currentUser')).toHaveAttribute('aria-checked', 'true');
 
         fireEvent.keyDown(item(mutationsTree(), 'admin'), {key: ' '});
@@ -552,6 +553,71 @@ describe('bulk actions and confirmation', () => {
         fireEvent.click(screen.getByRole('button', {name: 'label.clearQueries'}));
         confirmEmptying();
         expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'false');
+    });
+
+    test('"Allow all queries" leaves the admin query namespace unchecked (UX-1)', async () => {
+        const {save} = installApolloMock();
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.click(screen.getByRole('button', {name: 'label.allowAllQueries'}));
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'false');
+        expect(item(queriesTree(), 'currentUser')).toHaveAttribute('aria-checked', 'true');
+        fireEvent.click(saveButton());
+        await waitFor(() => expect(save).toHaveBeenCalledWith({variables: {whitelist: ['query:currentUser']}}));
+    });
+
+    test('the admin query row warns that it exposes configuration values', () => {
+        installApolloMock();
+        render(<CommunityMcpConfigAdmin/>);
+
+        expect(item(queriesTree(), 'admin')).toHaveAccessibleDescription('label.adminQueryNode Admin queries');
+        expect(item(mutationsTree(), 'admin')).not.toHaveAccessibleDescription(expect.stringContaining('label.adminQueryNode'));
+    });
+
+    test('checking the admin query asks for confirmation; Cancel leaves it unchecked', () => {
+        installApolloMock();
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        const dialog = screen.getByRole('alertdialog', {name: 'label.confirmAllowAdminTitle'});
+        expect(dialog).toHaveAccessibleDescription('label.confirmAllowAdminBody');
+        fireEvent.click(within(dialog).getByRole('button', {name: 'label.cancel'}));
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'false');
+    });
+
+    test('checking the admin query is applied once confirmed; unchecking it is not confirmed', () => {
+        installApolloMock();
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        fireEvent.click(screen.getByRole('button', {name: 'label.confirmAllowAdminAction'}));
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'true');
+
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
+        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'false');
+    });
+
+    test('a privilege-granting mutation field is locked in the tree (ARCH-5)', async () => {
+        const querySpy = jest.fn().mockResolvedValue({data: {typeFields: {fields: [
+            {name: 'personalApiTokens', description: '', type: {name: 'TokensMutation', kind: 'OBJECT'}}
+        ]}}});
+        installApolloMock({querySpy});
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.keyDown(item(mutationsTree(), 'admin'), {key: 'ArrowRight'});
+        const tokens = await within(mutationsTree()).findByRole('treeitem', {name: 'personalApiTokens'});
+        expect(tokens).toHaveAccessibleDescription('label.lockedPrivilegeNode');
+        fireEvent.keyDown(tokens, {key: ' '});
+        expect(tokens).toHaveAttribute('aria-checked', 'false');
+    });
+
+    test('a stored privilege-granting entry is listed as a problem with its own reason', () => {
+        installApolloMock({whitelist: ['mutation:admin.personalApiTokens', 'query:currentUser']});
+        render(<CommunityMcpConfigAdmin/>);
+
+        expect(within(problemsRegion()).getByText('label.problemLockedPrivilege')).toBeInTheDocument();
     });
 
     test('clearing queries while mutations stay checked asks for confirmation', () => {
@@ -866,11 +932,11 @@ describe('announcements', () => {
         render(<CommunityMcpConfigAdmin/>);
 
         expect(policyText('label.policyReadOnly').closest('[role="status"]')).toBeNull();
-        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: ' '});
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
         expect(liveRegion()).toHaveTextContent('label.policyRestricted');
         // Same policy after the next edit: nothing new is written to the live region.
         const announced = liveRegion().firstChild;
-        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
+        fireEvent.keyDown(item(mutationsTree(), 'admin'), {key: ' '});
         expect(liveRegion().firstChild).toBe(announced);
     });
 

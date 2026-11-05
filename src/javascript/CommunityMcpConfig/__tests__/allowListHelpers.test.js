@@ -51,7 +51,7 @@ describe('isValidEntry', () => {
     });
 
     test('rejects other operation types and malformed paths', () => {
-        ['subscription:x', 'foo:bar', 'query:', 'query:bad path', 'query:a..b', 'query:1a', 'jcr', 'QUERY:x']
+        ['subscription:x', 'foo:bar', 'query:', 'query:bad path', 'query:a..b', 'query:1a', 'jcr']
             .forEach(e => expect(isValidEntry(e)).toBe(false));
     });
 });
@@ -128,6 +128,21 @@ describe('allowAllOfType', () => {
         expect([...next].sort()).toEqual(['mutation:jcr', 'query:admin']);
     });
 
+    test('"Allow all queries" never adds the protected admin namespace (UX-1)', () => {
+        const next = allowAllOfType(new Set(), OPS, true);
+        expect([...next]).toEqual(['query:jcr']);
+    });
+
+    test('"Allow all queries" keeps admin entries the administrator added deliberately', () => {
+        const next = allowAllOfType(new Set(['query:admin.jahia', 'query:jcr.nodeByPath']), OPS, true);
+        expect([...next].sort()).toEqual(['query:admin.jahia', 'query:jcr']);
+    });
+
+    test('"Allow all mutations" skips roots that grant privileges', () => {
+        const ops = [...OPS, {name: 'grantRoles', path: 'mutation:grantRoles', isQuery: false, isMutation: true}];
+        expect([...allowAllOfType(new Set(), ops, false)]).toEqual(['mutation:jcr']);
+    });
+
     test('does not mutate its input', () => {
         const input = new Set(['query:admin']);
         allowAllOfType(input, OPS, true);
@@ -137,8 +152,8 @@ describe('allowAllOfType', () => {
 
 describe('clearAllOfType', () => {
     test('removes only the entries of the given type', () => {
-        const next = clearAllOfType(new Set(['query:a', 'mutation:b', 'query:c.d']), true);
-        expect([...next]).toEqual(['mutation:b']);
+        const next = clearAllOfType(new Set(['query:a', 'mutation:b', 'query:c.d', 'foo:bar']), true);
+        expect([...next]).toEqual(['mutation:b', 'foo:bar']);
     });
 });
 
@@ -167,6 +182,14 @@ describe('findProblemEntries', () => {
     test('flags the locked configuration mutation with its own reason', () => {
         expect(findProblemEntries(new Set(['mutation:admin.jahia.configuration']), OPS))
             .toEqual([{entry: 'mutation:admin.jahia.configuration', reason: 'lockedConfiguration'}]);
+    });
+
+    test('flags privilege-granting mutations with their own reason', () => {
+        expect(findProblemEntries(new Set(['mutation:jcr.mutateNode.grantRoles', 'mutation:admin.personalApiTokens']), OPS))
+            .toEqual([
+                {entry: 'mutation:admin.personalApiTokens', reason: 'lockedPrivilege'},
+                {entry: 'mutation:jcr.mutateNode.grantRoles', reason: 'lockedPrivilege'}
+            ]);
     });
 
     test('flags entries the server ignores, even while the schema is unknown', () => {

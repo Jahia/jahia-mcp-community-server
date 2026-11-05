@@ -30,6 +30,7 @@ const REASON_KEYS = {
     invalid: 'label.problemInvalid',
     locked: 'label.problemLocked',
     lockedConfiguration: 'label.problemLockedConfiguration',
+    lockedPrivilege: 'label.problemLockedPrivilege',
     unknown: 'label.problemUnknown'
 };
 

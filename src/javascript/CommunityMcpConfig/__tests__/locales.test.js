@@ -31,7 +31,7 @@ describe('locales', () => {
     });
 
     test('every locked-entry reason says the entry blocks Save', () => {
-        ['problemLocked', 'problemLockedConfiguration'].forEach(key => {
+        ['problemLocked', 'problemLockedConfiguration', 'problemLockedPrivilege'].forEach(key => {
             expect(en.label[key]).toContain('Remove it before saving.');
             expect(fr.label[key]).toContain('Supprimez-la avant d\'enregistrer.');
         });
@@ -41,6 +41,22 @@ describe('locales', () => {
         ['policyReadOnly', 'helpDefault', 'queriesNoteDefault', 'confirmClearBody'].forEach(key => {
             expect(en.label[key]).toContain('except the admin namespace');
             expect(fr.label[key]).toContain('sauf l\'espace de noms admin');
+        });
+    });
+
+    test('"Allow all queries" help and the admin row say the admin namespace is left out (UX-1)', () => {
+        expect(en.label.helpAllowAll).toContain('except the admin namespace');
+        expect(fr.label.helpAllowAll).toContain('sauf l\'espace de noms admin');
+        ['adminQueryNode', 'confirmAllowAdminBody'].forEach(key => {
+            expect(en.label[key]).toMatch(/secrets/);
+            expect(fr.label[key]).toMatch(/secrets/);
+        });
+    });
+
+    test('the help names every never-allowed mutation (ARCH-5)', () => {
+        ['communityMcp', 'admin.jahia.configuration', 'admin.personalApiTokens', 'grantRoles', 'revokeRoles'].forEach(name => {
+            expect(en.label.helpDefault).toContain(name);
+            expect(fr.label.helpDefault).toContain(name);
         });
     });
 

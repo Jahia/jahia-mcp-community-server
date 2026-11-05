@@ -19,6 +19,7 @@ import {
     setsEqual,
     toggleWhitelistPath
 } from './operationTree';
+import {isReadOnlyProtected} from './policyRules';
 import {OperationTree} from './OperationTree';
 import {ConfirmDialog} from './ConfirmDialog';
 import {AllEntries, ProblemEntries} from './AllowListEntries';
@@ -290,6 +291,17 @@ export const CommunityMcpConfigAdmin = () => {
         }
     };
 
+    // Checking the admin query namespace (or a field under it) exposes configuration values,
+    // secrets included: a deliberate action, confirmed each time (UX-1). Unchecking is not.
+    const togglePath = path => {
+        const isAdding = !whitelist.has(path);
+        if (isAdding && isReadOnlyProtected(path)) {
+            askConfirm('confirmAllowAdmin', () => edit(s => toggleWhitelistPath(s, path)));
+        } else {
+            edit(s => toggleWhitelistPath(s, path));
+        }
+    };
+
     const clearAll = () => edit(() => EMPTY);
     const allowAllMutations = () => askConfirm('confirmAllowMutations', () => edit(s => allowAllOfType(s, operations, false)));
     const clearQueries = () => {
@@ -390,7 +402,7 @@ export const CommunityMcpConfigAdmin = () => {
         const policy = policyOf(whitelist);
         const treeProps = {
             selected: whitelist, typeFields, expanded, filter, t,
-            onToggle: path => edit(s => toggleWhitelistPath(s, path)),
+            onToggle: togglePath,
             onSetExpanded: setNodeExpanded,
             onAnnounce: announce
         };
