@@ -2,9 +2,9 @@ import {
     buildChildNodes,
     buildOperationMap,
     getNamedType,
-    isCoveredBySet,
     isExpandableKind,
     mapTypeFields,
+    normalizeWhitelist,
     toggleWhitelistPath
 } from '../operationTree';
 
@@ -27,34 +27,41 @@ describe('getNamedType', () => {
     });
 });
 
+describe('getNamedType: [X!]! fields (UX-6)', () => {
+    test('unwraps NON_NULL -> LIST -> NON_NULL -> OBJECT', () => {
+        const wrapped = {name: null, kind: 'NON_NULL', ofType: {name: null, kind: 'LIST',
+            ofType: {name: null, kind: 'NON_NULL', ofType: {name: 'JCRNode', kind: 'OBJECT'}}}};
+        expect(getNamedType(wrapped)).toEqual({name: 'JCRNode', kind: 'OBJECT'});
+    });
+});
+
 describe('buildOperationMap', () => {
     test('returns an empty array when both inputs are missing', () => {
         expect(buildOperationMap(null, null)).toEqual([]);
     });
 
-    test('marks query-only fields as isQuery', () => {
+    test('qualifies query fields with the query: prefix', () => {
         const result = buildOperationMap([{name: 'currentUser', description: 'd', type: {name: 'User', kind: 'OBJECT'}}], null);
         expect(result).toHaveLength(1);
-        expect(result[0]).toMatchObject({name: 'currentUser', path: 'currentUser', isQuery: true, isMutation: false, typeName: 'User', typeKind: 'OBJECT'});
+        expect(result[0]).toMatchObject({name: 'currentUser', path: 'query:currentUser', isQuery: true, isMutation: false, typeName: 'User', typeKind: 'OBJECT'});
     });
 
-    test('merges a field present in both Query and Mutation into one entry', () => {
+    test('keeps a field present in both Query and Mutation as two distinct entries', () => {
         const result = buildOperationMap(
             [{name: 'admin', type: {name: 'AdminQuery', kind: 'OBJECT'}}],
             [{name: 'admin', type: {name: 'AdminMutation', kind: 'OBJECT'}}]
         );
-        expect(result).toHaveLength(1);
-        expect(result[0]).toMatchObject({name: 'admin', isQuery: true, isMutation: true});
-        // TypeName comes from the query pass (first writer wins)
-        expect(result[0].typeName).toBe('AdminQuery');
+        expect(result).toHaveLength(2);
+        expect(result[0]).toMatchObject({path: 'query:admin', isQuery: true, isMutation: false, typeName: 'AdminQuery'});
+        expect(result[1]).toMatchObject({path: 'mutation:admin', isQuery: false, isMutation: true, typeName: 'AdminMutation'});
     });
 
-    test('sorts entries alphabetically by name', () => {
+    test('lists queries first, then mutations, each sorted alphabetically', () => {
         const result = buildOperationMap(
             [{name: 'zeta', type: {}}, {name: 'alpha', type: {}}],
-            [{name: 'mid', type: {}}]
+            [{name: 'mid', type: {}}, {name: 'beta', type: {}}]
         );
-        expect(result.map(o => o.name)).toEqual(['alpha', 'mid', 'zeta']);
+        expect(result.map(o => o.path)).toEqual(['query:alpha', 'query:zeta', 'mutation:beta', 'mutation:mid']);
     });
 
     test('resolves the named type through wrappers', () => {
@@ -67,26 +74,39 @@ describe('buildOperationMap', () => {
     });
 });
 
-describe('isCoveredBySet', () => {
-    test('true when the exact path is in the set', () => {
-        expect(isCoveredBySet('admin', new Set(['admin']))).toBe(true);
+describe('normalizeWhitelist', () => {
+    test('keeps prefixed entries as they are', () => {
+        const {entries, migrated} = normalizeWhitelist(['query:jcr', 'mutation:jcr.deleteNode']);
+        expect([...entries]).toEqual(['query:jcr', 'mutation:jcr.deleteNode']);
+        expect(migrated).toBe(false);
     });
 
-    test('true when an ancestor prefix is in the set', () => {
-        expect(isCoveredBySet('admin.jahia.modules', new Set(['admin']))).toBe(true);
-        expect(isCoveredBySet('admin.jahia.modules', new Set(['admin.jahia']))).toBe(true);
+    test('rewrites a legacy unprefixed entry as query-only, like the server does', () => {
+        const {entries, migrated} = normalizeWhitelist(['jcr', 'mutation:x']);
+        expect([...entries]).toEqual(['query:jcr', 'mutation:x']);
+        expect(migrated).toBe(true);
     });
 
-    test('false when only a sibling is in the set', () => {
-        expect(isCoveredBySet('admin.jahia', new Set(['admin.cluster']))).toBe(false);
+    test('reads the prefix case-insensitively, like the server, and lower-cases it', () => {
+        const {entries, migrated} = normalizeWhitelist(['MUTATION:jcr.deleteNode', 'Query:jcr']);
+        expect([...entries]).toEqual(['mutation:jcr.deleteNode', 'query:jcr']);
+        expect(migrated).toBe(true);
     });
 
-    test('false when a descendant (not ancestor) is in the set', () => {
-        expect(isCoveredBySet('admin', new Set(['admin.jahia']))).toBe(false);
+    test('keeps entries the server ignores (unknown type, malformed) as they are, never drops them', () => {
+        const {entries, migrated} = normalizeWhitelist(['subscription:jcr', 'query:x', 'foo:bar', 'query:bad path']);
+        expect([...entries]).toEqual(['subscription:jcr', 'query:x', 'foo:bar', 'query:bad path']);
+        expect(migrated).toBe(false);
     });
 
-    test('false for an empty set', () => {
-        expect(isCoveredBySet('admin', new Set())).toBe(false);
+    test('a malformed legacy entry is kept as written, not turned into a query entry', () => {
+        const {entries, migrated} = normalizeWhitelist(['bad path', ' query:x ', '']);
+        expect([...entries]).toEqual(['bad path', 'query:x']);
+        expect(migrated).toBe(false);
+    });
+
+    test('handles a missing list', () => {
+        expect([...normalizeWhitelist(null).entries]).toEqual([]);
     });
 });
 
@@ -137,10 +157,10 @@ describe('buildChildNodes', () => {
     });
 
     test('composes dot-paths and inherits parent query/mutation flags', () => {
-        const node = {path: 'admin', isQuery: true, isMutation: false};
+        const node = {path: 'query:admin', isQuery: true, isMutation: false};
         const raw = [{name: 'jahia', typeName: 'X', typeKind: 'OBJECT'}];
         expect(buildChildNodes(node, raw)).toEqual([
-            {name: 'jahia', typeName: 'X', typeKind: 'OBJECT', path: 'admin.jahia', isQuery: true, isMutation: false}
+            {name: 'jahia', typeName: 'X', typeKind: 'OBJECT', path: 'query:admin.jahia', isQuery: true, isMutation: false}
         ]);
     });
 });

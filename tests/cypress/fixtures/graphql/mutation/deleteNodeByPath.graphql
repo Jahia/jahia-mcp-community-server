@@ -1,0 +1,5 @@
+mutation McpDeleteNodeByPath($path: String!) {
+    jcr {
+        deleteNode(pathOrId: $path)
+    }
+}

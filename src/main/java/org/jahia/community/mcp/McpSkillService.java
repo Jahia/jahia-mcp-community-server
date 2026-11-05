@@ -9,8 +9,13 @@ import org.osgi.service.component.annotations.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.jcr.InvalidItemStateException;
+import javax.jcr.ItemExistsException;
+import javax.jcr.Node;
 import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
+import javax.jcr.nodetype.ConstraintViolationException;
+import javax.jcr.Value;
 import javax.jcr.query.Query;
 import javax.jcr.query.QueryResult;
 import java.io.BufferedReader;
@@ -30,7 +35,17 @@ public class McpSkillService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpSkillService.class);
     static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
+    /** Upper bound on the Markdown body of one skill (characters). */
+    public static final int MAX_CONTENT_CHARS = 200_000;
+    private static final String ACL_NODE = "j:acl";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
+    /**
+     * Type of the skills container and of its sub-folders: the type 1.x created, so an upgraded
+     * install needs no migration. {@code mcpmix:mcp} carries {@code jmix:droppableContent}, which this
+     * list type requires of its children, and {@code jmix:hiddenType}, which keeps skills out of the
+     * editors' content-creation pickers.
+     */
+    static final String FOLDER_NODE_TYPE = "jnt:contentList";
     private static final String PROP_NAME = "jcr:title";
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";
@@ -50,22 +65,22 @@ public class McpSkillService {
      * Validates a caller-supplied skill name is safe for JCR path construction.
      * @throws IllegalArgumentException if the name is null, blank, or contains illegal characters
      */
-    static String validateSkillName(final String name) {
+    public static String validateSkillName(final String name) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Skill name must not be null or blank");
         }
         if (!SKILL_NAME_PATTERN.matcher(name).matches()) {
             throw new IllegalArgumentException(
-                    "Skill name contains illegal characters (only A-Za-z0-9_-/ allowed, no leading slash): " + name);
+                    "Skill name contains illegal characters (only A-Za-z0-9_-/ allowed, no leading slash): " + LogSupport.clean(name));
         }
         for (final String segment : name.split("/", -1)) {
             if (segment.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "Skill name must not contain empty path segments (leading, trailing, or double slash): " + name);
+                        "Skill name must not contain empty path segments (leading, trailing, or double slash): " + LogSupport.clean(name));
             }
             if ("..".equals(segment) || ".".equals(segment)) {
                 throw new IllegalArgumentException(
-                        "Skill name must not contain path-traversal segments: " + name);
+                        "Skill name must not contain path-traversal segments: " + LogSupport.clean(name));
             }
         }
         return name;
@@ -81,18 +96,25 @@ public class McpSkillService {
     @Activate
     public void activate(BundleContext bundleContext) {
         final Enumeration<URL> entries = bundleContext.getBundle().findEntries(SKILLS_RESOURCE_DIR, "*.md", true);
-        if (entries == null) {
-            return;
-        }
         try {
             JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
+                // Once, here — not on the read path. Also hardens containers created by older versions.
                 ensureContainer(session);
-                while (entries.hasMoreElements()) {
+                purgeLocalGrants(session);
+                while (entries != null && entries.hasMoreElements()) {
                     final URL url = entries.nextElement();
                     try {
                         importSkillEntry(session, url);
                     } catch (IOException ex) {
                         LOGGER.error("Cannot read skill file {}", url, ex);
+                    } catch (ItemExistsException | InvalidItemStateException | ConstraintViolationException ex) {
+                        // another cluster node seeded it first (or is saving the same folder)
+                        session.refresh(false);
+                    } catch (RepositoryException ex) {
+                        // one skill failing must not abort the seeding of the others
+                        session.refresh(false);
+                        LOGGER.warn("Could not import default skill {}; it is retried at the next activation",
+                                url, ex);
                     }
                 }
                 return null;
@@ -126,21 +148,12 @@ public class McpSkillService {
             return;
         }
 
-        // Ensure intermediate folder nodes
         final String[] segments = relNoExt.split("/");
-        String parentPath = SKILLS_PATH;
-        for (int i = 0; i < segments.length - 1; i++) {
-            final String folderPath = parentPath + "/" + segments[i];
-            if (!session.nodeExists(folderPath)) {
-                session.getNode(parentPath).addNode(segments[i], "jnt:contentList");
-                session.save();
-            }
-            parentPath = folderPath;
-        }
+        final JCRNodeWrapper parent = ensureFolders(session, segments);
 
         // Parse file and create skill node
         final String[] parsed = parseFrontmatter(url);
-        final JCRNodeWrapper skill = session.getNode(parentPath).addNode(segments[segments.length - 1], SKILL_NODE_TYPE);
+        final JCRNodeWrapper skill = parent.addNode(segments[segments.length - 1], SKILL_NODE_TYPE);
         if (!parsed[0].isEmpty()) skill.setProperty(PROP_NAME, parsed[0]);
         if (!parsed[1].isEmpty()) skill.setProperty(PROP_DESCRIPTION, parsed[1]);
         skill.setProperty(PROP_CONTENT, parsed[2]);
@@ -184,24 +197,29 @@ public class McpSkillService {
     private static final String LIST_SKILLS_SQL =
             "SELECT * FROM [mcp:skill] AS skill WHERE ISDESCENDANTNODE(skill, '" + SKILLS_PATH + "') ORDER BY NAME(skill)";
 
+    /** Every skill with its body. */
     public List<SkillEntry> listSkills() {
+        return listSkills(true);
+    }
+
+    /** Every skill without its body (empty {@code content}): enough to list names and descriptions. */
+    public List<SkillEntry> listSkillHeaders() {
+        return listSkills(false);
+    }
+
+    private List<SkillEntry> listSkills(final boolean withContent) {
         try {
-            // SECURITY POSTURE (intentional, ACL-bypassing — benign as shipped): skill reads run
-            // under a SYSTEM JCR session, so unlike executeGraphQL they do NOT run as the caller
-            // and do NOT pass through the whitelist. Skills are shared instruction documents meant
-            // to be readable by every MCP client, and the community-mcp scope is admin-only, so no
-            // caller is denied anything here that their own ACLs would otherwise permit, and no
-            // restrictive per-skill ACL ships. This becomes a real ACL bypass to revisit ONLY if
-            // the community-mcp grant is broadened beyond admin, or deny-ACLs are added to skill
-            // nodes — at which point these reads should run as the caller instead of SYSTEM.
+            // Reads run under a SYSTEM session on purpose: the skills container has its ACL
+            // inheritance broken (see ensureContainer), so no ordinary role can see or write it
+            // through generic JCR paths, and the only entry points (the tools and the communityMcp
+            // GraphQL operations) are admin-gated.
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
-                ensureContainer(session);
                 final Query query = session.getWorkspace().getQueryManager().createQuery(LIST_SKILLS_SQL, Query.JCR_SQL2);
                 final QueryResult result = query.execute();
                 final List<SkillEntry> skills = new ArrayList<>();
                 final NodeIterator iter = result.getNodes();
                 while (iter.hasNext()) {
-                    skills.add(toEntry((JCRNodeWrapper) iter.nextNode()));
+                    skills.add(toEntry((JCRNodeWrapper) iter.nextNode(), withContent));
                 }
                 return Collections.unmodifiableList(skills);
             });
@@ -219,11 +237,8 @@ public class McpSkillService {
             return null;
         }
         try {
-            // SECURITY POSTURE: see listSkills() — this read also runs as SYSTEM, intentionally
-            // bypassing the caller's ACLs and the whitelist. Benign under the admin-only
-            // community-mcp scope; revisit (run-as-caller) if the scope broadens or skills gain
-            // restrictive ACLs. The name is still validated (validateSkillName + assertDescendant)
-            // so this cannot be used for path traversal outside SKILLS_PATH.
+            // SYSTEM session, see listSkills(). The name is still validated (validateSkillName +
+            // assertDescendant) so it cannot reach a node outside SKILLS_PATH.
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 final String path = SKILLS_PATH + "/" + name;
                 assertDescendant(path);
@@ -231,22 +246,38 @@ public class McpSkillService {
                     return null;
                 }
                 final JCRNodeWrapper node = session.getNode(path);
-                return node.isNodeType(SKILL_NODE_TYPE) ? toEntry(node) : null;
+                return node.isNodeType(SKILL_NODE_TYPE) ? toEntry(node, true) : null;
             });
         } catch (SecurityException ex) {
             LOGGER.warn("getSkill path-traversal attempt blocked: {}", ex.getMessage());
             return null;
         } catch (RepositoryException e) {
-            LOGGER.error("Error getting MCP skill: {}", name, e);
+            LOGGER.error("Error getting MCP skill: {}", LogSupport.clean(name), e);
             return null;
         }
     }
 
-    public boolean saveSkill(final String name, final String mcpName, final String description, final String content) {
+    /** True when the name is a safe skill key and the content fits; otherwise logs the reason at WARN. */
+    private static boolean isAcceptedForSave(final String name, final String content) {
         try {
             validateSkillName(name);
         } catch (IllegalArgumentException ex) {
             LOGGER.warn("saveSkill rejected unsafe name: {}", ex.getMessage());
+            return false;
+        }
+        if (content != null && content.length() > MAX_CONTENT_CHARS) {
+            if (LOGGER.isWarnEnabled()) {
+                LOGGER.warn("saveSkill rejected: content of '{}' exceeds {} characters", LogSupport.clean(name),
+                        MAX_CONTENT_CHARS);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    public boolean saveSkill(final String name, final String mcpName, final String description, final String content) {
+        final String actingUser = LogSupport.actingUser();
+        if (!isAcceptedForSave(name, content)) {
             return false;
         }
         try {
@@ -257,8 +288,14 @@ public class McpSkillService {
                 final JCRNodeWrapper node;
                 if (session.nodeExists(path)) {
                     node = session.getNode(path);
+                    if (!node.isNodeType(SKILL_NODE_TYPE)) {
+                        LOGGER.warn("saveSkill refused: '{}' exists and is not an {} node", LogSupport.clean(name), SKILL_NODE_TYPE);
+                        return false;
+                    }
                 } else {
-                    node = session.getNode(SKILLS_PATH).addNode(name, SKILL_NODE_TYPE);
+                    final String[] segments = name.split("/");
+                    final JCRNodeWrapper parent = ensureFolders(session, segments);
+                    node = parent.addNode(segments[segments.length - 1], SKILL_NODE_TYPE);
                 }
                 if (mcpName != null) {
                     node.setProperty(PROP_NAME, mcpName);
@@ -268,18 +305,21 @@ public class McpSkillService {
                 }
                 node.setProperty(PROP_CONTENT, content);
                 session.save();
+                // JCR records the system session as author: the audit trail is this line.
+                LOGGER.info("MCP skill '{}' saved by user '{}'", LogSupport.clean(name), actingUser);
                 return true;
             });
-        } catch (SecurityException ex) {
-            LOGGER.warn("saveSkill path-traversal attempt blocked: {}", ex.getMessage());
+        } catch (SecurityException | IllegalArgumentException ex) {
+            LOGGER.warn("saveSkill refused: {}", ex.getMessage());
             return false;
         } catch (RepositoryException e) {
-            LOGGER.error("Error saving MCP skill: {}", name, e);
+            LOGGER.error("Error saving MCP skill: {}", LogSupport.clean(name), e);
             return false;
         }
     }
 
     public boolean deleteSkill(final String name) {
+        final String actingUser = LogSupport.actingUser();
         try {
             validateSkillName(name);
         } catch (IllegalArgumentException ex) {
@@ -293,24 +333,153 @@ public class McpSkillService {
                 if (!session.nodeExists(path)) {
                     return false;
                 }
-                session.getNode(path).remove();
+                final JCRNodeWrapper node = session.getNode(path);
+                if (!node.isNodeType(SKILL_NODE_TYPE)) {
+                    LOGGER.warn("deleteSkill refused: '{}' is not an {} node", LogSupport.clean(name), SKILL_NODE_TYPE);
+                    return false;
+                }
+                node.remove();
                 session.save();
+                LOGGER.info("MCP skill '{}' deleted by user '{}'", LogSupport.clean(name), actingUser);
                 return true;
             });
         } catch (SecurityException ex) {
             LOGGER.warn("deleteSkill path-traversal attempt blocked: {}", ex.getMessage());
             return false;
         } catch (RepositoryException e) {
-            LOGGER.error("Error deleting MCP skill: {}", name, e);
+            LOGGER.error("Error deleting MCP skill: {}", LogSupport.clean(name), e);
             return false;
         }
     }
 
+    /**
+     * Creates the skills container if missing and breaks its ACL inheritance (idempotent). With no
+     * role granted on it, ordinary users and roles cannot write skills through generic JCR paths, so
+     * a content author cannot plant text that an administrator's AI client would later read. The
+     * {@code root} user bypasses ACLs and can still write (accepted: it can also whitelist
+     * {@code mutation:jcr}); this module itself writes skills only through the system session.
+     *
+     * <p>Only the default workspace is hardened: skills are read from it exclusively, so a copy of
+     * the container that a 1.x install published to the live workspace is never served by the
+     * tools and needs no hardening there.</p>
+     *
+     * <p>Cluster-safe: every node runs this at activation, so a concurrent creation or ACL change
+     * by another node is tolerated (the session is refreshed and the state re-read).</p>
+     */
     private void ensureContainer(JCRSessionWrapper session) throws RepositoryException {
         if (!session.nodeExists(SKILLS_PATH)) {
-            session.getNode("/sites/systemsite/contents").addNode("mcp-skills", "jnt:contentList");
-            session.save();
+            try {
+                session.getNode("/sites/systemsite/contents").addNode("mcp-skills", FOLDER_NODE_TYPE);
+                session.save();
+            } catch (ItemExistsException | InvalidItemStateException | ConstraintViolationException ex) {
+                // created concurrently by another cluster node (Jackrabbit reports the race under
+                // either name); keep going if the container exists now, fail otherwise.
+                session.refresh(false);
+                if (!session.nodeExists(SKILLS_PATH)) {
+                    throw ex;
+                }
+            }
         }
+        final JCRNodeWrapper container = session.getNode(SKILLS_PATH);
+        if (!container.getAclInheritanceBreak()) {
+            try {
+                container.setAclInheritanceBreak(true);
+                session.save();
+                LOGGER.info("Broke ACL inheritance on {}: no inherited role may write skills", SKILLS_PATH);
+            } catch (RepositoryException ex) {
+                // Cluster activation race, or a real failure: either way the container is still open to
+                // inherited roles, so this is an ERROR. Idempotent: the next activation checks again.
+                session.refresh(false);
+                LOGGER.error("Could not break ACL inheritance on {} ({}): skills stay readable and writable by "
+                        + "inherited roles until it is retried at the next activation; saveSkill retries it "
+                        + "too", SKILLS_PATH, ex.toString());
+            }
+        }
+    }
+
+    /**
+     * Removes every local ACE (role grant) on the skills container and on each node below it, in the
+     * default workspace (the only one skills are read from). A 1.x install let administrators grant
+     * roles on these nodes, which would still let editors write skills after the inheritance break.
+     * Idempotent; the {@code j:acl} nodes themselves stay, so the container remains broken.
+     */
+    private void purgeLocalGrants(final JCRSessionWrapper session) {
+        try {
+            final List<String> removed = new ArrayList<>();
+            collectAndRemoveAces(session.getNode(SKILLS_PATH), removed);
+            if (!removed.isEmpty()) {
+                session.save();
+                for (final String grant : removed) {
+                    LOGGER.info("Removed local ACL grant {} (no role may hold a grant on the skills container)",
+                            grant);
+                }
+                LOGGER.info("Removed {} local ACL grant(s) under {}; review the existing skills, they may have "
+                        + "been written by users who held those grants", removed.size(), SKILLS_PATH);
+            }
+        } catch (RepositoryException | RuntimeException ex) {
+            try {
+                session.refresh(false);
+            } catch (RepositoryException refreshFailure) {
+                LOGGER.debug("refresh after a failed ACL purge failed", refreshFailure);
+            }
+            LOGGER.error("Could not remove the local ACL grants under {}; they will be retried at the next "
+                    + "activation", SKILLS_PATH, ex);
+        }
+    }
+
+    private static void collectAndRemoveAces(final JCRNodeWrapper node, final List<String> removed)
+            throws RepositoryException {
+        if (node.hasNode(ACL_NODE)) {
+            final NodeIterator aces = node.getNode(ACL_NODE).getNodes();
+            while (aces != null && aces.hasNext()) {
+                final Node ace = aces.nextNode();
+                if (ace.isNodeType("jnt:ace")) {
+                    removed.add(describeAce(node.getPath(), ace));
+                    ace.remove();
+                }
+            }
+        }
+        final NodeIterator children = node.getNodes();
+        while (children != null && children.hasNext()) {
+            final Node child = children.nextNode();
+            if (!ACL_NODE.equals(child.getName()) && child instanceof JCRNodeWrapper) {
+                collectAndRemoveAces((JCRNodeWrapper) child, removed);
+            }
+        }
+    }
+
+    private static String describeAce(final String path, final Node ace) throws RepositoryException {
+        final String principal = ace.hasProperty("j:principal") ? ace.getProperty("j:principal").getString() : "?";
+        final StringBuilder roles = new StringBuilder();
+        if (ace.hasProperty("j:roles")) {
+            for (final Value role : ace.getProperty("j:roles").getValues()) {
+                roles.append(roles.length() == 0 ? "" : ",").append(role.getString());
+            }
+        }
+        return "on '" + LogSupport.clean(path) + "' for '" + LogSupport.clean(principal)
+                + "' roles [" + LogSupport.clean(roles.toString()) + "]";
+    }
+
+    /**
+     * Returns the folder that must hold the skill {@code segments[last]}, creating the intermediate
+     * folders. An intermediate segment that is itself a skill cannot become a folder.
+     */
+    private static JCRNodeWrapper ensureFolders(final JCRSessionWrapper session, final String[] segments)
+            throws RepositoryException {
+        JCRNodeWrapper parent = session.getNode(SKILLS_PATH);
+        for (int i = 0; i < segments.length - 1; i++) {
+            final String folderPath = parent.getPath() + "/" + segments[i];
+            if (session.nodeExists(folderPath)) {
+                parent = session.getNode(folderPath);
+                if (parent.isNodeType(SKILL_NODE_TYPE)) {
+                    throw new IllegalArgumentException("'" + segments[i] + "' is a skill and cannot be used as a folder");
+                }
+            } else {
+                parent = parent.addNode(segments[i], FOLDER_NODE_TYPE);
+                session.save();
+            }
+        }
+        return parent;
     }
 
     /** Path of a skill node relative to {@link #SKILLS_PATH} — the key {@link #getSkill} expects. */
@@ -319,13 +488,13 @@ public class McpSkillService {
         return nodePath.startsWith(prefix) ? nodePath.substring(prefix.length()) : nodePath;
     }
 
-    private SkillEntry toEntry(JCRNodeWrapper node) throws RepositoryException {
+    private SkillEntry toEntry(JCRNodeWrapper node, boolean withContent) throws RepositoryException {
         return new SkillEntry(
                 node.getName(),
                 relativePath(node.getPath()),
                 node.hasProperty(PROP_NAME) ? node.getProperty(PROP_NAME).getString() : "",
                 node.hasProperty(PROP_DESCRIPTION) ? node.getProperty(PROP_DESCRIPTION).getString() : "",
-                node.hasProperty(PROP_CONTENT) ? node.getProperty(PROP_CONTENT).getString() : ""
+                withContent && node.hasProperty(PROP_CONTENT) ? node.getProperty(PROP_CONTENT).getString() : ""
         );
     }
 
@@ -344,11 +513,6 @@ public class McpSkillService {
             this.mcpName = mcpName;
             this.description = description;
             this.content = content;
-        }
-
-        /** Root-level skill: the relative path is the node name. */
-        public SkillEntry(String name, String mcpName, String description, String content) {
-            this(name, name, mcpName, description, content);
         }
     }
 }

@@ -7,7 +7,7 @@ import graphql.annotations.annotationTypes.GraphQLTypeExtension;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 
 @GraphQLTypeExtension(DXGraphQLProvider.Mutation.class)
-@GraphQLDescription("MCP mutations")
+@GraphQLDescription("Community MCP mutations")
 public class McpMutationExtension {
 
     private McpMutationExtension() {

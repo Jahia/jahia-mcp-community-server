@@ -2,6 +2,7 @@ package org.jahia.community.mcp.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.jahia.community.mcp.access.Denial;
 import org.jahia.community.mcp.access.GraphQLWhitelistGate;
 import org.jahia.modules.mcp.spi.tool.ToolError;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
@@ -33,10 +34,8 @@ class GraphQLExecuteToolTest {
     void setUp() {
         client = mock(InternalGraphQLClient.class);
         gate = mock(GraphQLWhitelistGate.class);
-        when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
-        tool = new GraphQLExecuteTool();
-        tool.setGraphQLClient(client);
-        tool.setWhitelistGate(gate);
+        when(gate.evaluate(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
+        tool = new GraphQLExecuteTool(client, gate);
     }
 
     private static ObjectNode input(final String query) {
@@ -64,7 +63,7 @@ class GraphQLExecuteToolTest {
         ToolResult result = tool.execute(input("{ currentUser { name } }"), f.ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_FORBIDDEN);
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(any(), anyString(), any());
         assertThat(f.auditEvents).containsExactly("tool.execute.error");
     }
 
@@ -81,30 +80,31 @@ class GraphQLExecuteToolTest {
     @DisplayName("whitelist denial → forbidden error carrying the gate's reason, GraphQL not called")
     void whitelist_denial() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
-        when(gate.check(eq("{ admin { jahia } }"), eq("root"), eq("10.0.0.7")))
-                .thenReturn(Optional.of("Operation not allowed: 'admin' is not in the whitelist"));
+        when(gate.evaluate("{ admin { jahia } }", "root", "10.0.0.7"))
+                .thenReturn(Optional.of(new Denial(Denial.Kind.NOT_WHITELISTED,
+                        "Operation not allowed: 'admin' is not in the whitelist")));
 
         ToolResult result = tool.execute(input("{ admin { jahia } }"), f.ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_FORBIDDEN);
         assertThat(result.error().message()).contains("not in the whitelist");
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(any(), anyString(), any());
     }
 
     @Test
-    @DisplayName("allowed query → GraphQL JSON response returned as the payload, forwarding auth + variables")
+    @DisplayName("allowed query → GraphQL JSON response returned as the payload, running as the caller with its variables")
     void success_returns_graphql_json() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
         ObjectNode in = input("query($p:String!){ jcr { nodeByPath(path:$p) { name } } }");
         in.putObject("variables").put("p", "/");
-        when(client.execute(anyString(), any(), eq("APIToken abc")))
+        when(client.execute(eq(f.ctx), anyString(), any()))
                 .thenReturn(new InternalGraphQLClient.Response(200, "{\"data\":{\"jcr\":{\"nodeByPath\":{\"name\":\"\"}}}}"));
 
         ToolResult result = tool.execute(in, f.ctx);
 
         assertThat(result.isOk()).isTrue();
         assertThat(result.payload().path("data").path("jcr").has("nodeByPath")).isTrue();
-        verify(client).execute(anyString(), eq(java.util.Map.of("p", "/")), eq("APIToken abc"));
+        verify(client).execute(eq(f.ctx), anyString(), eq(java.util.Map.of("p", "/")));
         assertThat(f.auditEvents).containsExactly("tool.execute.ok");
     }
 
@@ -112,7 +112,7 @@ class GraphQLExecuteToolTest {
     @DisplayName("HTTP error from the GraphQL servlet → isError result (the old wrapper never flagged it)")
     void http_error_is_reported() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
-        when(client.execute(anyString(), any(), any()))
+        when(client.execute(any(), anyString(), any()))
                 .thenReturn(new InternalGraphQLClient.Response(400, "{\"errors\":[{\"message\":\"Invalid syntax\"}]}"));
 
         ToolResult result = tool.execute(input("{ broken"), f.ctx);
@@ -126,7 +126,7 @@ class GraphQLExecuteToolTest {
     @org.junit.jupiter.params.provider.CsvSource({"401, forbidden", "403, forbidden", "500, internal", "400, validation"})
     @DisplayName("HTTP status of the GraphQL servlet maps to a ToolError code")
     void http_status_mapping(final int status, final String code) throws Exception {
-        when(client.execute(anyString(), any(), any())).thenReturn(new InternalGraphQLClient.Response(status, ""));
+        when(client.execute(any(), anyString(), any())).thenReturn(new InternalGraphQLClient.Response(status, ""));
 
         ToolResult result = tool.execute(input("{ x }"), ToolContextFixture.administrator().ctx);
 
@@ -142,7 +142,7 @@ class GraphQLExecuteToolTest {
         ToolResult result = tool.execute(in, ToolContextFixture.administrator().ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_VALIDATION);
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(any(), anyString(), any());
     }
 
     @Test
@@ -151,7 +151,7 @@ class GraphQLExecuteToolTest {
         ToolContextFixture f = ToolContextFixture.administrator();
         ObjectNode in = input("{ currentUser { name } }");
         in.putObject("variables").put("secret", "s3cr3t");
-        when(client.execute(anyString(), any(), any())).thenReturn(new InternalGraphQLClient.Response(200, "{}"));
+        when(client.execute(any(), anyString(), any())).thenReturn(new InternalGraphQLClient.Response(200, "{}"));
 
         tool.execute(in, f.ctx);
 
@@ -167,7 +167,7 @@ class GraphQLExecuteToolTest {
         when(f.ctx.audit()).thenReturn((event, details) -> {
             throw new IllegalStateException("audit down");
         });
-        when(client.execute(anyString(), any(), any())).thenReturn(new InternalGraphQLClient.Response(200, "{\"data\":{}}"));
+        when(client.execute(any(), anyString(), any())).thenReturn(new InternalGraphQLClient.Response(200, "{\"data\":{}}"));
 
         ToolResult result = tool.execute(input("mutation { x }"), f.ctx);
 
@@ -178,7 +178,7 @@ class GraphQLExecuteToolTest {
     @DisplayName("non-JSON body is still returned, as a text payload")
     void non_json_body_returned_as_text() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
-        when(client.execute(anyString(), any(), any())).thenReturn(new InternalGraphQLClient.Response(200, "plain"));
+        when(client.execute(any(), anyString(), any())).thenReturn(new InternalGraphQLClient.Response(200, "plain"));
 
         ToolResult result = tool.execute(input("{ x }"), f.ctx);
 
@@ -189,7 +189,7 @@ class GraphQLExecuteToolTest {
     @DisplayName("infrastructure failure → internal error without leaking the exception message")
     void infrastructure_failure() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
-        when(client.execute(anyString(), any(), any())).thenThrow(new java.io.IOException("secret detail"));
+        when(client.execute(any(), anyString(), any())).thenThrow(new java.io.IOException("secret detail"));
 
         ToolResult result = tool.execute(input("{ x }"), f.ctx);
 

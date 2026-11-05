@@ -1,4 +1,5 @@
 import './commands';
+import {setWhitelist} from './mcp';
 import addContext from 'mochawesome/addContext';
 import {jsErrorsLogger} from '@jahia/cypress';
 
@@ -12,6 +13,13 @@ jsErrorsLogger.setAllowedJsWarnings([
 require('cypress-terminal-report/src/installLogsCollector')();
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 require('@jahia/cypress/dist/support/registerSupport').registerSupport();
+
+// Every spec starts from the read-only default (empty whitelist), even when an earlier spec stopped
+// before its after() hook restored it. Specs that need entries set them themselves.
+before(() => {
+    cy.login();
+    setWhitelist([]);
+});
 
 Cypress.on('uncaught:exception', () => {
     return false;

@@ -2,5 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "properties": {}
+  "properties": {
+    "typeNames": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 25,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"},
+      "description": "GraphQL type names to describe in full (fields, arguments, enum values). Omit to get the type list and the root Query/Mutation fields. The schema lists operations the whitelist may still refuse in community.graphql.execute."
+    }
+  }
 }

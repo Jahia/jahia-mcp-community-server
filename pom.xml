@@ -11,7 +11,7 @@
     <name>Jahia MCP Community Server</name>
     <version>2.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
-    <description>An extension of the Jahia mcp-server module that contributes generic GraphQL tools (whitelist-gated) and JCR-stored skills to its MCP endpoint, enabling AI assistants such as Claude to query and mutate Jahia content directly.</description>
+    <description>An extension of the Jahia mcp-server module that contributes administrator-only GraphQL tools and JCR-stored skills to its MCP endpoint. The GraphQL tool is read-only by default: queries run, except the privileged admin namespace; mutations and admin queries run only when an administrator whitelists them.</description>
 
     <scm>
         <connection>scm:git:git@github.com:Jahia/jahia-mcp-community-server.git</connection>
@@ -24,10 +24,10 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <yarn.arguments>build:production</yarn.arguments>
-        <jahia-depends>default,graphql-dxm-provider,mcp-server</jahia-depends>
+        <jahia-depends>default,graphql-dxm-provider,mcp-server=[0.5,0.6)</jahia-depends>
         <mcp-server.version>0.5.0-SNAPSHOT</mcp-server.version>
         <require-capability>
-            osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)",osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
+            osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
         </require-capability>
     </properties>
 
@@ -50,12 +50,6 @@
             <groupId>com.graphql-java</groupId>
             <artifactId>graphql-java</artifactId>
             <version>${graphql-java.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.graphql-java-kickstart</groupId>
-            <artifactId>graphql-java-servlet</artifactId>
-            <version>${graphql-java-servlet.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -90,7 +84,7 @@
             <version>3.25.3</version>
             <scope>test</scope>
         </dependency>
-        <!-- Test-only SLF4J backend so audit-log assertions (F10) can attach a ListAppender.
+        <!-- Test-only SLF4J backend so audit-log assertions can attach a ListAppender.
              Not embedded in the bundle; at runtime SLF4J is bound by Pax Logging. -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
@@ -159,6 +153,10 @@
                 <configuration>
                     <instructions>
                         <_dsannotations>org.jahia.community.mcp.*</_dsannotations>
+                        <!-- Implementation packages are private. Only the graphql package stays exported:
+                             graphql-dxm-provider reflects over the annotated extension classes and their
+                             return types, and the bundle scan has not been verified to work without it. -->
+                        <Export-Package>org.jahia.community.mcp.graphql</Export-Package>
                         <!-- Tight range: the mcp-server SPI is pre-1.0 and may change between minor versions. -->
                         <Import-Package>
                             org.jahia.modules.mcp.spi.tool;version="[0.5,0.6)",
@@ -173,6 +171,49 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
+            </plugin>
+
+            <!-- Coverage gate: the build fails when line coverage drops below 90%. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

@@ -2,7 +2,9 @@ package org.jahia.community.mcp.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
+import org.jahia.modules.mcp.spi.tool.ToolError;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,8 +17,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
 
-/** Small helpers shared by the community tools: schema loading, auditing, header access. */
+/** Small helpers shared by the community tools: schema loading, auditing, hashing, JSON parsing and sanitizing. */
 final class ToolSupport {
 
     static final ObjectMapper MAPPER = new ObjectMapper();
@@ -24,13 +27,35 @@ final class ToolSupport {
     static final String EVENT_OK = "tool.execute.ok";
     static final String EVENT_ERROR = "tool.execute.error";
 
+    /** Upper bound for any caller- or server-supplied text echoed into an error message. */
+    /** Message of the 'unavailable' error returned when the GraphQL servlet is not bound. */
+    static final String MESSAGE_GRAPHQL_UNAVAILABLE = "The Jahia GraphQL service is not available on this node.";
+    static final String HINT_GRAPHQL_UNAVAILABLE = "Do not retry until an administrator has checked that "
+            + "graphql-dxm-provider is started; the GraphQL tools work again as soon as its servlet is available.";
+
+    static final int MAX_ECHO_CHARS = 300;
+
     private ToolSupport() {
+    }
+
+    /** The explicit refusal of a GraphQL tool while the GraphQL servlet is not bound. */
+    static ToolResult graphQLUnavailable(final String toolName, final String username) {
+        if (LOGGER.isWarnEnabled()) {
+            LOGGER.warn("{} refused for user='{}': the GraphQL servlet is not available", toolName,
+                    LogSupport.clean(username));
+        }
+        return ToolResult.error(ToolError.CODE_UNAVAILABLE,
+                MESSAGE_GRAPHQL_UNAVAILABLE, HINT_GRAPHQL_UNAVAILABLE);
     }
 
     /** Loads {@code schemas/<toolName>.json} from this bundle. */
     static JsonNode loadSchema(final String toolName) {
+        return loadSchema(toolName, ToolSupport.class::getResourceAsStream);
+    }
+
+    static JsonNode loadSchema(final String toolName, final Function<String, InputStream> opener) {
         final String resource = "/schemas/" + toolName + ".json";
-        try (InputStream in = ToolSupport.class.getResourceAsStream(resource)) {
+        try (InputStream in = opener.apply(resource)) {
             if (in == null) {
                 throw new IllegalStateException("Missing tool schema resource " + resource);
             }
@@ -38,11 +63,6 @@ final class ToolSupport {
         } catch (IOException e) {
             throw new UncheckedIOException("Unreadable tool schema resource " + resource, e);
         }
-    }
-
-    /** Records the mandatory audit event for {@code result} and returns it unchanged. */
-    static ToolResult audited(final ToolContext ctx, final String toolName, final ToolResult result) {
-        return audited(ctx, toolName, result, Map.of());
     }
 
     /**
@@ -54,7 +74,7 @@ final class ToolSupport {
             final Map<String, Object> extra) {
         final Map<String, Object> details = new LinkedHashMap<>();
         details.put("tool", toolName);
-        details.put("user", ctx.username());
+        details.put("user", LogSupport.clean(ctx.username()));
         if (result.isError()) {
             details.put("code", result.error().code());
         }
@@ -81,11 +101,6 @@ final class ToolSupport {
         }
     }
 
-    /** The caller's Authorization header, forwarded to the in-process GraphQL servlet. */
-    static String authorization(final ToolContext ctx) {
-        return ctx.request().map(r -> r.getHeader("Authorization")).orElse(null);
-    }
-
     /** Parses {@code body} as JSON, or {@code null} when it is empty or not JSON. */
     static JsonNode parseJsonOrNull(final String body) {
         if (body == null || body.isBlank()) {
@@ -96,5 +111,17 @@ final class ToolSupport {
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /**
+     * Makes untrusted text safe to echo in an error: control characters (including line breaks)
+     * become spaces, and the result is cut to {@code maxChars} with an ellipsis.
+     */
+    static String sanitize(final String text, final int maxChars) {
+        if (text == null) {
+            return "";
+        }
+        final String cleaned = text.replaceAll("\\p{Cntrl}+", " ").strip();
+        return cleaned.length() <= maxChars ? cleaned : cleaned.substring(0, maxChars) + "…";
     }
 }

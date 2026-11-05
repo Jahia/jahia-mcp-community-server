@@ -3,12 +3,13 @@ package org.jahia.community.mcp.tools;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.jahia.community.mcp.access.CommunityMcpAccess;
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.modules.mcp.spi.tool.JahiaMcpTool;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
 import org.jahia.modules.mcp.spi.tool.ToolError;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
 import org.jahia.modules.mcp.spi.tool.ToolSafety;
+import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
@@ -17,56 +18,83 @@ import org.slf4j.LoggerFactory;
 import javax.servlet.ServletException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
- * {@code community.graphql.introspect} — describes the GraphQL schema in several requests, each
- * with at most one {@code __Type.fields} selection, to stay under Jahia's bad-faith introspection
- * guard (which rejects documents with more than one).
+ * {@code community.graphql.introspect} — bounded, two-level schema discovery.
+ *
+ * <ul>
+ *   <li>No arguments: the type list (name + kind) and full details of the root Query/Mutation types.</li>
+ *   <li>{@code typeNames}: full details of up to {@value #MAX_TYPE_NAMES} named types.</li>
+ * </ul>
+ *
+ * <p>Each type is fetched in its own request (Jahia's bad-faith introspection guard rejects documents
+ * with more than one {@code __Type.fields} selection), with the name passed as a GraphQL variable.
+ * Details stop once the result reaches {@value #MAX_RESULT_CHARS} characters; the remaining names
+ * are returned in {@code truncatedTypes} so the caller can ask for them in a later call.</p>
  */
 @Component(service = JahiaMcpTool.class, immediate = true)
-public class GraphQLIntrospectTool implements JahiaMcpTool {
+public class GraphQLIntrospectTool extends AbstractCommunityTool {
 
     static final String NAME = "community.graphql.introspect";
+    static final int MAX_TYPE_NAMES = 25;
+    static final int MAX_RESULT_CHARS = 100_000;
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphQLIntrospectTool.class);
-    private static final JsonNode SCHEMA = ToolSupport.loadSchema(NAME);
+    private static final String TYPES = "types";
+    private static final Pattern GRAPHQL_NAME = Pattern.compile("[_A-Za-z]\\w*+");
 
-    // Step 1: type names + root types — zero __Type.fields selections.
-    private static final String STEP1 = "{ __schema { queryType { name } mutationType { name } "
-            + "subscriptionType { name } types { name kind description } } }";
+    // Type list + root type names — zero __Type.fields selections.
+    private static final String SCHEMA_QUERY = "{ __schema { queryType { name } mutationType { name } "
+            + "subscriptionType { name } types { name kind } } }";
 
-    // Step 2: one request per type — exactly one __Type.fields selection.
-    private static final String TYPE_QUERY = "{ __type(name: \"%s\") { name kind description "
+    /** {@code type { name kind ofType { ... } }} unwrapped deep enough for {@code [[X!]!]!}. */
+    private static final int TYPE_REF_LEVELS = 5;
+    private static final String TYPE_REF = typeRef(TYPE_REF_LEVELS);
+
+    // One type — exactly one __Type.fields selection; the name is a variable, never formatted in.
+    private static final String TYPE_QUERY = "query($name: String!) { __type(name: $name) { name kind description "
             + "fields(includeDeprecated: false) { name description "
-            + "args { name description type { name kind ofType { name kind ofType { name kind } } } } "
-            + "type { name kind ofType { name kind ofType { name kind } } } } "
-            + "inputFields { name description type { name kind ofType { name kind ofType { name kind } } } } "
+            + "args { name description type " + TYPE_REF + " } "
+            + "type " + TYPE_REF + " } "
+            + "inputFields { name description type " + TYPE_REF + " } "
             + "enumValues(includeDeprecated: false) { name description } "
             + "interfaces { name kind } possibleTypes { name kind } } }";
 
-    private volatile InternalGraphQLClient graphQLClient;
+    private static String typeRef(final int levels) {
+        final StringBuilder open = new StringBuilder();
+        final StringBuilder close = new StringBuilder();
+        for (int i = 0; i < levels; i++) {
+            open.append("{ name kind ");
+            close.append("} ");
+            if (i < levels - 1) {
+                open.append("ofType ");
+            }
+        }
+        return open.append(close).toString().trim();
+    }
 
-    @Reference
-    public void setGraphQLClient(final InternalGraphQLClient graphQLClient) {
+    private final InternalGraphQLClient graphQLClient;
+
+    @Activate
+    public GraphQLIntrospectTool(@Reference final InternalGraphQLClient graphQLClient) {
+        super(NAME);
         this.graphQLClient = graphQLClient;
     }
 
     @Override
-    public String name() {
-        return NAME;
-    }
-
-    @Override
     public String description() {
-        return "Describe Jahia's GraphQL schema: root query/mutation types and full details of every "
-                + "named type. Call this before community.graphql.execute. The result is large.";
-    }
-
-    @Override
-    public JsonNode inputSchema() {
-        return SCHEMA;
+        return "Discover Jahia's GraphQL schema before calling community.graphql.execute. Without arguments, "
+                + "returns every type name and kind plus the fields of the root Query and Mutation types. "
+                + "Pass typeNames (at most " + MAX_TYPE_NAMES + ") to get the fields, arguments and enum values "
+                + "of specific types; names left in truncatedTypes can be requested in a further call. "
+                + "The schema lists every operation Jahia offers, including ones the administrator's "
+                + "whitelist may refuse (mutations are refused unless explicitly whitelisted): a listed "
+                + "operation is not necessarily allowed in community.graphql.execute.";
     }
 
     @Override
@@ -75,70 +103,124 @@ public class GraphQLIntrospectTool implements JahiaMcpTool {
     }
 
     @Override
-    public Set<String> tags() {
-        return Set.of("community");
-    }
-
-    @Override
-    public ToolResult execute(final JsonNode input, final ToolContext ctx) {
-        return ToolSupport.audited(ctx, NAME, run(ctx));
-    }
-
-    private ToolResult run(final ToolContext ctx) {
-        final Optional<ToolResult> denied = CommunityMcpAccess.requireAdministrator(ctx);
-        if (denied.isPresent()) {
-            return denied.get();
+    protected ToolResult doExecute(final JsonNode input, final ToolContext ctx) {
+        final JsonNode typeNamesNode = input.path("typeNames");
+        final boolean explicit = !typeNamesNode.isMissingNode() && !typeNamesNode.isNull();
+        final Optional<ToolResult> invalid = explicit ? validateTypeNames(typeNamesNode) : Optional.empty();
+        if (invalid.isPresent()) {
+            return invalid.get();
         }
-        final String auth = ToolSupport.authorization(ctx);
         try {
-            final InternalGraphQLClient.Response step1Response = graphQLClient.execute(STEP1, null, auth);
-            final JsonNode step1 = step1Response.isHttpError() ? null : ToolSupport.parseJsonOrNull(step1Response.body());
-            final JsonNode schema = step1 == null ? null : step1.path("data").path("__schema");
-            if (schema == null || !schema.isObject()) {
-                LOGGER.error("{}: schema step returned no data (HTTP {})", NAME, step1Response.status());
-                return internalError();
-            }
             final ObjectNode result = ToolSupport.MAPPER.createObjectNode();
-            result.set("schema", schema);
-            final ObjectNode types = result.putObject("types");
-            final ArrayNode skipped = result.putArray("skippedTypes");
-            fetchTypeDetails(collectTypeNames(schema.path("types")), auth, types, skipped);
-            if (!skipped.isEmpty()) {
-                LOGGER.warn("{}: {} type(s) could not be introspected: {}", NAME, skipped.size(), skipped);
+            final List<String> wanted = new ArrayList<>();
+            if (explicit) {
+                final Set<String> distinct = new LinkedHashSet<>();
+                typeNamesNode.forEach(n -> distinct.add(n.asText()));
+                wanted.addAll(distinct);
+            } else {
+                final JsonNode schema = fetchSchemaSummary(ctx);
+                if (schema == null) {
+                    return internalError();
+                }
+                result.set("schema", schema);
+                addRootTypeName(schema, "queryType", wanted);
+                addRootTypeName(schema, "mutationType", wanted);
             }
+            fetchTypeDetails(wanted, ctx, result);
             return ToolResult.ok(result);
+        } catch (InternalGraphQLClient.ServletUnavailableException ex) {
+            return ToolSupport.graphQLUnavailable(NAME, ctx.username());
         } catch (IOException | ServletException | RuntimeException ex) {
-            LOGGER.error("{} failed for user='{}'", NAME, ctx.username(), ex);
+            LOGGER.error("{} failed for user='{}'", NAME, LogSupport.clean(ctx.username()), ex);
             return internalError();
         }
     }
 
-    private static List<String> collectTypeNames(final JsonNode types) {
-        final List<String> names = new ArrayList<>();
-        for (final JsonNode t : types) {
-            final String name = t.path("name").asText("");
-            if (!name.isEmpty() && !name.startsWith("__") && !"SCALAR".equals(t.path("kind").asText(""))) {
-                names.add(name);
+    private static Optional<ToolResult> validateTypeNames(final JsonNode typeNames) {
+        if (!typeNames.isArray() || typeNames.isEmpty() || typeNames.size() > MAX_TYPE_NAMES) {
+            return Optional.of(ToolResult.error(ToolError.CODE_VALIDATION,
+                    "'typeNames' must be an array of 1 to " + MAX_TYPE_NAMES + " type names.",
+                    "Request fewer types per call, or omit typeNames to get the type list."));
+        }
+        for (final JsonNode n : typeNames) {
+            if (!n.isTextual() || !GRAPHQL_NAME.matcher(n.asText()).matches()) {
+                return Optional.of(ToolResult.error(ToolError.CODE_VALIDATION,
+                        "'typeNames' entries must be GraphQL type names.",
+                        "Use names exactly as returned in schema.types by a call without arguments."));
             }
         }
-        return names;
+        return Optional.empty();
     }
 
-    /** Fills {@code details} per type; types that cannot be fetched are named in {@code skipped}. */
-    private void fetchTypeDetails(final List<String> typeNames, final String auth,
-            final ObjectNode details, final ArrayNode skipped) throws IOException, ServletException {
-        for (final String typeName : typeNames) {
-            // typeName comes from the server's own schema (GraphQL names are [_A-Za-z][_0-9A-Za-z]*).
-            final InternalGraphQLClient.Response response =
-                    graphQLClient.execute(String.format(TYPE_QUERY, typeName), null, auth);
-            final JsonNode json = response.isHttpError() ? null : ToolSupport.parseJsonOrNull(response.body());
-            final JsonNode type = json == null ? null : json.path("data").path("__type");
-            if (type != null && type.isObject()) {
-                details.set(typeName, type);
-            } else {
-                skipped.add(typeName);
+    /** The {@code __schema} summary, type list reduced to non-introspection {name, kind}; null on failure. */
+    private JsonNode fetchSchemaSummary(final ToolContext ctx) throws IOException, ServletException {
+        final InternalGraphQLClient.Response response = graphQLClient.execute(ctx, SCHEMA_QUERY, null);
+        final JsonNode json = response.isHttpError() ? null : ToolSupport.parseJsonOrNull(response.body());
+        final JsonNode schema = json == null ? null : json.path("data").path("__schema");
+        if (schema == null || !schema.isObject()) {
+            LOGGER.error("{}: schema step returned no data (HTTP {})", NAME, response.status());
+            return null;
+        }
+        final ObjectNode summary = ((ObjectNode) schema).deepCopy();
+        final ArrayNode types = summary.putArray(TYPES);
+        for (final JsonNode t : schema.path(TYPES)) {
+            final String name = t.path("name").asText("");
+            if (!name.isEmpty() && !name.startsWith("__")) {
+                types.addObject().put("name", name).put("kind", t.path("kind").asText(""));
             }
         }
+        return summary;
+    }
+
+    private static void addRootTypeName(final JsonNode schema, final String field, final List<String> into) {
+        final String name = schema.path(field).path("name").asText("");
+        if (!name.isEmpty()) {
+            into.add(name);
+        }
+    }
+
+    /**
+     * Adds {@code types}, {@code skippedTypes} (unknown or failed) and {@code truncatedTypes} (not
+     * fetched: output budget reached) to {@code result}. The budget counts type details only — the
+     * compact {name, kind} list must never push the root types out. The first type is always
+     * included so a caller asking for one large type still makes progress.
+     */
+    private void fetchTypeDetails(final List<String> names, final ToolContext ctx, final ObjectNode result)
+            throws IOException, ServletException {
+        final ObjectNode details = result.putObject(TYPES);
+        final ArrayNode skipped = result.putArray("skippedTypes");
+        final ArrayNode truncated = result.putArray("truncatedTypes");
+        int used = 0;
+        for (int i = 0; i < names.size(); i++) {
+            final boolean budgetSpent = used >= MAX_RESULT_CHARS && !details.isEmpty();
+            final JsonNode type = budgetSpent ? null : fetchType(names.get(i), ctx);
+            final int size = type == null ? 0 : type.toString().length();
+            if (budgetSpent || exceedsBudget(used, size, details)) {
+                names.subList(i, names.size()).forEach(truncated::add);
+                break;
+            }
+            if (type == null) {
+                skipped.add(names.get(i));
+            } else {
+                details.set(names.get(i), type);
+                used += size;
+            }
+        }
+        if (!skipped.isEmpty() || !truncated.isEmpty()) {
+            LOGGER.info("{}: skipped={}, truncated={}", NAME, skipped, truncated);
+        }
+    }
+
+    private static boolean exceedsBudget(final int used, final int size, final ObjectNode details) {
+        return used + size > MAX_RESULT_CHARS && !details.isEmpty();
+    }
+
+    /** One type's details, or null when the server does not know it or fails. */
+    private JsonNode fetchType(final String name, final ToolContext ctx) throws IOException, ServletException {
+        final InternalGraphQLClient.Response response = graphQLClient.execute(ctx, TYPE_QUERY, Map.of("name", name));
+        final JsonNode json = response.isHttpError() ? null : ToolSupport.parseJsonOrNull(response.body());
+        final JsonNode type = json == null ? null : json.path("data").path("__type");
+        return type != null && type.isObject() ? type : null;
     }
 
     private static ToolResult internalError() {

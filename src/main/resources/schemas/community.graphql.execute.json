@@ -6,7 +6,7 @@
     "query": {
       "type": "string",
       "minLength": 1,
-      "description": "GraphQL query or mutation document. Named fragment spreads are refused while a whitelist is active."
+      "description": "GraphQL query or mutation document. Mutations are refused unless explicitly whitelisted. Role grants (grantRoles/revokeRoles), API token mutations, OSGi configuration writes and this module's own settings are never allowed. Syntax errors (reported with their position) and named fragment spreads (use inline fragments instead) are refused, and operations outside the whitelist return a forbidden error. Errors raised by GraphQL itself come back in the 'errors' array of a successful result."
     },
     "variables": {
       "type": "object",

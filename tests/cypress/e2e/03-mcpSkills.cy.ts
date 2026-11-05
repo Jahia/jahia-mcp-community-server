@@ -1,93 +1,90 @@
 import {DocumentNode} from 'graphql';
+import {
+    TOOL, callTool, createApiToken, deleteApiToken, deleteSkill, deleteSkillRefused, getSkills, removeSkill, saveSkill,
+    saveSkillRefused, toolPayload, toolText
+} from '../support/mcp';
 
 describe('MCP Server — Skills', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const getSkills: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSkills.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const saveSkill: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/saveSkill.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const deleteSkill: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteSkill.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const createToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/createToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const deleteToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const listTokens: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/listTokens.graphql');
-
     const TOKEN_NAME = 'mcp-cypress-skills-token';
     const TEST_SKILL = 'cypress-test-skill';
+    const NESTED_FOLDER = 'cypress-test-folder';
+    const NESTED_SKILL = `${NESTED_FOLDER}/nested-skill`;
+    // A skill this spec owns, so nothing depends on what the module seeded or on other specs.
+    const OWN_SKILL = 'cypress-owned-skill';
+    const OWN_CONTENT = 'Content owned by the skills spec';
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const getSkillStorage: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSkillStorage.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const getSkillsChildren: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSkillsChildren.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const deleteNodeByPath: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteNodeByPath.graphql');
+    const SKILLS_ROOT = '/sites/systemsite/contents/mcp-skills';
 
     let apiToken: string;
-    let tokenKey: string;
+
+    const skillNames = (skills: {name: string}[]) => skills.map(s => s.name);
+
+    /** The nodes named `name` directly under the skills root, read as root outside the module. */
+    const skillsRootChildren = (name: string) => cy.apollo({query: getSkillsChildren, variables: {names: [name]}})
+        .then(result => result.data.jcr.nodeByPath.children.nodes.map((n: {name: string}) => n.name));
+
+    // The deleteSkill mutation refuses any node that is not an mcp:skill, so the jnt:contentList folder that
+    // saveSkill(NESTED_SKILL) creates is removed as root through the generic JCR mutation, and the
+    // removal is checked: a leftover folder would survive from one run to the next.
+    const removeNestedFolder = () => {
+        cy.apollo({mutation: deleteNodeByPath, variables: {path: `${SKILLS_ROOT}/${NESTED_FOLDER}`}, errorPolicy: 'all'});
+        skillsRootChildren(NESTED_FOLDER).should('deep.equal', []);
+    };
+
+    const cleanup = () => {
+        removeSkill(NESTED_SKILL);
+        removeNestedFolder();
+        removeSkill(TEST_SKILL);
+        removeSkill(OWN_SKILL);
+    };
+
+    // Client-safe messages of the GraphQL errors that saveSkill and deleteSkill raise (McpMutation).
+    const NOT_DELETED = 'The skill was not deleted';
+    const INVALID_NAME = 'Invalid skill name';
+    const TOO_LONG = 'The skill content is too long';
+    const NOT_SAVED = 'The skill could not be saved';
+    const MAX_CONTENT_CHARS = 200000;
 
     before(() => {
         cy.login();
-        cy.apollo({query: listTokens}).then(result => {
-            const nodes: {key: string}[] = result.data.admin.personalApiTokens.tokens.nodes;
-            nodes.forEach(t => {
-                cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
-            });
+        createApiToken(TOKEN_NAME).then(token => {
+            apiToken = token;
         });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
-            apiToken = result.data.admin.personalApiTokens.createToken;
-        });
-        cy.apollo({query: listTokens}).then(result => {
-            const found = result.data.admin.personalApiTokens.tokens.nodes.find(
-                (t: {key: string; name: string}) => t.name === TOKEN_NAME
-            );
-            tokenKey = found.key;
-        });
+        cleanup();
     });
 
     after(() => {
-        cy.apollo({mutation: deleteSkill, variables: {name: TEST_SKILL}});
-        cy.apollo({mutation: deleteToken, variables: {tokenKey}});
+        cleanup();
+        deleteApiToken(TOKEN_NAME);
     });
 
-    afterEach(() => {
-        cy.apollo({mutation: deleteSkill, variables: {name: TEST_SKILL}});
+    beforeEach(() => {
+        cleanup();
+        saveSkill(OWN_SKILL, OWN_CONTENT, 'Owned', 'Owned by the skills spec');
     });
-
-    const callTool = (name: string, args: Record<string, unknown>) => {
-        return cy.request({
-            method: 'POST',
-            url: '/modules/mcp',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `APIToken ${apiToken}`
-            },
-            body: {
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'tools/call',
-                params: {name, arguments: args}
-            }
-        });
-    };
 
     // --- GraphQL API ---
 
-    it('mcpSkills returns the default hello-jahia skill seeded on activation', () => {
-        cy.apollo({query: getSkills}).then(result => {
-            const skills: {name: string}[] = result.data.communityMcp.skills;
-            const names = skills.map((s: {name: string}) => s.name);
-            expect(names).to.include('hello-jahia');
+    it('skills returns the default skill seeded on activation, keyed by its relative path', () => {
+        getSkills().then(result => {
+            expect(skillNames(result.data.communityMcp.skills)).to.include('default/hello-jahia');
         });
     });
 
-    it('mcpSaveSkill creates a new skill and returns true', () => {
-        cy.apollo({
-            mutation: saveSkill,
-            variables: {name: TEST_SKILL, mcpName: 'Cypress Test', description: 'Test skill', content: 'Test content'}
-        }).its('data.communityMcp.saveSkill').should('eq', true);
+    it('saveSkill creates a new skill and returns true', () => {
+        saveSkill(TEST_SKILL, 'Test content', 'Cypress Test', 'Test skill')
+            .its('data.communityMcp.saveSkill').should('eq', true);
     });
 
-    it('mcpSkills reads back a saved skill with all fields', () => {
-        cy.apollo({
-            mutation: saveSkill,
-            variables: {name: TEST_SKILL, mcpName: 'Cypress Test', description: 'A test skill', content: 'Hello from Cypress'}
-        });
-        cy.apollo({query: getSkills}).then(result => {
+    it('skills reads back a saved skill with all fields', () => {
+        saveSkill(TEST_SKILL, 'Hello from Cypress', 'Cypress Test', 'A test skill');
+        getSkills().then(result => {
             const skill = result.data.communityMcp.skills.find((s: {name: string}) => s.name === TEST_SKILL);
             expect(skill).to.exist;
             expect(skill.mcpName).to.eq('Cypress Test');
@@ -96,73 +93,129 @@ describe('MCP Server — Skills', () => {
         });
     });
 
-    it('mcpSaveSkill updates an existing skill', () => {
-        cy.apollo({mutation: saveSkill, variables: {name: TEST_SKILL, mcpName: 'v1', description: '', content: 'v1 content'}});
-        cy.apollo({mutation: saveSkill, variables: {name: TEST_SKILL, mcpName: 'v2', description: '', content: 'v2 content'}});
-        cy.apollo({query: getSkills}).then(result => {
+    it('saveSkill updates an existing skill', () => {
+        saveSkill(TEST_SKILL, 'v1 content', 'v1');
+        saveSkill(TEST_SKILL, 'v2 content', 'v2');
+        getSkills().then(result => {
             const skill = result.data.communityMcp.skills.find((s: {name: string}) => s.name === TEST_SKILL);
             expect(skill.mcpName).to.eq('v2');
             expect(skill.content).to.eq('v2 content');
         });
     });
 
-    it('mcpDeleteSkill removes a skill and returns true', () => {
-        cy.apollo({mutation: saveSkill, variables: {name: TEST_SKILL, mcpName: '', description: '', content: 'to delete'}});
-        cy.apollo({mutation: deleteSkill, variables: {name: TEST_SKILL}})
-            .its('data.communityMcp.deleteSkill').should('eq', true);
-        cy.apollo({query: getSkills}).then(result => {
-            const names = result.data.communityMcp.skills.map((s: {name: string}) => s.name);
-            expect(names).not.to.include(TEST_SKILL);
+    it('deleteSkill removes a skill and returns true', () => {
+        deleteSkill(OWN_SKILL).its('data.communityMcp.deleteSkill').should('eq', true);
+        getSkills().then(result => {
+            expect(skillNames(result.data.communityMcp.skills)).not.to.include(OWN_SKILL);
         });
     });
 
-    it('mcpDeleteSkill returns false for a non-existent skill', () => {
-        cy.apollo({mutation: deleteSkill, variables: {name: 'does-not-exist'}})
-            .its('data.communityMcp.deleteSkill').should('eq', false);
+    it('deleteSkill fails with a GraphQL error for a non-existent skill', () => {
+        deleteSkillRefused('does-not-exist', NOT_DELETED);
     });
 
-    // --- MCP tools ---
+    it('saveSkill accepts a body of the maximum length and refuses a longer one with a GraphQL error', () => {
+        saveSkill(TEST_SKILL, 'x'.repeat(MAX_CONTENT_CHARS)).its('data.communityMcp.saveSkill').should('eq', true);
+        saveSkillRefused(TEST_SKILL, 'y'.repeat(MAX_CONTENT_CHARS + 1), TOO_LONG);
+        getSkills().then(result => {
+            const skill = result.data.communityMcp.skills.find((s: {name: string}) => s.name === TEST_SKILL);
+            expect(skill.content, 'the refused body is not stored').to.eq('x'.repeat(MAX_CONTENT_CHARS));
+        });
+    });
 
-    it('community.skill.list lists the default skill by the path community.skill.get expects', () => {
-        callTool('community.skill.list', {}).then(response => {
+    it('stores skills in jnt:contentList folders, as 1.x did, with a type hidden from content pickers', () => {
+        cy.apollo({query: getSkillStorage}).then(result => {
+            const jcr = result.data.jcr;
+            expect(jcr.container.primaryNodeType.name).to.eq('jnt:contentList');
+            expect(jcr.folder.primaryNodeType.name).to.eq('jnt:contentList');
+            expect(jcr.skill.primaryNodeType.name).to.eq('mcp:skill');
+            expect(jcr.skill.hidden, 'mcp:skill is a jmix:hiddenType').to.eq(true);
+            expect(jcr.skill.droppable, 'mcp:skill is droppable into jnt:contentList').to.eq(true);
+        });
+    });
+
+    // --- Nested skills ---
+
+    it('saveSkill with a nested name creates the folders and lists the skill by its relative path', () => {
+        saveSkill(NESTED_SKILL, 'nested content', 'Nested', 'A nested skill')
+            .its('data.communityMcp.saveSkill').should('eq', true);
+        getSkills().then(result => {
+            const skill = result.data.communityMcp.skills.find((s: {name: string}) => s.name === NESTED_SKILL);
+            expect(skill, 'nested skill listed by relative path').to.exist;
+            expect(skill.content).to.eq('nested content');
+        });
+        callTool(apiToken, TOOL.getSkill, {name: NESTED_SKILL}).then(response => {
             expect(response.body.result.isError).to.eq(false);
-            const {skills} = JSON.parse(response.body.result.content[0].text);
-            const names = skills.map((s: {name: string}) => s.name);
-            expect(names).to.include('default/hello-jahia');
+            expect(toolText(response)).to.include('nested content');
         });
+        deleteSkill(NESTED_SKILL).its('data.communityMcp.deleteSkill').should('eq', true);
+        getSkills().then(result => {
+            expect(skillNames(result.data.communityMcp.skills)).not.to.include(NESTED_SKILL);
+        });
+        // The deleteSkill mutation never removes a folder: the folder stays until it is removed as root.
+        deleteSkillRefused(NESTED_FOLDER, NOT_DELETED);
+        skillsRootChildren(NESTED_FOLDER).should('deep.equal', [NESTED_FOLDER]);
+        // A folder cannot be overwritten by a skill of the same name either.
+        saveSkillRefused(NESTED_FOLDER, 'must not replace the folder', NOT_SAVED);
+        skillsRootChildren(NESTED_FOLDER).should('deep.equal', [NESTED_FOLDER]);
     });
 
-    it('a name returned by community.skill.list can be passed straight to community.skill.get', () => {
-        callTool('community.skill.list', {}).then(response => {
-            const {skills} = JSON.parse(response.body.result.content[0].text);
-            const hello = skills.find((s: {name: string}) => s.name.endsWith('hello-jahia'));
-            callTool('community.skill.get', {name: hello.name}).then(getResponse => {
-                expect(getResponse.body.result.isError).to.eq(false);
-                expect(JSON.parse(getResponse.body.result.content[0].text).content).to.include('Hello Jahian');
+    // --- Traversal-style names are refused end to end ---
+
+    ['../escape', 'a/../b', '/leading', 'trailing/', 'a//b', './x', '..', 'a b', 'a\\b'].forEach(name => {
+        it(`refuses the unsafe skill name '${name}' through saveSkill, deleteSkill and community.skill.get`, () => {
+            saveSkillRefused(name, 'must not be stored', INVALID_NAME);
+            deleteSkillRefused(name, INVALID_NAME);
+            callTool(apiToken, TOOL.getSkill, {name}).then(response => {
+                expect(response.body.result.isError).to.eq(true);
+                expect(toolText(response)).not.to.include(OWN_CONTENT);
+            });
+            getSkills().then(result => {
+                expect(skillNames(result.data.communityMcp.skills)).to.include(OWN_SKILL);
             });
         });
     });
 
-    it('community.skill.get returns content for the default hello-jahia skill', () => {
-        callTool('community.skill.get', {name: 'default/hello-jahia'}).then(response => {
+    // --- MCP tools ---
+
+    it('community.skill.list lists the skills by the path community.skill.get expects', () => {
+        callTool(apiToken, TOOL.listSkills, {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
-            expect(response.body.result.content[0].text).to.include('Hello Jahian');
+            const names = skillNames(toolPayload(response).skills);
+            expect(names).to.include('default/hello-jahia');
+            expect(names).to.include(OWN_SKILL);
         });
     });
 
-    it('community.skill.get returns not_found for a non-existent skill', () => {
-        callTool('community.skill.get', {name: 'does-not-exist'}).then(response => {
+    it('a name returned by community.skill.list can be passed straight to community.skill.get', () => {
+        callTool(apiToken, TOOL.listSkills, {}).then(response => {
+            const hello = toolPayload(response).skills.find((s: {name: string}) => s.name.endsWith('hello-jahia'));
+            callTool(apiToken, TOOL.getSkill, {name: hello.name}).then(getResponse => {
+                expect(getResponse.body.result.isError).to.eq(false);
+                expect(toolPayload(getResponse).content).to.include('Hello Jahian');
+            });
+        });
+    });
+
+    it('community.skill.get returns the content of a skill this spec created', () => {
+        callTool(apiToken, TOOL.getSkill, {name: OWN_SKILL}).then(response => {
+            expect(response.body.result.isError).to.eq(false);
+            expect(toolPayload(response).content).to.eq(OWN_CONTENT);
+        });
+    });
+
+    it('community.skill.get reports a non-existent skill as an error', () => {
+        callTool(apiToken, TOOL.getSkill, {name: 'does-not-exist'}).then(response => {
             expect(response.body.result.isError).to.eq(true);
-            expect(response.body.result.content[0].text).to.include('not found');
+            expect(toolText(response)).to.include('not found');
         });
     });
 
     it('community.skill.list reflects a newly created skill', () => {
-        cy.apollo({mutation: saveSkill, variables: {name: TEST_SKILL, mcpName: 'MCP Listed', description: 'Listed via MCP', content: 'content'}});
-        callTool('community.skill.list', {}).then(response => {
+        saveSkill(TEST_SKILL, 'content', 'MCP Listed', 'Listed via MCP');
+        callTool(apiToken, TOOL.listSkills, {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
-            const {skills} = JSON.parse(response.body.result.content[0].text);
-            const found = skills.find((s: {name: string}) => s.name === TEST_SKILL);
+            const found = toolPayload(response).skills.find((s: {name: string}) => s.name === TEST_SKILL);
             expect(found).to.exist;
             expect(found.description).to.eq('Listed via MCP');
         });

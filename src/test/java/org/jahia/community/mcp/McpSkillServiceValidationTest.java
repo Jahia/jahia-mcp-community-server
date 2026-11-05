@@ -128,10 +128,4 @@ class McpSkillServiceValidationTest {
                 .isEqualTo("default/hello-jahia");
         assertThat(McpSkillService.relativePath(McpSkillService.SKILLS_PATH + "/top")).isEqualTo("top");
     }
-
-    @Test
-    @DisplayName("the 4-argument SkillEntry keeps path equal to name (root-level skill)")
-    void four_arg_entry_path_defaults_to_name() {
-        assertThat(new McpSkillService.SkillEntry("a", "A", "d", "c").path).isEqualTo("a");
-    }
 }

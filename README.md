@@ -3,14 +3,32 @@
 **GitHub:** https://github.com/Jahia/jahia-mcp-community-server
 
 An extension of Jahia's [`mcp-server`](https://github.com/Jahia/mcp-server) module. It contributes
-**generic GraphQL tools** (gated by an operation whitelist) and **JCR-stored skills** to the
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) endpoint that `mcp-server` exposes,
-so AI assistants such as Claude can reach any Jahia GraphQL operation — not only the curated
-`site.*`, `page.*` and `content.*` tools — when an administrator allows it.
+**administrator-only GraphQL tools** and **JCR-stored skills** to the
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) endpoint that `mcp-server` exposes.
+The GraphQL tool can reach any Jahia GraphQL operation, not only the curated `site.*`, `page.*` and
+`content.*` tools, but it is **read-only by default**: queries run, except the privileged `admin`
+namespace, and mutations and subscriptions are refused until an administrator allows them in the whitelist.
 
 > **2.0 is a breaking change.** Versions 1.x ran their own MCP endpoint at
 > `/modules/community-mcp`. From 2.0 that endpoint is gone: the tools are served by `mcp-server` at
-> `/modules/mcp`, under new names. See [Migrating from 1.x](#migrating-from-1x).
+> `/modules/mcp`, under new names. See [Migrating from 1.x](#migrating-from-1x) and
+> [CHANGELOG.md](CHANGELOG.md).
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Authentication and access](#authentication-and-access)
+- [MCP client setup](#mcp-client-setup-claude-code)
+- [Tools](#tools)
+- [Skills](#skills)
+- [Access control: the whitelist](#access-control-the-whitelist)
+- [Administration UI](#administration-ui)
+- [Security notes](#security-notes)
+- [Troubleshooting](#troubleshooting)
+- [Migrating from 1.x](#migrating-from-1x)
+- [Testing](#testing)
 
 ## How it works
 
@@ -27,35 +45,57 @@ mcp-server ToolRegistry ──► community.graphql.execute ──[admin gate]�
 
 Each tool is an OSGi Declarative Services component implementing `mcp-server`'s public
 `org.jahia.modules.mcp.spi.tool.JahiaMcpTool` SPI; `mcp-server` discovers it automatically. GraphQL
-documents are dispatched **in-process** to `graphql-dxm-provider` under the calling user's JCR
-identity, so JCR ACLs apply normally.
+documents are dispatched **in-process** to `graphql-dxm-provider`, under the identity of the
+administrator who called the tool, so JCR ACLs apply normally.
 
 ## Requirements
 
-- Jahia 8.2+ with `graphql-dxm-provider`
-- `mcp-server` **0.5.x** (the SPI is pre-1.0; this module imports `org.jahia.modules.mcp.spi.tool` in the range `[0.5,0.6)`)
-- `personal-api-tokens` (for API token authentication)
-- Java 17
+| Component | Version | Notes |
+|---|---|---|
+| Jahia | 8.2+ | Built against the Jahia 8.2.2.1 parent POM |
+| `graphql-dxm-provider` | **3.4.0 or later**, below 4.0 (`[3.4,4)`) | Built against 3.4.0 and declared in `jahia-depends`. The tools bind its servlet component by name (`graphql.kickstart.servlet.OsgiGraphQLHttpServlet`). If it is missing (the provider is stopped, or a later version renames it), `community.graphql.execute` and `community.graphql.introspect` stay listed but refuse every call with an `unavailable` error, and the module logs a WARN naming the component |
+| `mcp-server` | **0.5.x** (`[0.5,0.6)`) | Provides the tool SPI. The SPI is pre-1.0, so the import range is kept tight |
+| Declarative Services | 1.4 (Felix SCR 2.1 or later) | Required for the configuration-driven components |
+| `personal-api-tokens` | optional | Only needed for API-token authentication |
+| Java | 17 | |
+
+`mcp-server` must be deployed first. The 2.0.0 build targets `mcp-server` 0.5.0-SNAPSHOT; a release
+of this module must be built against a released `mcp-server` 0.5.x.
 
 ## Installation
 
 Deploy `mcp-server` first, then this bundle (Module Manager, or drop the JAR into `$JAHIA_HOME/modules/`).
 
-On first activation the module seeds a set of default skills into JCR under `/sites/systemsite/contents/mcp-skills/`.
+The bundle ships `org.jahia.community.mcp.cfg` (the whitelist, empty by default). Keep that
+configuration in place: without it the whitelist-gated tool and the settings API stay unavailable
+(see [Troubleshooting](#troubleshooting)).
+
+On every activation the module seeds its default skills into JCR under
+`/sites/systemsite/contents/mcp-skills/`, creating each one only when it is absent.
 
 ## Authentication and access
 
-Authentication is handled by `mcp-server`: send a personal API token (or HTTP Basic credentials)
-to `/modules/mcp`.
+Authentication is handled by `mcp-server`: send a personal API token (or HTTP Basic credentials) to
+`/modules/mcp`. The community tools **require an explicit `Authorization` header**: a call authenticated
+only by a Jahia session cookie is refused with `forbidden`, so a web page visited by a logged-in
+administrator cannot make the browser drive them (cross-site request forgery).
 
 ```
 Authorization: APIToken <your-token>
 ```
 
-`mcp-server` admits any authenticated, non-guest user. The **community tools add their own gate**:
-the caller must hold the `admin` permission on the repository root (a server administrator). Other
-users still see the community tools in `tools/list`, but every call returns a structured
-`forbidden` error. The built-in `mcp-server` tools are unaffected.
+`mcp-server` admits authenticated, non-guest users. The **community tools add their own gate**: the
+caller must hold the `admin` permission on the repository root (a server administrator). Other users
+still see the community tools in `tools/list`, but every call returns a `forbidden` error. The
+built-in `mcp-server` tools are unaffected.
+
+The gate uses the caller that `mcp-server` binds to the request thread: the same user and realm. The
+`Authorization` header is never forwarded to the GraphQL servlet, so a GraphQL call runs as exactly
+that user.
+
+> This binding is a behaviour of `mcp-server`, not part of its tool SPI. If a later `mcp-server`
+> stops binding the caller this way, the community tools refuse every call (they fail closed) until
+> this module is updated.
 
 > Why not an API scope? Tools run on MCP worker threads where Jahia's security-filter scope context
 > is not bound, and `PermissionService.hasPermission(...)` returns `true` in that state. The gate is
@@ -79,71 +119,112 @@ users still see the community tools in `tools/list`, but every call returns a st
 
 ## Tools
 
-| Tool | Safety | Purpose |
-|---|---|---|
-| `community.graphql.execute` | destructive | Run any GraphQL query or mutation, subject to the whitelist |
-| `community.graphql.introspect` | read-only | Describe the GraphQL schema (root types + every named type) |
-| `community.skill.list` | read-only | List skills: `name`, `mcpName`, `description` |
-| `community.skill.get` | read-only | Read one skill's full Markdown content |
+| Tool | Safety | Tags | Purpose |
+|---|---|---|---|
+| `community.graphql.execute` | destructive | `destructive`, `reads-ugc`, `community` | Run a GraphQL query or mutation, subject to the whitelist |
+| `community.graphql.introspect` | read-only | `community` | Discover the GraphQL schema: type list and root types, or specific types (bounded) |
+| `community.skill.list` | read-only | `community`, `reads-ugc` | List skills: `name`, `mcpName`, `description` |
+| `community.skill.get` | read-only | `community`, `reads-ugc` | Read one skill's full Markdown content |
+
+`reads-ugc` marks tools whose output is stored content, which may contain instructions. Treat it as data.
 
 Results follow `mcp-server`'s contract: a JSON text block on success, and
-`{"error":{"code","message","hint"}}` with `isError: true` on failure (`forbidden`, `validation`,
-`not_found`, `internal`).
+`{"error":{"code","message","hint"}}` with `isError: true` on failure. Codes used by the community
+tools: `forbidden`, `validation`, `not_found`, `unavailable` and `internal`.
 
 ### `community.graphql.execute`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `query` | string | yes | GraphQL query or mutation |
+| `query` | string | yes | GraphQL query or mutation document |
 | `variables` | object | no | Variables map for the operation |
 
-Returns the GraphQL response JSON (`data` / `errors`). GraphQL-level errors arrive inside the
-payload; an HTTP-level failure of the GraphQL servlet is reported as an error result. It is
-announced as **destructive** because it can run any mutation, so well-behaved clients ask for
-confirmation before calling it.
+- On success the result is the GraphQL response JSON (`data` / `errors`). GraphQL-level errors arrive
+  inside that payload with HTTP 200, so clients must check `errors` even when the call succeeds.
+- A document refused by the whitelist returns `forbidden` with the reason (see
+  [Access control](#access-control-the-whitelist)).
+- An HTTP-level failure of the GraphQL servlet is reported as an error: 400 becomes `validation`,
+  401 and 403 become `forbidden`, anything else becomes `internal`.
+- A response larger than **5 MB** is refused with `validation` and a hint to narrow the query: select
+  fewer fields, paginate or query a narrower path. Retrying the same document cannot succeed.
+- The tool is announced as **destructive** because it can run any allowed mutation, so well-behaved
+  clients ask for confirmation before calling it.
 
 ### `community.graphql.introspect`
 
-No arguments. Works around Jahia's *bad-faith introspection guard* (which rejects documents with
-more than one `__Type.fields` selection) by issuing one request for the type list, then one request
-per non-scalar type. The result is `{"schema", "types", "skippedTypes"}`: any type whose detail
-request failed is named in `skippedTypes` rather than silently missing. The result is large (one
-request per type, no size cap); prefer it only when the schema is unknown.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `typeNames` | string[] | no | 1–25 GraphQL type names to describe in full |
+
+- **No arguments:** returns `schema` (root type names and every type's `name` + `kind`) and the full
+  details of the root `Query` and `Mutation` types.
+- **`typeNames`:** returns the full details (fields, arguments, input fields, enum values) of those
+  types only.
+
+Every answer also carries `skippedTypes` (unknown, or the request failed) and `truncatedTypes`
+(not fetched because the result reached its **100,000-character** budget; ask for them in a further
+call). Each type is fetched in its own request, so Jahia's bad-faith introspection guard (which rejects
+documents with more than one `__Type.fields` selection) never trips. Type names are passed as GraphQL
+variables, never formatted into the document.
+
+The schema lists every operation Jahia offers, including ones the whitelist refuses. A listed operation
+is not necessarily allowed in `community.graphql.execute`.
 
 ### `community.skill.list` / `community.skill.get`
 
 `community.skill.list` returns `{"skills":[{"name","mcpName","description"}]}`. Each `name` is the
-path relative to the skills root (e.g. `default/hello-jahia`) and can be passed as-is to
-`community.skill.get`, which returns `{"name","mcpName","description","content"}`.
+path relative to the skills root (for example `default/hello-jahia`). Pass it unchanged to
+`community.skill.get`, which returns `{"name","mcpName","description","content"}`. An unknown name
+returns `not_found`.
 
 ## Skills
 
-Skills are Markdown documents stored as `mcp:skill` JCR nodes. They deliver Jahia-specific
-knowledge and instructions to any MCP client session.
+Skills are Markdown documents stored as `mcp:skill` JCR nodes under
+`/sites/systemsite/contents/mcp-skills/` (a `jnt:contentList`, with `jnt:contentList` sub-folders). They
+deliver Jahia-specific knowledge and instructions to any MCP client session. Skills are hidden from the
+editors' content-creation pickers (`jmix:hiddenType`), and editing is restricted by the container's ACL
+(see [Security notes](#security-notes)).
+
+A skill's **key** is its path relative to the skills root (`default/hello-jahia`). The same key is
+returned by `skills { name }`, accepted by `saveSkill`, `deleteSkill` and `community.skill.get`.
 
 ### Default skills
 
-Default skills are defined as `.md` files under `src/main/resources/skills/` and seeded into JCR on
-module activation, only when the node does not already exist.
+Default skills are `.md` files under `src/main/resources/skills/` and are seeded into JCR on module
+activation, **only when the node does not already exist**. Consequences:
+
+- Editing a bundled file does not update an existing installation. To refresh a default skill, update
+  it with `saveSkill` (GraphQL), or delete its node under `/sites/systemsite/contents/mcp-skills/` and
+  restart the module.
+- A default skill that an administrator deletes is seeded again the next time the module activates.
+
+The bundle ships these skills:
+
+| Key | Purpose |
+|---|---|
+| `default/hello-jahia` | Smoke-test skill: answers "Hello Jahian" to "Hello Jahia". It is used by the integration tests. Deleting it lasts only until the next module activation |
+| `default/jahia-properties` | Quick guide to configuring Jahia 8.2 through `jahia.properties`, node properties and OSGi `.cfg` files |
+| `default/jahia-properties-ref` | Reference of all Jahia 8.2 properties, grouped by category |
 
 ### Managing skills and settings via GraphQL
 
-The module's GraphQL operations are grouped under a single `communityMcp` namespace on `Query` and
-`Mutation` (all require the `admin` permission).
+The module's GraphQL operations are grouped under one `communityMcp` namespace on `Query` and
+`Mutation` (types `CommunityMcpQuery` and `CommunityMcpMutation`). Every operation requires the
+`admin` permission and is an administrator-only entry point.
 
 ```graphql
-# List all skills
+# List all skills (name = key, relative to the skills root)
 query {
     communityMcp {
         skills { name mcpName description content }
     }
 }
 
-# Create or update a skill
+# Create or update a skill. Intermediate folders are created for nested keys.
 mutation {
     communityMcp {
         saveSkill(
-            name: "my-skill",
+            name: "team/my-skill",
             mcpName: "My Skill Display Name",
             description: "What this skill does",
             content: "# My Skill\n\nInstructions for Claude..."
@@ -151,17 +232,31 @@ mutation {
     }
 }
 
-# Delete a skill
+# Delete a skill by key
 mutation {
     communityMcp {
-        deleteSkill(name: "my-skill")
+        deleteSkill(name: "team/my-skill")
     }
 }
 
 # Read / write the whitelist
-query { communityMcp { settings { whitelist } } }
-mutation { communityMcp { saveSettings(whitelist: ["currentUser", "jcr"]) } }
+query { communityMcp { settings { whitelist clustered } } }
+mutation { communityMcp { saveSettings(whitelist: ["query:currentUser", "query:jcr"]) } }
 ```
+
+Rules for `saveSkill` and `deleteSkill`:
+
+- `name` must match `[A-Za-z0-9_-]` segments separated by single `/`. Leading or trailing slashes,
+  empty segments and `.` or `..` are refused.
+- Missing intermediate folders are created. A segment that is already a skill cannot become a folder.
+- An existing node at the key must be an `mcp:skill` node. Anything else is refused.
+- `content` holds at most 200,000 characters.
+- Both return `true` on success. A refused call fails with a GraphQL error (in the `errors` array, with a
+  `null` result) whose message gives the reason: `Invalid skill name: …`, `The skill content is too long: …`,
+  `The skill could not be saved: …` (a segment of the key is an existing skill, a folder or another node uses
+  the key, or the repository failed) or
+  `The skill was not deleted: …` (no skill with that key). The key is never echoed back; details are in
+  the server log.
 
 ### Adding a bundled default skill
 
@@ -176,59 +271,303 @@ Full Markdown instructions here...
 ```
 
 The file name (without `.md`) becomes the JCR node name. The folder hierarchy mirrors the JCR
-sub-folder structure under `mcp-skills/`.
+sub-folder structure under `mcp-skills/`. The bundled file is seeded only on a fresh install (see
+[Default skills](#default-skills)).
 
-## Access control — Allow List
+## Access control: the whitelist
 
-The admin UI at **Administration → MCP Server** restricts which GraphQL operations
-`community.graphql.execute` may run. The other community tools are not affected by the whitelist.
+The whitelist controls which GraphQL operations `community.graphql.execute` may run. The other
+community tools are not affected by it.
 
-| Whitelist state | Effect |
+### Read-only default
+
+| Whitelist | Effect |
 |---|---|
-| Empty (default) | All operations are allowed |
-| Non-empty | Only listed operations (and their sub-paths) are allowed |
+| **Empty (default)** | Every **query** is allowed, except the queries under `admin`. Every **mutation** and **subscription** is refused. Not recommended in production, see below |
+| Non-empty | Only the listed operations, and the fields below them, are allowed. Mutations and queries are allowed only when listed |
 
-Entries are dot-separated field paths that mirror the GraphQL selection hierarchy:
+An empty list is therefore not "allow everything". Saving an empty list (for example with **Clear the
+allow list** in the UI, or `saveSettings(whitelist: [])`) restores this read-only default.
+
+**The `admin` query namespace needs an explicit entry.** Queries under `admin` expose server state,
+including the raw values of every OSGi configuration (`admin.jahia.configuration(pid: …)`), which can hold
+passwords and keys. The read-only default refuses them, with a reason that names `query:admin`. To allow
+them, add an explicit entry such as `query:admin.jahia.isAlive`, or `query:admin` for the whole namespace.
+
+"Read-only" protects against writes, **not against disclosure**. Every other query still returns whatever
+the calling administrator can read, and the result goes to the AI client and its model provider. That
+includes settings stored in JCR, such as the mail server configuration under `/settings`, the user nodes
+and their profile data, and the query namespaces of other modules. Text planted in content the AI client
+reads can ask it to run such a query. **In production, set an explicit allow list** of the queries the AI
+client needs (for example `query:jcr.nodeByPath` and `query:currentUser`) instead of relying on the empty
+default, and keep the `admin` entries as narrow as the task allows.
+
+**The first entry ends the read-only default.** As soon as the list holds one entry, only the listed
+operations are allowed, on both sides. Adding a single `mutation:` entry to an empty list therefore
+refuses every query until you add `query:` entries for the queries you need, for example `query:jcr` and
+`query:currentUser`.
+
+**Upgrades from 1.x:** an installation keeps its existing `org.jahia.community.mcp.cfg` (the shipped file
+is a default configuration and is never overwritten). That file may still carry the 1.x comment
+"If empty, all operations are allowed". The comment is stale. An empty whitelist is the read-only default
+described above, and it no longer allows mutations. Unprefixed 1.x entries are read as query-only, so
+review the list after the upgrade (see [Migrating from 1.x](#migrating-from-1x)).
+
+A non-empty list that contains only malformed entries denies every operation. Malformed entries are
+refused by `saveSettings`, so this state can only come from outside `saveSettings`: the `.cfg` file,
+provisioning, the Karaf `config:edit` command, or Jahia's generic OSGi configuration API (for example the
+`admin.jahia.configuration` GraphQL mutation called directly on `/modules/graphql`).
+
+### Entry syntax
+
+Each entry names an **operation type** and a dot-separated field path that mirrors the GraphQL
+selection hierarchy:
 
 | Entry | Covers |
 |---|---|
-| `admin` | All operations under `admin` |
-| `admin.jahia` | All operations under `admin.jahia` |
-| `admin.jahia.isAlive` | Only that specific nested field |
+| `query:admin` | Every query under `admin` |
+| `query:admin.jahia.isAlive` | Only that query field |
+| `mutation:jcr` | Every mutation under `jcr` |
+| `mutation:jcr.deleteNode` | Only that mutation |
 
-Entries are persisted in the OSGi configuration `org.jahia.community.mcp`:
+- Allowing a query never allows the mutation of the same name: `query:jcr` does **not** permit
+  `mutation { jcr { … } }`.
+- A document is allowed only if **every** operation it contains is allowed, so a mutation cannot hide
+  behind an allowed query in the same document.
+- A prefix entry grants everything below it. `mutation:jcr` allows every mutation under `jcr`. Prefer
+  exact paths for mutations.
+- A deeper mutation entry also runs the intermediate mutation fields above it. GraphQL cannot run
+  `mutation { jcr { addNode { mutateProperty } } }` without running `addNode`, so the entry
+  `mutation:jcr.addNode.mutateProperty` also lets `addNode` create a node. Intermediate fields are not
+  checked on their own. Choose entries whose intermediate fields may run, and prefer the leaf
+  operations you need.
+- Other operation types (for example `subscription:`) and malformed paths grant nothing.
+- `mutation:communityMcp` and `mutation:admin.jahia.configuration` (each with everything under it) are
+  **always refused**, whatever the whitelist says, including under a broader entry such as `mutation:admin`.
+  The data plane cannot rewrite its own guard: the second path is the generic OSGi configuration mutation,
+  which could rewrite this module's configuration. `saveSettings` refuses entries for these paths too.
+- **Privilege-granting mutations are always refused** too, at any depth and under any entry: role grants
+  and revocations (`grantRoles`, `revokeRoles`, for example under `mutation:jcr.mutateNode`) and personal
+  API token management (`admin.personalApiTokens`). A session steered by injected text could otherwise make
+  a user an administrator or mint a token that outlives it. Make these changes in Jahia yourself.
+- The operation prefix is case-insensitive (`MUTATION:jcr` is `mutation:jcr`); field names are
+  case-sensitive.
+
+### Legacy entries
+
+An entry without a prefix (`jcr`, as written by 1.x) is accepted and treated as **query-only**. A
+`WARN` lists such entries when the configuration loads, and the admin UI shows them as `query:`
+entries, ready to save in the new form. Malformed entries are dropped from the enforced set, and each
+one is logged at `WARN`.
+
+### Where the whitelist is stored
+
+The entries are the `whitelist` key of the OSGi configuration `org.jahia.community.mcp`:
 
 ```properties
-whitelist=jcr,currentUser,admin.jahia.isAlive
+whitelist=query:jcr,query:currentUser,mutation:jcr.deleteNode
 ```
 
-> **Known limitation:** paths do not carry the operation type. A Query field and a Mutation field
-> with the same name share one entry, so whitelisting `jcr` for reads also allows
-> `mutation { jcr { … } }`. Whitelist the precise nested paths you need.
+`saveSettings` validates the list before storing it. A malformed or refused entry makes the call fail
+with a GraphQL error that names the entry, and nothing is stored.
 
-Every blocked operation is logged at `WARN` with the path, user and client IP:
+If a configuration update cannot be read at all (for example a hand-edited `.cfg` with a value of the
+wrong type), the module logs an `ERROR` and keeps enforcing the previous whitelist. If the configuration
+cannot be read when the module starts, every operation is refused until it is fixed.
+
+**Clusters.** `saveSettings` writes the OSGi configuration on the node that served the request only. In a
+cluster, set the whitelist on every node: through the administration UI or `saveSettings` on each node, or
+through provisioning or the `.cfg` file. Until then the other nodes keep their previous list.
+`communityMcp { settings { clustered } }` reports whether Jahia runs as a cluster, and the administration UI
+then warns that saving affects this node only.
+
+### Rules applied to each document
+
+- A document that cannot be parsed is refused, in every state of the whitelist. The message gives the line
+  and column of the syntax error.
+- A named fragment spread (`...Name`) is refused in **every** state, the read-only default included,
+  because the gate does not expand it and so cannot check what it selects. Inline fragments
+  (`... on Type { … }`) are supported.
+- Introspection fields (`__schema`, `__type`, `__typename`) always pass.
+
+### Logging
+
+Every refused operation is logged at `WARN`. A policy denial shows the operation path, the reason,
+the user and the client IP. Its shape is:
 
 ```
-WARN GraphQLWhitelistGate - MCP operation blocked: path='admin.jahia.shutdown', reason=not in whitelist, user='john', ip='10.0.0.5'
+WARN ... MCP operation blocked: path='mutation:jcr.deleteNode', reason='...', user='john', ip='10.0.0.5'
 ```
+
+A document that cannot be parsed, or that contains a named fragment spread, is logged with the user and
+IP and the reason, but without a path.
+
+## Administration UI
+
+**Administration → MCP Server** (in the server configuration section of the administration) edits the
+whitelist. The page writes the same `whitelist` entries
+through `communityMcp { saveSettings }`.
+
+- **Two groups.** Queries and mutations are listed separately, each with bulk actions: allow all,
+  clear. **Allow all queries** checks every query root except `admin`, which exposes configuration values,
+  secrets included: check `admin` yourself only if the AI client needs it. Checking `query:admin`, or a
+  field under it, asks for confirmation every time. The operation tree is loaded lazily, one type at a
+  time.
+- **Keyboard.** The tree follows the WAI-ARIA tree pattern: Up and Down move between items, Home and
+  End go to the first and last item, Right expands or enters the children, Left collapses or moves to
+  the parent, Space or Enter checks or unchecks an item.
+- **Confirmations.** Any edit that empties a non-empty list asks for confirmation first, because an
+  empty list restores the read-only default, which allows every query outside `admin`: Clear, Clear queries or Clear
+  mutations, unchecking the last checked item, and removing the last entry. Clearing queries while
+  mutations remain, allowing all mutations, and checking an `admin` query are confirmed too. Discard
+  changes is never confirmed: it restores the saved list. While a confirmation dialog is open, the rest
+  of the page is inert: it cannot be focused or used.
+- **Locked operations.** The never-allowed paths are shown but cannot be checked:
+  `mutation:communityMcp`, `mutation:admin.jahia.configuration`, `mutation:admin.personalApiTokens`, and
+  every mutation path with a `grantRoles` or `revokeRoles` segment.
+- **Entries that need your attention.** Entries whose root operation is missing from the current
+  schema, entries that are locked, and entries the server ignores (another operation type such as
+  `subscription:`, or a malformed entry) are kept in the list and shown there as such, each with a
+  Remove action. They are never dropped silently. When the list only holds ignored entries, the policy
+  banner says that every operation is refused.
+- **Save.** Save is refused, with a message naming the entries, while invalid or locked entries remain:
+  the server would reject them. Remove them first.
+- **Filter.** Matches the names and paths of all root operations and of fields already loaded.
+- **Unsaved changes.** The page shows an indicator and warns when you reload or close the page with
+  unsaved changes. Moving to another administration page does not warn, so save first. **Discard changes**
+  restores the saved list. The save bar sits at the end of the panel and is not sticky, so it never
+  covers the focused control.
+- **Focus.** Focus never gets lost. After a confirmed edit whose control disappears, it goes to the
+  allow-list heading; after Discard changes or Dismiss, to Save; after Remove, to the next entry of the
+  same list (the previous one at the end), else to the list summary or the allow-list heading.
+- **Policy banner.** The banner states the policy the list gives. With unsaved changes it shows both the
+  policy in force now and the policy that applies after you save.
+- **Clusters.** On a cluster, the page warns that saving changes the allow list of the node that serves
+  the page only, and the success message after a save repeats that the other nodes are unchanged.
+- **Messages.** Status messages never time out. A success or info message clears on the next edit; an
+  error stays until it is dismissed or the save is retried. A failed save shows the server's reason.
+- **Expired session.** If the Jahia session has expired (HTTP 401 or 403) when the page saves or loads,
+  it says so instead of showing a generic error. Unsaved changes are kept in the browser tab
+  (`sessionStorage`). After you log in again and reload the page, they are restored only if the saved
+  list on the server has not changed in the meantime; otherwise they are dropped and the server's list
+  is shown.
+- The UI targets WCAG 2.2 Level AAA.
 
 ## Security notes
 
-- **Allow-all by default.** With an empty whitelist every GraphQL operation is permitted to server
-  administrators (bounded by JCR ACLs), and a `WARN` is logged on every call. Treat it as an
-  out-of-box convenience; configure an explicit whitelist in production.
-- **Named fragment spreads** (`...Name`) are refused while a whitelist is active — the gate cannot
-  resolve them, so it fails closed. Inline fragments are supported.
-- **Unparseable documents** are refused while a whitelist is active (SEC-364).
-- **Client IP** in audit lines is the TCP peer (`getRemoteAddr()`); `X-Forwarded-For` is ignored.
+- **Read-only by default.** With an empty whitelist, queries are allowed to administrators, except the
+  queries under `admin`, and mutations and subscriptions are refused. Allowing a mutation requires an
+  explicit `mutation:` entry, and allowing an `admin` query requires an explicit `query:admin…` entry.
+  Read-only does **not** mean non-sensitive: any allowed query returns what the administrator can read,
+  JCR-stored settings (such as the mail server configuration) and user data included, and that result is
+  sent to the AI client. Use an explicit allow list in production. See [Read-only default](#read-only-default).
+- **Explicit `Authorization` header.** The community tools refuse calls authenticated only by a session
+  cookie, so a cross-site form post cannot drive them. The built-in `mcp-server` tools are outside this
+  module: whether they accept a cookie-only call, and so whether a cross-site request can reach them, is
+  decided by `mcp-server`.
+- **Privilege-granting mutations** (role grants and revocations, personal API tokens) can never be run
+  through `community.graphql.execute`, whatever the whitelist says.
+- **Administrator gate.** Every community tool and every `communityMcp` operation checks the `admin`
+  permission on the repository root with the caller's own session. A failure to determine the caller
+  denies the call.
+- **Caller identity.** The GraphQL call runs as the bound caller. No `Authorization` header is forwarded
+  to the in-process servlet.
+- **Accepted risk: API scopes.** The API scopes of `graphql-dxm-provider` (security-filter) are not applied to
+  in-process calls, because no scope context exists on MCP worker threads. JCR ACLs and the administrator
+  gate are the boundary. Do not broaden the gate without revisiting this.
+- **Accepted risk: prefix entries.** A prefix entry grants everything below it, such as `mutation:jcr`. Use exact
+  paths unless a whole namespace is intended.
+- **Accepted risk: a deny list.** Self-protection is a deny list: `mutation:communityMcp`,
+  `mutation:admin.jahia.configuration` and the privilege-granting mutations. Any other mutation that changes
+  server state, such as a module,
+  bundle or provisioning mutation contributed by another module, including one installed later, is
+  protected only by your choice of entries. Do not whitelist `mutation:admin` or other broad mutation
+  roots unless you mean it.
+- **Accepted risk: skills and generic JCR mutations.** The never-allowed paths block `communityMcp.saveSkill`, but a
+  `mutation:jcr` entry reaches the skill nodes under `/sites/systemsite/contents/mcp-skills` through the
+  generic JCR mutations. The container ACL stops ordinary users, not `root`, which bypasses ACLs. With
+  `mutation:jcr` whitelisted and a `root` token, a prompt-injected session could rewrite skills. Use a
+  token of a non-root administrator and exact `mutation:jcr.…` entries.
+- **Skills use a system session.** Skill reads and writes run as the system session, so they bypass
+  per-node ACLs and the whitelist. This is deliberate: skills are shared instruction documents that every
+  MCP client may read, and the only write paths are the administrator-gated `saveSkill` and `deleteSkill`
+  operations and the module's own seeding. The skills container has its ACL inheritance broken, so no
+  ordinary role can write skills through generic JCR paths. This also applies to a container created by a 1.x
+  install: on the next activation its inheritance is broken and the local role grants (ACL entries) on the
+  container and on every folder and skill below it are removed. Skills that already exist are kept as they
+  are, so review the skills of an upgraded 1.x install (see [Migrating from 1.x](#migrating-from-1x)). The skill type carries `jmix:hiddenType`, so
+  skills are hidden from the editors' content-creation pickers. Revisit this if the gate is broadened beyond
+  administrators or deny ACLs are added to skill nodes.
+- **Named fragment spreads** and **unparseable documents** are refused in every state, including the
+  read-only default. Inline fragments are supported.
+- **Never-allowed paths.** `mutation:communityMcp`, `mutation:admin.jahia.configuration` and the
+  privilege-granting mutations are refused whatever the whitelist says. Intermediate mutation fields of a deeper entry do run (see
+  [Entry syntax](#entry-syntax)), so keep mutation entries as narrow as the task allows.
+- **Cluster.** The whitelist is stored per node; set it on every node (see [Where the whitelist is stored](#where-the-whitelist-is-stored)).
+- **Response size and cost.** In-process GraphQL responses are capped at 5 MB; a larger response is
+  refused with `validation`. The cap applies after the
+  servlet has run the query and serialized its result in memory, and there is no timeout or complexity
+  limit. An expensive query (for example a JCR query over the whole repository) runs to completion on the
+  `mcp-server` worker thread. The tool is administrator-only; this is accepted.
+- **Introspection** is bounded to 25 types per call and 100,000 characters of output.
+- **Client IP** in audit lines is the TCP peer (`getRemoteAddr()`). `X-Forwarded-For` is ignored.
   Configure Tomcat's `RemoteIpValve` behind a trusted proxy.
-- **Skills are read and written with a system session**, bypassing per-node ACLs. This is benign
-  while the tools are restricted to administrators.
-- **Request size / transport** limits are now those of `mcp-server` (this module no longer owns an
-  endpoint). Note that `mcp-server` 0.5 reads the request body without a size cap — the 2 MB cap of
-  1.x is gone with the old servlet.
-- **Audit.** Every call records an mcp-server audit event (`tool`, `user`, error `code`);
-  `community.graphql.execute` adds `queryHash` (SHA-256 of the document — never the text or variables).
+- **Request size and transport** limits are those of `mcp-server`, which reads the request body without a
+  size cap in 0.5.
+- **Dependencies on `mcp-server`.** Two behaviours this module relies on are not guaranteed by the
+  `mcp-server` tool SPI: the caller bound on the worker thread (the administrator gate and the GraphQL
+  call use it), and the SPI package version, which follows the `mcp-server` bundle version. The import
+  range is therefore `[0.5,0.6)`: `mcp-server` 0.6 leaves this bundle unresolved (the tools, the settings API,
+  the UI and the skills all stop) until a release of this module supports it.
+- **Audit.** Every call records an audit event `tool.execute.ok` or `tool.execute.error` with `tool`, `user`
+  and, on error, `code`. `community.graphql.execute` adds `queryHash` (SHA-256 of the document). The
+  document text and variables are never logged.
+
+## Troubleshooting
+
+| Symptom or message | Cause | Fix |
+|---|---|---|
+| `The community tools are restricted to server administrators.` (`forbidden`) | The caller does not hold `admin` on the repository root | Use an administrator's token, or use the built-in `mcp-server` tools |
+| A `forbidden` error saying that an `Authorization` header is required | The call was authenticated only by a session cookie (for example sent from a browser) | Send `Authorization: APIToken <token>` or HTTP Basic credentials |
+| `Operation not allowed: mutations require an explicit mutation:<path> whitelist entry …` | Read-only default: the whitelist is empty and the call is a mutation | Add the mutation as `mutation:<path>` in Administration → MCP Server, or use a query |
+| `Operation not allowed: queries under 'admin' require an explicit query:admin<.path> whitelist entry …; '<path>' is not allowed` | Read-only default: the whitelist is empty, and the `admin` query namespace is not part of it | Add an explicit entry, for example `query:admin.jahia.isAlive`, or `query:admin` for the whole namespace |
+| `Operation not allowed: '<path>' is not in the whitelist` | The operation is not covered by an entry | Add an exact `query:<path>` or `mutation:<path>` entry |
+| Every query refused after adding one `mutation:` entry | The list is no longer empty, so the read-only default no longer applies: only listed operations run | Add `query:` entries for the queries you need |
+| A denial saying the operation can never be run through `community.graphql.execute` | The operation is a never-allowed path: `mutation:communityMcp`, `mutation:admin.jahia.configuration`, a role grant or revocation, or personal API token management, or anything under them | Not allowed; by design. Make the change yourself in Jahia (the UI, the OSGi configuration or provisioning) |
+| A message saying the GraphQL document could not be parsed, with a line and column | Syntax error in the document | Fix the document at that position; check names with `community.graphql.introspect` |
+| A denial that mentions a named fragment | The document contains a `...Name` spread. Refused in every state | Inline the fields, or use `... on Type { … }` |
+| `Operation not allowed: subscriptions are not supported` | A subscription was sent while the whitelist is empty (read-only default) | Subscriptions are not available through this tool. With a whitelist, the message is `'subscription:<path>' is not in the whitelist` |
+| `Malformed whitelist entry '…': expected query:<path> or mutation:<path>` | `saveSettings` rejected an entry | Correct the entry; `<path>` is dot-separated GraphQL names |
+| `Whitelist entry '…' is refused: …` | The entry names a never-allowed path (`mutation:communityMcp`, `mutation:admin.jahia.configuration`, `mutation:admin.personalApiTokens`, a path with a `grantRoles` or `revokeRoles` segment, or anything under them) | Not allowed; by design |
+| `The Jahia GraphQL service is not available on this node.` (`unavailable`) | The GraphQL servlet of `graphql-dxm-provider` is not available (WARN: `The GraphQL servlet (component.name=…) is not available`) | Check that `graphql-dxm-provider` is started and that its servlet component still has that name |
+| `The GraphQL schema could not be introspected.` (`internal`) | The GraphQL servlet returned no schema | Check that `graphql-dxm-provider` is started, then the Jahia log |
+| `The GraphQL operation could not be executed.` (`internal`) | The servlet failed | Check the Jahia log |
+| A `validation` error saying the response exceeds the 5 MB limit | The query selects too much | Do not retry the same document: select fewer fields, paginate, or query a narrower path |
+| `GraphQL endpoint returned HTTP <n>: …` | `graphql-dxm-provider` rejected the request: 400 → `validation`, 401 or 403 → `forbidden`, anything else → `internal` | For 400, fix the document; for 401 or 403, check the caller's permissions; otherwise check the Jahia log |
+| `'query' is required and must be a non-blank string.` / `'variables' must be a JSON object.` (`validation`) | Invalid `community.graphql.execute` input | Pass the document in `query` and, optionally, an object in `variables` |
+| `'typeNames' must be an array of 1 to 25 type names.` / `'typeNames' entries must be GraphQL type names.` (`validation`) | Invalid `community.graphql.introspect` input | Pass 1 to 25 names exactly as listed in `schema.types` |
+| `The MCP whitelist could not be stored, see the server log` | ConfigurationAdmin failed to store the list | Check the Jahia log and the write permissions on `karaf/etc` |
+| `The MCP skill service is not available` | The skill component is not active | Check the bundle state and the Jahia log |
+| `The MCP configuration service is not available: check that the org.jahia.community.mcp configuration exists` | The `org.jahia.community.mcp` configuration is missing. The gated tool and the settings API are disabled, and the UI cannot save | Restore `org.jahia.community.mcp.cfg` in `karaf/etc` (or re-deploy the bundle). The UI works again once the configuration exists |
+| `community.graphql.execute` missing from `tools/list` | The whitelist configuration is missing | Restore the configuration |
+| ERROR: `Unreadable MCP configuration update; keeping the previous whitelist` | The updated `org.jahia.community.mcp` configuration could not be read | Correct the `.cfg`; until then the previous whitelist stays in force |
+| `Community MCP caller identity is not bound … denying` (WARN) | The caller is not bound on the thread, or the bound user differs from the request user. Usually a version mismatch with `mcp-server` | Use `mcp-server` 0.5.x |
+| `Invalid skill name: …` (GraphQL error of `saveSkill` or `deleteSkill`) | The key breaks the name rules | Use `[A-Za-z0-9_-]` segments separated by single `/` |
+| `The skill content is too long: …` | `content` exceeds 200,000 characters | Split the skill |
+| `The skill could not be saved: …` | A segment is an existing skill, the key holds a folder or another non-skill node, or the repository failed | Choose another key; check the server log |
+| `The skill was not deleted: …` | No skill has that key, or the key names a folder | Use the `name` returned by `skills` or `community.skill.list` |
+| `Skill '…' not found.` (`not_found`) | Wrong key | Use the `name` returned by `community.skill.list` |
+| Edit to a bundled `.md` file has no effect | Default skills are seeded only when absent | Update with `saveSkill`, or delete the node and restart the module |
+| A deleted default skill came back | Default skills are re-seeded on module activation | Delete it again after the restart, or remove the bundled file |
+| WARN: `MCP whitelist entries without an operation prefix are treated as query-only` | Legacy entries | Rewrite them as `query:<path>` and add `mutation:<path>` where needed |
+| Mutations refused after upgrading from 1.x, although the `.cfg` comment says an empty list allows all | The 1.x comment in the kept `.cfg` is stale. An empty list is the read-only default | Add the mutation entries you need, see [Migrating from 1.x](#migrating-from-1x) |
+| Whitelist change works on one node but not another | `saveSettings` writes only the node that served the request | Set the whitelist on every node, see [Where the whitelist is stored](#where-the-whitelist-is-stored) |
+| WARN: `Ignoring malformed MCP whitelist entry` | Malformed entry in the `.cfg` file | Correct or remove the entry |
+| UI: a warning that saving affects this node only | Jahia runs as a cluster, and the allow list is stored per node | Save on every node, or set the list through provisioning or the `.cfg` |
+| UI: `Entries that need your attention` | The entry's root operation is not in the schema, it is locked, or the server ignores it (malformed, or another operation type such as `subscription:`) | Remove it, unless it is expected to come back. Locked and ignored entries block Save |
+| UI: `The settings were not saved. The server said: …` | The server rejected the list | Read the reason and correct the entry |
+| UI: browser warning when reloading or closing the page | The list changed and was not saved | Save, or use **Discard changes**. Moving to another administration page does not warn |
+| UI: a message that the Jahia session has expired | The session ended before a save or load | Log in again, then save again or reload the page. Unsaved changes are restored unless the server's list changed meanwhile |
 
 ## Migrating from 1.x
 
@@ -236,39 +575,73 @@ WARN GraphQLWhitelistGate - MCP operation blocked: path='admin.jahia.shutdown', 
 |---|---|
 | Endpoint `/modules/community-mcp` | `/modules/mcp` (served by `mcp-server`) |
 | `executeGraphQL` | `community.graphql.execute` |
-| `introspectSchema` | `community.graphql.introspect` |
-| `listSkills` | `community.skill.list` (returns `{"skills":[…]}`, names are relative paths) |
+| `introspectSchema` | `community.graphql.introspect` (bounded: type list and root types, or `typeNames`) |
+| `listSkills` | `community.skill.list` (returns `{"skills":[…]}`; names are relative paths) |
 | `getSkill` | `community.skill.get` (returns JSON with a `content` field) |
-| Token scopes `graphql` + `community-mcp` | Any token accepted by `mcp-server`; caller must be a server administrator |
-| `GET /modules/community-mcp` health check | Removed — use MCP `tools/list` |
-| GraphQL namespace `mcp { … }` | `communityMcp { … }` |
+| Token scopes `graphql` and `community-mcp` | Any token accepted by `mcp-server`. The caller must be a server administrator |
+| `GET /modules/community-mcp` health check | Removed. Use MCP `tools/list` |
+| GraphQL namespace `mcp { … }` | `communityMcp { … }` (types `CommunityMcpQuery`, `CommunityMcpMutation`, …) |
 | Errors as `{"errors":[{"message"}]}` text | `{"error":{"code","message","hint"}}` |
+| Whitelist entry `jcr`, allowing queries and mutations | `jcr` is query-only. Write `query:jcr` and `mutation:jcr` |
+| Empty whitelist allowed everything | Empty whitelist is read-only: queries only, and not the queries under `admin` |
+| A session cookie could authenticate calls | The community tools need an `Authorization` header (API token or HTTP Basic) |
+| Whitelist entries as dot-paths | `query:<path>` / `mutation:<path>` entries |
+| Skill list names were node names | Skill key is the relative path (for example `default/hello-jahia`) |
 
-Update your MCP client URL and any tool names hard-coded in prompts or skills. The whitelist
-configuration (`org.jahia.community.mcp`) is unchanged.
+Update your MCP client URL and any tool names hard-coded in prompts or skills. Review your whitelist:
+an entry that was meant to allow mutations needs an explicit `mutation:` entry, and an empty whitelist
+no longer allows mutations.
+
+An upgraded installation keeps its existing `org.jahia.community.mcp.cfg` in `karaf/etc`. Its comments
+are stale: the "If empty, all operations are allowed" line from 1.x no longer applies. Update the
+`whitelist` key (or the UI) rather than relying on the comments. In a cluster, do this on every node.
+Named fragment spreads are refused in every state, and `mutation:admin.jahia.configuration` is always
+refused. Update any client that sends named fragment spreads to use inline fragments. With an empty
+whitelist, queries under `admin` need an explicit `query:admin…` entry.
+
+`karaf/etc/org.jahia.modules.PersonalApiToken-community-mcp.cfg`, shipped by 1.0.4 for the removed
+`community-mcp` scope, is no longer used. Delete it if it is still present.
+
+**Review the skills.** In 1.x, editors could be granted roles on the skills container, its folders or its
+skill nodes, and could write skills that every administrator's AI client reads. On activation, 2.0 breaks
+the container's ACL inheritance and removes the local role grants on the container and everything below
+it. It does not change the content of existing skills. After the upgrade, read every skill under
+`/sites/systemsite/contents/mcp-skills` (or list them with `community.skill.list`) and delete or correct any
+skill you did not write. If a role grant there was intended, it has to be replaced: from 2.0 skills are
+written only through the administrator-gated `saveSkill` and `deleteSkill` operations.
 
 ## Testing
 
 ```bash
-mvn clean install              # Java unit tests + Jest + bundle
+mvn clean install              # Java unit tests + JaCoCo check + React (webpack) build + bundle
+yarn test                      # Jest tests of the administration UI: not run by Maven
 ```
 
-Docker-based Cypress integration tests live in `tests/` (they provision `mcp-server` 0.5.0-SNAPSHOT).
+Coverage is enforced. `mvn verify` (and so `install`) fails when JaCoCo line coverage of the bundle is
+below 90%. `yarn test` fails below the Jest thresholds set in `jest.config.js` (95% of statements, lines
+and functions, 90% of branches).
+
+Docker-based Cypress integration tests live in `tests/`. They provision `mcp-server` 0.5.0-SNAPSHOT. The
+suite needs a Jahia instance of its own: the whitelist is one server-wide configuration, and the token,
+skill and probe names are fixed, so two runs against the same instance interfere. Every spec starts from
+the read-only default.
 
 ```bash
 cd tests
 cp .env.example .env          # fill JAHIA_IMAGE and JAHIA_LICENSE
 yarn install
 ./ci.build.sh                  # build the Cypress Docker image
-./ci.startup.sh                # start Jahia + run tests + collect results
+./ci.startup.sh                # start Jahia, run the tests and collect results
 ```
 
 | Spec | What is tested |
 |---|---|
-| `01-mcpSettings.cy.ts` | GraphQL settings API: read, write, round-trip, dot-path persistence |
-| `02-mcpEndpoint.cy.ts` | `community.graphql.execute`: whitelist enforcement, dot-path coverage, introspection pass-through, 401 when unauthenticated |
+| `01-mcpSettings.cy.ts` | Settings GraphQL API: read, write, round-trip, the `clustered` flag, prefixed entries, rejection of malformed and never-allowed entries (`mutation:communityMcp`, `mutation:admin.jahia.configuration`) |
+| `02-mcpEndpoint.cy.ts` | `community.graphql.execute`: whitelist enforcement, path coverage, queries vs mutations, `admin` queries refused by the read-only default and allowed by `query:admin`, introspection pass-through, 401 when unauthenticated |
 | `03-mcpSkills.cy.ts` | Skills GraphQL API, `community.skill.list` → `community.skill.get` round-trip, default skill seeding |
-| `04-mcpToolCatalogAndGate.cy.ts` | Tools listed in mcp-server's catalog with safety annotations; non-administrators refused |
-| `05-mcpToolGating.cy.ts` | Only `community.graphql.execute` is whitelist-gated; introspection result shape |
-| `06-mcpWhitelistEnforcement.cy.ts` | Fail-closed guards: named fragments, multi-operation documents, SEC-364 bypasses |
-| `07-mcpCallerIdentity.cy.ts` | GraphQL runs as the calling user |
+| `04-mcpToolCatalogAndGate.cy.ts` | Tools listed in the `mcp-server` catalog with safety annotations; non-administrators refused (HTTP Basic, user created with `createUser`) |
+| `05-mcpToolGating.cy.ts` | Gating per tool: a narrow whitelist does not affect introspection or skills; bounded introspection (default, `typeNames`, cap) |
+| `06-mcpWhitelistEnforcement.cy.ts` | Fail-closed guards: named fragment spreads (refused under the read-only default too, and the hidden mutation does not run), `mutation:admin.jahia.configuration` refused even with `mutation:admin` whitelisted, multi-operation documents, unparseable documents (with the line and column) |
+| `07-mcpCallerIdentity.cy.ts` | GraphQL runs as the calling user (`currentUser` returns the caller) |
+| `08-mcpAdminUi.cy.ts` | Administration UI smoke test only: loads at the admin route, shows the Queries and Mutations groups, persists a checked entry when saved, Allow all queries leaves `admin` unchecked, shows `mutation:admin.jahia.configuration` locked and saves nothing when it is clicked. Keyboard, confirmations, problem entries and error display are covered by Jest only |
+| `09-mcpHardening.cy.ts` | A cookie-only call is refused and its mutation does not run, while the same call with a token works; role grants, revocations and API token creation can never be run (nothing is granted, no token is created); a response over 5 MB is a `validation` error |

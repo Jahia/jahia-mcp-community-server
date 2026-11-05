@@ -1,0 +1,11 @@
+query McpGetContentsChildren($names: [String]) {
+    jcr {
+        nodeByPath(path: "/sites/systemsite/contents") {
+            children(names: $names) {
+                nodes {
+                    name
+                }
+            }
+        }
+    }
+}

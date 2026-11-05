@@ -1,51 +1,32 @@
-import {DocumentNode} from 'graphql';
+import {createApiToken, deleteApiToken, callTool as callToolRaw, removeSkill, saveSkill, setWhitelist} from '../support/mcp';
 
 describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const saveSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/saveSettings.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const createToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/createToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const deleteToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const listTokens: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/listTokens.graphql');
-
     const TOKEN_NAME = 'mcp-cypress-gating-token';
+    const GATING_SKILL = 'cypress-gating-skill';
     let apiToken: string;
-    let tokenKey: string;
 
     before(() => {
         cy.login();
-        cy.apollo({query: listTokens}).then(result => {
-            const nodes: {key: string}[] = result.data.admin.personalApiTokens.tokens.nodes;
-            nodes.forEach(t => {
-                cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
-            });
+        createApiToken(TOKEN_NAME).then(token => {
+            apiToken = token;
         });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
-            apiToken = result.data.admin.personalApiTokens.createToken;
-        });
-        cy.apollo({query: listTokens}).then(result => {
-            const found = result.data.admin.personalApiTokens.tokens.nodes.find(
-                (t: {key: string; name: string}) => t.name === TOKEN_NAME
-            );
-            tokenKey = found.key;
-        });
+        saveSkill(GATING_SKILL, 'gating skill body');
         // A narrow whitelist that covers neither introspection nor skills.
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
+    });
+
+    // Another spec may have run in between: pin the whitelist this spec relies on.
+    beforeEach(() => {
+        setWhitelist(['currentUser']);
     });
 
     after(() => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
-        cy.apollo({mutation: deleteToken, variables: {tokenKey}});
+        removeSkill(GATING_SKILL);
+        setWhitelist([]);
+        deleteApiToken(TOKEN_NAME);
     });
 
-    const callTool = (name: string, args: Record<string, unknown>) => cy.request({
-        method: 'POST',
-        url: '/modules/mcp',
-        headers: {'Content-Type': 'application/json', Authorization: `APIToken ${apiToken}`},
-        body: {jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name, arguments: args}}
-    });
+    const callTool = (name: string, args: Record<string, unknown>) => callToolRaw(apiToken, name, args);
 
     // U3 — only community.graphql.execute is whitelist-gated. The introspect and skill tools rely
     // solely on the administrator gate (see 04-mcpToolCatalogAndGate) and ignore the whitelist.
@@ -65,24 +46,46 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
     });
 
     it('community.skill.get is NOT whitelist-gated', () => {
-        callTool('community.skill.get', {name: 'default/hello-jahia'})
+        callTool('community.skill.get', {name: GATING_SKILL})
             .its('body.result.isError').should('eq', false);
     });
 
-    // F2 — community.graphql.introspect runs the two-step __schema / per-type __type workaround without
-    // tripping Jahia's bad-faith introspection guard, ignores the whitelist, and returns a
-    // parsed schema picture containing query + mutation type names and per-type field details.
-    it('community.graphql.introspect returns a schema with query/mutation types and per-type details', () => {
+    // The introspect tool is bounded: with no arguments it returns the type list plus
+    // the root Query/Mutation details only (one __Type.fields per request, so Jahia's bad-faith
+    // introspection guard never trips); specific types are requested through typeNames.
+    it('community.graphql.introspect without arguments returns the type list and the root types', () => {
         callTool('community.graphql.introspect', {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
             const payload = JSON.parse(response.body.result.content[0].text);
-            expect(payload.schema).to.exist;
-            expect(payload.schema.queryType.name).to.be.a('string');
-            expect(payload.schema.mutationType.name).to.be.a('string');
-            expect(payload.schema.types).to.be.an('array').and.have.length.greaterThan(0);
-            // Step-2 per-type detail map (keyed by type name) is populated.
-            expect(payload.types).to.be.an('object');
-            expect(Object.keys(payload.types).length).to.be.greaterThan(0);
+            expect(payload.schema.queryType.name).to.eq('Query');
+            expect(payload.schema.mutationType.name).to.eq('Mutation');
+            expect(payload.schema.types).to.be.an('array').and.have.length.greaterThan(10);
+            expect(Object.keys(payload.types)).to.have.members(['Query', 'Mutation']);
+            expect(payload.types.Query.fields.map((f: {name: string}) => f.name)).to.include('jcr');
+            expect(payload.skippedTypes).to.deep.eq([]);
+            expect(payload.truncatedTypes).to.deep.eq([]);
+            // Bounded: the whole default answer stays far below the 100k-character budget.
+            expect(response.body.result.content[0].text.length).to.be.lessThan(100000);
+        });
+    });
+
+    it('community.graphql.introspect describes the types named in typeNames', () => {
+        callTool('community.graphql.introspect', {typeNames: ['JCRNode', 'NoSuchType']}).then(response => {
+            expect(response.body.result.isError).to.eq(false);
+            const payload = JSON.parse(response.body.result.content[0].text);
+            expect(payload.schema).to.be.undefined;
+            expect(payload.types.JCRNode.fields.map((f: {name: string}) => f.name)).to.include('path');
+            expect(payload.skippedTypes).to.deep.eq(['NoSuchType']);
+        });
+    });
+
+    it('community.graphql.introspect refuses more than 25 typeNames', () => {
+        const names = Array.from({length: 26}, (_, i) => `Type${i}`);
+        callTool('community.graphql.introspect', {typeNames: names}).then(response => {
+            // Rejected either by mcp-server's schema validation (JSON-RPC error or isError result)
+            // or by the tool's own check — in every case nothing is introspected.
+            const rejected = Boolean(response.body.error) || response.body.result.isError === true;
+            expect(rejected).to.eq(true);
         });
     });
 
@@ -97,11 +100,11 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
         callTool('community.skill.list', {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
             const {skills} = JSON.parse(response.body.result.content[0].text);
-            expect(skills.map((s: {name: string}) => s.name)).to.include('default/hello-jahia');
+            expect(skills.map((s: {name: string}) => s.name)).to.include(GATING_SKILL);
         });
-        callTool('community.skill.get', {name: 'default/hello-jahia'}).then(response => {
+        callTool('community.skill.get', {name: GATING_SKILL}).then(response => {
             expect(response.body.result.isError).to.eq(false);
-            expect(response.body.result.content[0].text).to.include('Hello Jahian');
+            expect(response.body.result.content[0].text).to.include('gating skill body');
         });
     });
 });
