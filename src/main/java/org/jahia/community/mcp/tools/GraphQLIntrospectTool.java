@@ -128,6 +128,8 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
             }
             fetchTypeDetails(wanted, ctx, result);
             return ToolResult.ok(result);
+        } catch (InternalGraphQLClient.ServletUnavailableException ex) {
+            return ToolSupport.graphQLUnavailable(NAME, ctx.username());
         } catch (IOException | ServletException | RuntimeException ex) {
             LOGGER.error("{} failed for user='{}'", NAME, LogSupport.clean(ctx.username()), ex);
             return internalError();

@@ -142,6 +142,8 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
                 : null;
         try {
             return toResult(graphQLClient.execute(ctx, query, variables));
+        } catch (InternalGraphQLClient.ServletUnavailableException ex) {
+            return ToolSupport.graphQLUnavailable(NAME, ctx.username());
         } catch (InternalGraphQLClient.ResponseTooLargeException ex) {
             LOGGER.warn("{} response too large for user='{}'", NAME, LogSupport.clean(ctx.username()));
             return ToolResult.error(ToolError.CODE_VALIDATION, MESSAGE_TOO_LARGE, HINT_TOO_LARGE);

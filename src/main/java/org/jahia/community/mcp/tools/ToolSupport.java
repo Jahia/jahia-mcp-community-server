@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jahia.community.mcp.LogSupport;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
+import org.jahia.modules.mcp.spi.tool.ToolError;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,12 +28,25 @@ final class ToolSupport {
     static final String EVENT_ERROR = "tool.execute.error";
 
     /** Upper bound for any caller- or server-supplied text echoed into an error message. */
+    /** Message of the 'unavailable' error returned when the GraphQL servlet is not bound. */
+    static final String MESSAGE_GRAPHQL_UNAVAILABLE = "The Jahia GraphQL service is not available on this node.";
+    static final String HINT_GRAPHQL_UNAVAILABLE = "Do not retry until an administrator has checked that "
+            + "graphql-dxm-provider is started; the GraphQL tools work again as soon as its servlet is available.";
+
     static final int MAX_ECHO_CHARS = 300;
 
     private ToolSupport() {
     }
 
     /** Loads {@code schemas/<toolName>.json} from this bundle. */
+    /** The explicit refusal of a GraphQL tool while the GraphQL servlet is not bound. */
+    static ToolResult graphQLUnavailable(final String toolName, final String username) {
+        LOGGER.warn("{} refused for user='{}': the GraphQL servlet is not available", toolName,
+                LogSupport.clean(username));
+        return ToolResult.error(ToolError.CODE_UNAVAILABLE,
+                MESSAGE_GRAPHQL_UNAVAILABLE, HINT_GRAPHQL_UNAVAILABLE);
+    }
+
     static JsonNode loadSchema(final String toolName) {
         return loadSchema(toolName, ToolSupport.class::getResourceAsStream);
     }

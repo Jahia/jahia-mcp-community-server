@@ -90,6 +90,15 @@ public class InternalGraphQLClient {
         }
     }
 
+    /** The GraphQL servlet is not bound (graphql-dxm-provider missing, stopped or renamed it). */
+    public static final class ServletUnavailableException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        ServletUnavailableException() {
+            super("The GraphQL servlet is not available");
+        }
+    }
+
     /** The response exceeded {@link #MAX_RESPONSE_BYTES}: the document must select less. */
     public static final class ResponseTooLargeException extends IOException {
         private static final long serialVersionUID = 1L;
@@ -128,12 +137,13 @@ public class InternalGraphQLClient {
      * @param variables optional variables map (may be {@code null})
      * @throws IllegalStateException if the bound JCR user is missing or is not {@code ctx.username()}
      * @throws ResponseTooLargeException if the response exceeds {@value #MAX_RESPONSE_BYTES} bytes
-     * @throws IOException if the servlet is unavailable or the call fails
+     * @throws ServletUnavailableException if the GraphQL servlet is not bound
+     * @throws IOException if the call fails
      */
     public Response execute(final ToolContext ctx, final String query, final Object variables)
             throws IOException, ServletException {
         if (graphQLServlet == null) {
-            throw new IOException("The GraphQL servlet is not available");
+            throw new ServletUnavailableException();
         }
         final JahiaUser caller = CommunityMcpAccess.boundCaller(ctx).orElseThrow(() ->
                 new IllegalStateException("The MCP caller identity is not bound to this thread"));
