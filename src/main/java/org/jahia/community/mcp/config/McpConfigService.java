@@ -28,7 +28,8 @@ import java.util.Set;
  * <p>Fail-closed lifecycle: the component requires its configuration
  * ({@link ConfigurationPolicy#REQUIRE}); the shipped default {@code .cfg} provides it. Until the
  * configuration is delivered (startup) and after it is deleted, this service is not active, so the
- * gate and the tools that reference it are not active either — nothing runs on a guessed default.</p>
+ * gate and {@code community.graphql.execute} are not active either, and the {@code communityMcp}
+ * settings operations fail — nothing runs on a guessed default.</p>
  *
  * <p>An empty whitelist is the read-only default (queries only), see {@link WhitelistSnapshot}.</p>
  */

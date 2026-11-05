@@ -19,7 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Function;
 
-/** Small helpers shared by the community tools: schema loading, auditing, header access. */
+/** Small helpers shared by the community tools: schema loading, auditing, hashing, JSON parsing and sanitizing. */
 final class ToolSupport {
 
     static final ObjectMapper MAPPER = new ObjectMapper();

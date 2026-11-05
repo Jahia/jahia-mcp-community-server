@@ -36,7 +36,8 @@ import java.util.Set;
  *
  * <p>An EMPTY whitelist is the read-only default: every query is allowed EXCEPT those under the
  * privileged {@code admin} namespace (it exposes OSGi configuration values, secrets included; an
- * explicit {@code query:admin...} entry re-enables it), no mutation and no subscription is. The {@code communityMcp} mutations are denied whatever the whitelist says: the
+ * explicit {@code query:admin...} entry re-enables it), and no mutation and no subscription is allowed.
+ * The {@code communityMcp} mutations are denied whatever the whitelist says: the
  * data plane must not rewrite its own guard. (Whitelisting broad mutation roots such as
  * {@code mutation:jcr} or {@code mutation:admin} is allowed but grants everything below them to
  * administrators — prefer exact paths.)</p>
@@ -49,7 +50,7 @@ import java.util.Set;
  * Use inline fragments instead. Directives ({@code @include}, {@code @skip}) never hide a field:
  * the gate walks every selection whatever its condition.</p>
  *
- * <p>Container rule (inherent, no behaviour change): a path is allowed when it is covered by an
+ * <p>Container rule: a path is allowed when it is covered by an
  * entry OR leads towards one. An entry such as {@code mutation:jcr.addNode.mutateProperty}
  * therefore also lets the intermediate field {@code jcr.addNode} run, and an intermediate mutation
  * field may act by itself (create a node, for instance) even when only a field below it was meant.
@@ -121,8 +122,7 @@ public class GraphQLWhitelistGate {
 
     private static Optional<Denial> evaluate(final String query, final WhitelistSnapshot snapshot,
             final String who, final String ip) {
-        // Parse ONCE with the real GraphQL grammar; a document the gate cannot parse is DENIED
-        // (a hand-written scanner once let `query,{...}` through).
+        // Parse ONCE with the real GraphQL grammar; a document the gate cannot parse is DENIED.
         final Document document;
         try {
             document = Parser.parse(query);

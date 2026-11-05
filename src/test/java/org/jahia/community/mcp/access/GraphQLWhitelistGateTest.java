@@ -23,10 +23,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Audit-logging + decision tests for the REAL {@link GraphQLWhitelistGate#check} method
- * (package-private after the visibility refactor). A mocked {@link McpConfigService} drives the
- * two branches; a logback {@link ListAppender} captures the WARN audit trail, which is the
- * module's only real-time visibility into blocked operations.
+ * Audit-logging and decision tests for {@link GraphQLWhitelistGate#check}: a mocked
+ * {@link McpConfigService} drives the read-only and whitelist states, and a logback
+ * {@link ListAppender} captures the WARN audit trail, which is the module's only real-time
+ * visibility into blocked operations.
  */
 class GraphQLWhitelistGateTest {
 
