@@ -8,7 +8,7 @@
     "@babel/preset-env": "^7.25.3",
     "@cypress/code-coverage": "^4.0.3",
     "@cypress/webpack-preprocessor": "^5.9.1",
-    "@faker-js/faker": "^10.0.0",
+    "@faker-js/faker": "^10.5.0",
     "@jahia/cypress": "^7.0.0",
     "@jahia/eslint-config": "^2.1.2",
     "@typescript-eslint/eslint-plugin": "^5.2.0",
@@ -17,7 +17,7 @@
     "babel-plugin-istanbul": "^6.1.1",
     "compare-versions": "^6.1.1",
     "cross-fetch": "3.1.6",
-    "cypress": "15.13.1",
+    "cypress": "15.21.1",
     "cypress-multi-reporters": "^1.6.3",
     "cypress-terminal-report": "^5.3.7",
     "cypress-wait-until": "^3.0.1",
@@ -63,7 +63,7 @@
   "author": "",
   "license": "MIT",
   "resolutions": {
-    "axios": "^1.15.0",
-    "serialize-javascript": "^7.0.5"
+    "axios": "^1.20.0",
+    "serialize-javascript": "^7.1.3"
   }
 }
