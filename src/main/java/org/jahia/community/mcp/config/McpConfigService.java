@@ -55,7 +55,9 @@ public class McpConfigService {
     }
 
     private final ConfigurationAdmin configurationAdmin;
-    // One immutable object, replaced as a whole: readers always see a consistent snapshot.
+    // One immutable object (final class, unmodifiable sets), replaced as a whole: readers always see
+    // a consistent snapshot, which is what S3077 asks for.
+    @SuppressWarnings("java:S3077")
     private volatile WhitelistSnapshot snapshot;
 
     @Activate
