@@ -1,10 +1,10 @@
+# Executed by @jahia/cypress env.provision.sh (MANIFEST in .env / .env.example).
+# graphql-dxm-provider and personal-api-tokens ship with the Jahia image; only mcp-server is added.
 - karafCommand: "log:log 'START - provisioning'"
 
 - karafCommand: "log:log 'START - Install jahia-mcp-community-server dependencies'"
 - addMavenRepository: 'https://devtools.jahia.com/nexus/content/groups/public/@snapshots@noreleases@id=JahiaSnapshot'
 - installBundle:
-      - 'mvn:org.jahia.modules/graphql-dxm-provider/LATEST'
-      - 'mvn:org.jahia.modules/personal-api-tokens/LATEST'
       # The community module is an extension of mcp-server: it contributes tools to /modules/mcp.
       - 'mvn:org.jahia.modules/mcp-server/0.5.0-SNAPSHOT'
   autoStart: true
