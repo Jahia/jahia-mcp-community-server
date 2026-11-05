@@ -311,6 +311,28 @@ class McpSkillServiceTest {
     }
 
     @Test
+    @DisplayName("listSkillHeaders returns the same skills without loading their body")
+    void list_headers_has_no_content() throws Exception {
+        jcr.container();
+        jcr.queryReturns(jcr.skill("default/hello", "Hello", "Says hi", "# Hi"));
+
+        final List<McpSkillService.SkillEntry> skills = service.listSkillHeaders();
+
+        assertThat(skills).extracting(s -> s.path).containsExactly("default/hello");
+        assertThat(skills.get(0).mcpName).isEqualTo("Hello");
+        assertThat(skills.get(0).content).isEmpty();
+    }
+
+    @Test
+    @DisplayName("saveSkill refuses a body longer than MAX_CONTENT_CHARS and writes nothing")
+    void save_refuses_oversized_content() throws Exception {
+        jcr.container();
+
+        assertThat(service.saveSkill("big", "n", "d", "x".repeat(McpSkillService.MAX_CONTENT_CHARS + 1))).isFalse();
+        assertThat(service.saveSkill("ok", "n", "d", "x".repeat(McpSkillService.MAX_CONTENT_CHARS))).isTrue();
+    }
+
+    @Test
     @DisplayName("listSkills returns nothing when the repository fails")
     void list_repository_failure() throws Exception {
         when(template.doExecuteWithSystemSession(any(JCRCallback.class))).thenThrow(new RepositoryException("down"));

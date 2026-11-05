@@ -50,7 +50,7 @@ public class McpConfigService {
             description = "Operation whitelist of the community.graphql.execute tool")
     public @interface Config {
         @AttributeDefinition(name = "Whitelist",
-                description = "query:<path> / mutation:<path> entries. Empty: every query is allowed, "
+                description = "query:<path> / mutation:<path> entries. Empty: every query except those under 'admin' is allowed, "
                         + "no mutation and no subscription.")
         String[] whitelist() default {};
     }

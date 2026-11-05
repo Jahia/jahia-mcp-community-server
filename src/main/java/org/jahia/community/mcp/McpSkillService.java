@@ -33,6 +33,8 @@ public class McpSkillService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpSkillService.class);
     static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
+    /** Upper bound on the Markdown body of one skill (characters). */
+    public static final int MAX_CONTENT_CHARS = 200_000;
     private static final String ACL_NODE = "j:acl";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
     /**
@@ -61,7 +63,7 @@ public class McpSkillService {
      * Validates a caller-supplied skill name is safe for JCR path construction.
      * @throws IllegalArgumentException if the name is null, blank, or contains illegal characters
      */
-    static String validateSkillName(final String name) {
+    public static String validateSkillName(final String name) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Skill name must not be null or blank");
         }
@@ -188,7 +190,17 @@ public class McpSkillService {
     private static final String LIST_SKILLS_SQL =
             "SELECT * FROM [mcp:skill] AS skill WHERE ISDESCENDANTNODE(skill, '" + SKILLS_PATH + "') ORDER BY NAME(skill)";
 
+    /** Every skill with its body. */
     public List<SkillEntry> listSkills() {
+        return listSkills(true);
+    }
+
+    /** Every skill without its body (empty {@code content}): enough to list names and descriptions. */
+    public List<SkillEntry> listSkillHeaders() {
+        return listSkills(false);
+    }
+
+    private List<SkillEntry> listSkills(final boolean withContent) {
         try {
             // Reads run under a SYSTEM session on purpose: the skills container has its ACL
             // inheritance broken (see ensureContainer), so no ordinary role can see or write it
@@ -200,7 +212,7 @@ public class McpSkillService {
                 final List<SkillEntry> skills = new ArrayList<>();
                 final NodeIterator iter = result.getNodes();
                 while (iter.hasNext()) {
-                    skills.add(toEntry((JCRNodeWrapper) iter.nextNode()));
+                    skills.add(toEntry((JCRNodeWrapper) iter.nextNode(), withContent));
                 }
                 return Collections.unmodifiableList(skills);
             });
@@ -227,7 +239,7 @@ public class McpSkillService {
                     return null;
                 }
                 final JCRNodeWrapper node = session.getNode(path);
-                return node.isNodeType(SKILL_NODE_TYPE) ? toEntry(node) : null;
+                return node.isNodeType(SKILL_NODE_TYPE) ? toEntry(node, true) : null;
             });
         } catch (SecurityException ex) {
             LOGGER.warn("getSkill path-traversal attempt blocked: {}", ex.getMessage());
@@ -244,6 +256,11 @@ public class McpSkillService {
             validateSkillName(name);
         } catch (IllegalArgumentException ex) {
             LOGGER.warn("saveSkill rejected unsafe name: {}", ex.getMessage());
+            return false;
+        }
+        if (content != null && content.length() > MAX_CONTENT_CHARS) {
+            LOGGER.warn("saveSkill rejected: content of '{}' exceeds {} characters", LogSupport.clean(name),
+                    MAX_CONTENT_CHARS);
             return false;
         }
         try {
@@ -441,13 +458,13 @@ public class McpSkillService {
         return nodePath.startsWith(prefix) ? nodePath.substring(prefix.length()) : nodePath;
     }
 
-    private SkillEntry toEntry(JCRNodeWrapper node) throws RepositoryException {
+    private SkillEntry toEntry(JCRNodeWrapper node, boolean withContent) throws RepositoryException {
         return new SkillEntry(
                 node.getName(),
                 relativePath(node.getPath()),
                 node.hasProperty(PROP_NAME) ? node.getProperty(PROP_NAME).getString() : "",
                 node.hasProperty(PROP_DESCRIPTION) ? node.getProperty(PROP_DESCRIPTION).getString() : "",
-                node.hasProperty(PROP_CONTENT) ? node.getProperty(PROP_CONTENT).getString() : ""
+                withContent && node.hasProperty(PROP_CONTENT) ? node.getProperty(PROP_CONTENT).getString() : ""
         );
     }
 

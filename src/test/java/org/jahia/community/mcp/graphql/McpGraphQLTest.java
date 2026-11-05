@@ -148,34 +148,64 @@ class McpGraphQLTest {
     // ── mutations ─────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("saveSkill and deleteSkill delegate and return the service result")
+    @DisplayName("saveSkill and deleteSkill delegate and return true on success")
     void skill_mutations_delegate() {
         when(skills.saveSkill("a/b", "m", "d", "c")).thenReturn(true);
-        when(skills.deleteSkill("a/b")).thenReturn(false);
+        when(skills.deleteSkill("a/b")).thenReturn(true);
 
         assertThat(new McpMutation().saveSkill("a/b", "m", "d", "c")).isTrue();
-        assertThat(new McpMutation().deleteSkill("a/b")).isFalse();
+        assertThat(new McpMutation().deleteSkill("a/b")).isTrue();
         verify(skills).saveSkill("a/b", "m", "d", "c");
     }
 
     @Test
-    @DisplayName("skill mutations return false when the skill service is missing")
-    void skill_mutations_missing_service() {
-        bundleUtils.when(() -> BundleUtils.getOsgiService(McpSkillService.class, null)).thenReturn(null);
+    @DisplayName("a refused save or delete is a GraphQL error with a reason, not a silent false")
+    void skill_mutation_failures_throw() {
+        when(skills.saveSkill("a", "m", "d", "c")).thenReturn(false);
+        when(skills.deleteSkill("a")).thenReturn(false);
+        final McpMutation mutation = new McpMutation();
 
-        assertThat(new McpMutation().saveSkill("a", "m", "d", "c")).isFalse();
-        assertThat(new McpMutation().deleteSkill("a")).isFalse();
+        assertThatThrownBy(() -> mutation.saveSkill("a", "m", "d", "c")).isInstanceOf(DataFetchingException.class)
+                .hasMessageContaining("could not be saved");
+        assertThatThrownBy(() -> mutation.deleteSkill("a")).isInstanceOf(DataFetchingException.class)
+                .hasMessageContaining("was not deleted");
     }
 
     @Test
-    @DisplayName("traversal names are rejected through the real service and never reach JCR")
-    void traversal_rejected_through_real_service() {
-        bundleUtils.when(() -> BundleUtils.getOsgiService(McpSkillService.class, null)).thenReturn(new McpSkillService());
+    @DisplayName("skill mutations fail with a GraphQL error when the skill service is missing")
+    void skill_mutations_missing_service() {
+        bundleUtils.when(() -> BundleUtils.getOsgiService(McpSkillService.class, null)).thenReturn(null);
+        final McpMutation mutation = new McpMutation();
 
-        for (String evil : new String[]{"../../etc/passwd", "a/../../b", "/abs", "a//b", "..", "."}) {
-            assertThat(new McpMutation().saveSkill(evil, "m", "d", "c")).as(evil).isFalse();
-            assertThat(new McpMutation().deleteSkill(evil)).as(evil).isFalse();
+        assertThatThrownBy(() -> mutation.saveSkill("a", "m", "d", "c")).isInstanceOf(DataFetchingException.class)
+                .hasMessageContaining("not available");
+        assertThatThrownBy(() -> mutation.deleteSkill("a")).isInstanceOf(DataFetchingException.class)
+                .hasMessageContaining("not available");
+    }
+
+    @Test
+    @DisplayName("invalid names are rejected with a client-safe error that does not echo the name, before JCR")
+    void invalid_names_rejected_with_reason() {
+        final McpMutation mutation = new McpMutation();
+
+        for (String evil : new String[]{"../../etc/passwd", "a/../../b", "/abs", "a//b", "..", ".", "x\ny"}) {
+            assertThatThrownBy(() -> mutation.saveSkill(evil, "m", "d", "c")).as(evil)
+                    .isInstanceOf(DataFetchingException.class).hasMessageContaining("Invalid skill name")
+                    .hasMessageNotContaining(evil);
+            assertThatThrownBy(() -> mutation.deleteSkill(evil)).as(evil)
+                    .isInstanceOf(DataFetchingException.class).hasMessageContaining("Invalid skill name");
         }
+        verifyNoInteractions(skills);
+    }
+
+    @Test
+    @DisplayName("an oversized body is rejected with the limit in the message")
+    void oversized_content_rejected() {
+        final McpMutation mutation = new McpMutation();
+        final String big = "x".repeat(McpSkillService.MAX_CONTENT_CHARS + 1);
+
+        assertThatThrownBy(() -> mutation.saveSkill("a", "m", "d", big)).isInstanceOf(DataFetchingException.class)
+                .hasMessageContaining("too long").hasMessageContaining(String.valueOf(McpSkillService.MAX_CONTENT_CHARS));
         verifyNoInteractions(skills);
     }
 

@@ -32,7 +32,7 @@ public class McpMutation {
     public Boolean saveSettings(
             @GraphQLName("whitelist") @GraphQLNonNull @GraphQLDescription("Operations to allow, as 'query:<path>' or "
                     + "'mutation:<path>' (an unprefixed path is query-only). An empty list is the read-only "
-                    + "default: every query is allowed, no mutation and no subscription") List<String> whitelist) {
+                    + "default: every query is allowed except those under 'admin' (needs query:admin), no mutation and no subscription") List<String> whitelist) {
         final McpConfigService config = BundleUtils.getOsgiService(McpConfigService.class, null);
         if (config == null) {
             LOGGER.error("McpConfigService is not available (is the org.jahia.community.mcp configuration present?)");
@@ -57,7 +57,8 @@ public class McpMutation {
 
     @GraphQLField
     @GraphQLName("saveSkill")
-    @GraphQLDescription("Creates or updates an MCP skill in JCR")
+    @GraphQLDescription("Creates or updates an MCP skill in JCR. Returns true on success; fails with a GraphQL "
+            + "error giving the reason when the name or content is invalid or the skill cannot be stored.")
     @GraphQLRequiresPermission("admin")
     public Boolean saveSkill(
             @GraphQLName("name") @GraphQLNonNull @GraphQLDescription("Skill key: the path relative to the skills root, "
@@ -68,22 +69,47 @@ public class McpMutation {
         final McpSkillService service = BundleUtils.getOsgiService(McpSkillService.class, null);
         if (service == null) {
             LOGGER.error(SKILL_SERVICE_UNAVAILABLE);
-            return Boolean.FALSE;
+            throw new DataFetchingException(SKILL_SERVICE_UNAVAILABLE);
         }
-        return service.saveSkill(name, mcpName, description, content);
+        validateName(name);
+        if (content.length() > McpSkillService.MAX_CONTENT_CHARS) {
+            throw new DataFetchingException("The skill content is too long: at most "
+                    + McpSkillService.MAX_CONTENT_CHARS + " characters are accepted");
+        }
+        if (!service.saveSkill(name, mcpName, description, content)) {
+            throw new DataFetchingException("The skill could not be saved: a folder or a node that is not a skill "
+                    + "may already use that name, or the repository failed (see the server log)");
+        }
+        return Boolean.TRUE;
     }
 
     @GraphQLField
     @GraphQLName("deleteSkill")
-    @GraphQLDescription("Deletes an MCP skill from JCR")
+    @GraphQLDescription("Deletes an MCP skill from JCR. Returns true on success; fails with a GraphQL error when "
+            + "the name is invalid or no such skill exists.")
     @GraphQLRequiresPermission("admin")
     public Boolean deleteSkill(
             @GraphQLName("name") @GraphQLNonNull @GraphQLDescription("Skill key (the path returned by the skills query)") String name) {
         final McpSkillService service = BundleUtils.getOsgiService(McpSkillService.class, null);
         if (service == null) {
             LOGGER.error(SKILL_SERVICE_UNAVAILABLE);
-            return Boolean.FALSE;
+            throw new DataFetchingException(SKILL_SERVICE_UNAVAILABLE);
         }
-        return service.deleteSkill(name);
+        validateName(name);
+        if (!service.deleteSkill(name)) {
+            throw new DataFetchingException("The skill was not deleted: it does not exist, is not a skill, "
+                    + "or the repository failed (see the server log)");
+        }
+        return Boolean.TRUE;
+    }
+
+    /** Client-safe refusal of an invalid skill key (never echoes the key back). */
+    private static void validateName(final String name) {
+        try {
+            McpSkillService.validateSkillName(name);
+        } catch (IllegalArgumentException e) {
+            throw new DataFetchingException("Invalid skill name: use letters, digits, '_' and '-' in segments "
+                    + "separated by single '/', without leading or trailing slash");
+        }
     }
 }
