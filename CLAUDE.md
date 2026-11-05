@@ -2,7 +2,7 @@
 
 ## What this module does
 
-An extension of Jahia's `mcp-server` module (2.x). It contributes four MCP tools to the `mcp-server`
+An extension of Jahia's `mcp-server` module (0.5.x). This module is version 2.x. It contributes four MCP tools to the `mcp-server`
 endpoint (`/modules/mcp`) through its public tool SPI: `community.graphql.execute`,
 `community.graphql.introspect`, `community.skill.list` and `community.skill.get`. The module owns no
 endpoint and no MCP SDK: `mcp-server` handles transport, authentication, JSON-RPC and the tool catalog.
@@ -144,26 +144,37 @@ Configuration (`McpConfigService`, PID `org.jahia.community.mcp`):
 - `saveWhitelist` validates every entry first. A malformed or never-allowed entry throws
   `IllegalArgumentException` naming the entry, and nothing is written. Otherwise it writes the
   `whitelist` key through `ConfigurationAdmin`.
+- `saveWhitelist` writes the configuration of the node that served the request only. In a cluster the
+  whitelist must be set on every node (or through provisioning or the `.cfg`). Nodes do not replicate it.
+- Upgrades: an installation from 1.x keeps its existing `.cfg` (the shipped file is a
+  "default configuration" and is not overwritten), including its stale 1.x comment that an empty
+  whitelist allows everything. An empty whitelist is the read-only default.
 
 Entry syntax (`WhitelistEntries`):
 
 - `query:<path>` or `mutation:<path>`, with `<path>` = `name(.name)*` of GraphQL names. The prefix is
   case-insensitive.
 - An unprefixed entry is a legacy query-only entry. Mutations must always be explicit.
+- A deeper mutation entry also lets its intermediate mutation fields run. `mutation:jcr.addNode.mutateProperty`
+  also lets `mutation.jcr.addNode` execute, because GraphQL cannot run the deeper field without it. Choose
+  entries whose intermediate fields may run (for example `addNode`, `copyNode`, `moveNode` under `jcr` create
+  or move nodes), and prefer the leaf paths you need.
 - Malformed entries and other operation types (for example `subscription:`) normalize to nothing.
   `McpConfigService` logs legacy and malformed entries at WARN when the configuration loads.
-- Never-allowed: `mutation.communityMcp` and everything under it. The gate refuses it in every state,
-  and `saveWhitelist` refuses it.
+- Never-allowed: `mutation.communityMcp` and `mutation.admin.jahia.configuration`, each with everything
+  under it. The gate refuses them in every state, including when a broader entry such as `mutation:admin`
+  covers them, and `saveWhitelist` refuses entries for them. The second path is needed because the
+  generic `configuration(pid, …)` mutation under `admin` could rewrite this module's own configuration.
 - Internal form puts the operation type first: `query.jcr.nodeByPath`, `mutation.jcr.deleteNode`.
   Denial messages and logs use the user-facing form (`display(...)`).
 
 Decision (`GraphQLWhitelistGate.check`):
 
 1. Parse with `graphql.parser.Parser`. Failure denies with `could not be parsed`, always.
-2. If the whitelist is non-empty and the document has a named fragment spread, deny (SEC-2). The read-only
-   default allows spreads, since they cannot change the operation type.
+2. If the document has a named fragment spread, deny (SEC-2), in every state, read-only default included.
+   The gate does not expand spreads, so their content cannot be checked. Inline fragments are supported.
 3. Extract operation-qualified paths for every operation in the document, up to `maxDepth` segments.
-   Inline fragments keep the parent's prefix and depth. Named spreads are not expanded.
+   Inline fragments keep the parent's prefix and depth.
 4. Drop paths with an `__`-prefixed segment (introspection passes).
 5. For each remaining path:
    - never-allowed: deny;
