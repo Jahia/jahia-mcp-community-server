@@ -60,6 +60,40 @@ describe('locales', () => {
         });
     });
 
+    test('the read-only texts warn that queries still read everything readable (SEC-1)', () => {
+        ['policyReadOnly', 'helpDefault'].forEach(key => {
+            expect(en.label[key]).toContain('user data');
+            expect(en.label[key]).toContain('In production');
+            expect(fr.label[key]).toContain('données des utilisateurs');
+            expect(fr.label[key]).toContain('En production');
+        });
+    });
+
+    test('the whitelist setting is named once, to map the allow list to the API and configuration (UX-17)', () => {
+        [en, fr].forEach(locale => {
+            const naming = Object.keys(locale.label).filter(key => locale.label[key].includes('whitelist'));
+            expect(naming).toEqual(['helpEntries']);
+            expect(locale.label.helpEntries).toContain('settings.whitelist');
+        });
+    });
+
+    test('abbreviations are expanded on first use (A11Y-7)', () => {
+        expect(en.label.title).toContain('Model Context Protocol (MCP)');
+        expect(fr.label.title).toContain('MCP (Model Context Protocol)');
+        expect(en.label.description).toContain('artificial intelligence (AI)');
+        expect(fr.label.description).toContain('intelligence artificielle (IA)');
+        [en, fr].forEach(locale => {
+            expect(locale.label.helpEntries).toContain('OSGi (Open Service Gateway initiative)');
+            expect(locale.label.helpDefault).toContain('Java Content Repository');
+            expect(locale.label.helpDefault).toMatch(/application programming interface|interface de programmation/);
+        });
+    });
+
+    test('the button that empties the list has the same name as the confirmation (A11Y-11)', () => {
+        expect(en.label.clearAll).toBe(en.label.confirmClearAction);
+        expect(fr.label.clearAll).toBe(fr.label.confirmClearAction);
+    });
+
     test('field counts use plural forms in English and French', async () => {
         const tEn = await instance('en');
         expect(tEn('label.fieldsLoaded', {count: 1, name: 'admin'})).toBe('admin: 1 field loaded.');
