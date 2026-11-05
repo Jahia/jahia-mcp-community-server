@@ -1,9 +1,11 @@
 package org.jahia.community.mcp.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import org.jahia.community.mcp.LogSupport;
 import org.jahia.community.mcp.access.CommunityMcpAccess;
+import org.jahia.community.mcp.access.Denial;
 import org.jahia.community.mcp.access.GraphQLWhitelistGate;
 import org.jahia.modules.mcp.spi.tool.JahiaMcpTool;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
@@ -32,19 +34,27 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
     static final String NAME = "community.graphql.execute";
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphQLExecuteTool.class);
     private static final String ERRORS = "errors";
+    private static final int MAX_ERROR_MESSAGE_CHARS = 500;
     private static final int HTTP_BAD_REQUEST = 400;
     private static final int HTTP_UNAUTHORIZED = 401;
     private static final int HTTP_FORBIDDEN = 403;
 
-    static final String HINT_PARSE = "The document is not valid GraphQL. Fix the syntax and retry; check "
-            + "names with community.graphql.introspect.";
+    static final String HINT_PARSE = "The document is not valid GraphQL (a syntax error, not a refusal). Fix "
+            + "the syntax at the reported position and retry; check names with community.graphql.introspect.";
+    static final String HINT_UNANALYSABLE = "The document is too deeply nested or unusual to analyse. "
+            + "Simplify it (less nesting, no named fragments) and retry.";
+    static final String MESSAGE_TOO_LARGE = "The GraphQL response exceeds the 5 MB limit.";
+    static final String HINT_TOO_LARGE = "Do not retry the same document: narrow the query, select fewer "
+            + "fields, or paginate (first/after, limit/offset), then retry.";
     static final String HINT_FRAGMENT = "Replace named fragment spreads (...Name) with the fields themselves "
             + "or with inline fragments (... on Type { ... }), then retry.";
     static final String HINT_MUTATION = "Mutations are refused unless a 'mutation:<field>' entry is on the "
             + "whitelist. Do not retry; tell the user which mutation is needed so an administrator can add "
             + "it in Administration -> MCP Server, or use a read-only query instead.";
     static final String HINT_NEVER = "This operation can never be run through community.graphql.execute, "
-            + "whatever the whitelist says. Do not retry; tell the user to use the Administration UI instead.";
+            + "whatever the whitelist says. Do not retry; tell the user to make this change themselves in Jahia "
+            + "(Administration -> MCP Server for these settings, or the OSGi configuration / provisioning for "
+            + "admin.jahia.configuration, role grants and API tokens).";
     static final String HINT_SUBSCRIPTION = "Subscriptions are not supported by community.graphql.execute and "
             + "cannot be whitelisted. Do not retry; use a query instead.";
     static final String HINT_NOT_WHITELISTED = "Do not retry this operation. Tell the user it must be added "
@@ -71,8 +81,12 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         return "Execute a GraphQL query or mutation against Jahia's GraphQL API as the calling administrator. "
                 + "Mutations take effect immediately (delete, publish, permissions) and are refused unless "
                 + "explicitly whitelisted; queries are allowed by default, except the privileged 'admin' namespace "
-                + "(configuration values), which needs an explicit 'query:admin' entry. Once the administrator "
-                + "adds any entry, ONLY the listed operations run (queries included). Prefer the built-in site.*, page.* "
+                + "(configuration values), which needs an explicit 'query:admin' entry. Note that this read-only "
+                + "default still exposes EVERYTHING readable through queries, including settings and user data "
+                + "stored in the JCR repository: production installations should use an explicit allow list. "
+                + "Once the administrator adds any entry, ONLY the listed operations run (queries included). "
+                + "Role grants (grantRoles/revokeRoles), API token mutations, OSGi configuration writes and this "
+                + "module's own settings are never allowed. Prefer the built-in site.*, page.* "
                 + "and content.* tools when one fits. Call community.graphql.introspect first to find "
                 + "operation and argument names. GraphQL-level errors arrive inside a successful result: "
                 + "check the 'errors' array of the returned response even when the call succeeds. "
@@ -114,11 +128,13 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         }
         final String query = queryNode.asText();
 
-        final Optional<String> blocked = whitelistGate.check(query, ctx.username(), CommunityMcpAccess.clientIp(ctx));
+        final Optional<Denial> blocked = whitelistGate.evaluate(query, ctx.username(),
+                CommunityMcpAccess.clientIp(ctx));
         if (blocked.isPresent()) {
-            final String reason = blocked.get();
-            return ToolResult.error(ToolError.CODE_FORBIDDEN,
-                    ToolSupport.sanitize(reason, ToolSupport.MAX_ECHO_CHARS), hintForDenial(reason));
+            final Denial denial = blocked.get();
+            return ToolResult.error(
+                    denial.kind() == Denial.Kind.PARSE ? ToolError.CODE_VALIDATION : ToolError.CODE_FORBIDDEN,
+                    ToolSupport.sanitize(denial.message(), ToolSupport.MAX_ECHO_CHARS), hintFor(denial.kind()));
         }
 
         final Object variables = variablesNode.isObject()
@@ -126,6 +142,9 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
                 : null;
         try {
             return toResult(graphQLClient.execute(ctx, query, variables));
+        } catch (InternalGraphQLClient.ResponseTooLargeException ex) {
+            LOGGER.warn("{} response too large for user='{}'", NAME, LogSupport.clean(ctx.username()));
+            return ToolResult.error(ToolError.CODE_VALIDATION, MESSAGE_TOO_LARGE, HINT_TOO_LARGE);
         } catch (IOException | ServletException | RuntimeException ex) {
             LOGGER.error("{} failed for user='{}'", NAME, LogSupport.clean(ctx.username()), ex);
             return ToolResult.error(ToolError.CODE_INTERNAL, "The GraphQL operation could not be executed.",
@@ -133,31 +152,34 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         }
     }
 
-    /** Maps the gate's reason to a recovery hint; unknown reasons get the general whitelist hint. */
-    static String hintForDenial(final String reason) {
-        if (reason.contains("could not be parsed")) {
-            return HINT_PARSE;
+    /** Recovery hint for a typed denial; the gate's wording is never inspected. */
+    static String hintFor(final Denial.Kind kind) {
+        switch (kind) {
+            case PARSE:
+                return HINT_PARSE;
+            case NAMED_SPREAD:
+                return HINT_FRAGMENT;
+            case UNANALYSABLE:
+                return HINT_UNANALYSABLE;
+            case NEVER_ALLOWED:
+                return HINT_NEVER;
+            case SUBSCRIPTION:
+                return HINT_SUBSCRIPTION;
+            case MUTATION_NOT_ALLOWED:
+                return HINT_MUTATION;
+            case PROTECTED_QUERY:
+            case NOT_WHITELISTED:
+            default:
+                return HINT_NOT_WHITELISTED;
         }
-        if (reason.contains("named fragment")) {
-            return HINT_FRAGMENT;
-        }
-        if (reason.contains("can never be run")) {
-            return HINT_NEVER;
-        }
-        if (reason.contains("subscriptions are not supported") || reason.contains("'subscription:")) {
-            return HINT_SUBSCRIPTION;
-        }
-        if (reason.contains("mutations require an explicit") || reason.contains("'mutation:")) {
-            return HINT_MUTATION;
-        }
-        return HINT_NOT_WHITELISTED;
     }
 
     private static ToolResult toResult(final InternalGraphQLClient.Response response) {
         final JsonNode json = ToolSupport.parseJsonOrNull(response.body());
         if (!response.isHttpError()) {
-            // GraphQL-level errors arrive with HTTP 200 inside "errors" — returned as-is for the model.
-            return ToolResult.ok(json != null ? json : TextNode.valueOf(response.body()));
+            // GraphQL-level errors arrive with HTTP 200 inside "errors"; their messages are bounded
+            // and stripped of control characters (they can carry paths and exception text).
+            return ToolResult.ok(json != null ? withSanitizedErrors(json) : TextNode.valueOf(response.body()));
         }
         final int status = response.status();
         if (status == HTTP_BAD_REQUEST) {
@@ -170,6 +192,22 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         }
         return ToolResult.error(ToolError.CODE_INTERNAL,
                 "GraphQL endpoint returned HTTP " + status + ": " + errorMessages(json), HINT_SERVER);
+    }
+
+    /** {@code json} with every {@code errors[].message} sanitized and bounded; other content untouched. */
+    private static JsonNode withSanitizedErrors(final JsonNode json) {
+        final JsonNode errors = json.path(ERRORS);
+        if (!errors.isArray() || errors.isEmpty()) {
+            return json;
+        }
+        final JsonNode copy = json.deepCopy();
+        for (final JsonNode error : copy.path(ERRORS)) {
+            if (error instanceof ObjectNode && error.path("message").isTextual()) {
+                ((ObjectNode) error).put("message",
+                        ToolSupport.sanitize(error.path("message").asText(), MAX_ERROR_MESSAGE_CHARS));
+            }
+        }
+        return copy;
     }
 
     /** Server-supplied error messages, flattened, sanitized and bounded. */

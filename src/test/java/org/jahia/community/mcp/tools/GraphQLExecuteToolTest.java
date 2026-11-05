@@ -2,6 +2,7 @@ package org.jahia.community.mcp.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.jahia.community.mcp.access.Denial;
 import org.jahia.community.mcp.access.GraphQLWhitelistGate;
 import org.jahia.modules.mcp.spi.tool.ToolError;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
@@ -33,7 +34,7 @@ class GraphQLExecuteToolTest {
     void setUp() {
         client = mock(InternalGraphQLClient.class);
         gate = mock(GraphQLWhitelistGate.class);
-        when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
+        when(gate.evaluate(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
         tool = new GraphQLExecuteTool(client, gate);
     }
 
@@ -79,8 +80,9 @@ class GraphQLExecuteToolTest {
     @DisplayName("whitelist denial → forbidden error carrying the gate's reason, GraphQL not called")
     void whitelist_denial() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
-        when(gate.check("{ admin { jahia } }", "root", "10.0.0.7"))
-                .thenReturn(Optional.of("Operation not allowed: 'admin' is not in the whitelist"));
+        when(gate.evaluate("{ admin { jahia } }", "root", "10.0.0.7"))
+                .thenReturn(Optional.of(new Denial(Denial.Kind.NOT_WHITELISTED,
+                        "Operation not allowed: 'admin' is not in the whitelist")));
 
         ToolResult result = tool.execute(input("{ admin { jahia } }"), f.ctx);
 

@@ -7,7 +7,7 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
-      "description": "Skill name as returned by community.skill.list, may include a sub-folder path (e.g. default/hello-jahia)."
+      "description": "Skill key: the 'name' field (not the 'mcpName' display title) of an entry returned by community.skill.list; may include a sub-folder path (e.g. default/hello-jahia)."
     }
   },
   "required": ["name"]

@@ -8,6 +8,10 @@ import org.jahia.services.usermanager.JahiaUser;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
+import org.osgi.service.component.annotations.ReferenceCardinality;
+import org.osgi.service.component.annotations.ReferencePolicyOption;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.servlet.ReadListener;
 import javax.servlet.ServletException;
@@ -61,13 +65,38 @@ public class InternalGraphQLClient {
     /** Largest GraphQL response accepted (bytes); a bigger one is an error, not truncated data. */
     static final int MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(InternalGraphQLClient.class);
+
     private final HttpServlet graphQLServlet;
 
+    /**
+     * The servlet is the OSGi component {@code graphql.kickstart.servlet.OsgiGraphQLHttpServlet}
+     * (graphql-java-kickstart, shipped by graphql-dxm-provider). The reference is optional and
+     * greedy: when the component is missing or renamed by a graphql-dxm-provider upgrade, the tools
+     * stay registered and answer with an explicit error (and this WARN names the target) instead of
+     * silently disappearing from {@code tools/list}; the component is reactivated when the servlet
+     * appears.
+     */
     @Activate
     public InternalGraphQLClient(@Reference(service = HttpServlet.class,
-            target = "(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)")
+            target = "(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)",
+            cardinality = ReferenceCardinality.OPTIONAL, policyOption = ReferencePolicyOption.GREEDY)
             final HttpServlet graphQLServlet) {
         this.graphQLServlet = graphQLServlet;
+        if (graphQLServlet == null) {
+            LOGGER.warn("The GraphQL servlet (component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet) "
+                    + "is not available: community.graphql.* calls will fail until graphql-dxm-provider "
+                    + "provides it (was the component renamed by an upgrade?)");
+        }
+    }
+
+    /** The response exceeded {@link #MAX_RESPONSE_BYTES}: the document must select less. */
+    public static final class ResponseTooLargeException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        ResponseTooLargeException() {
+            super("The GraphQL response exceeds " + MAX_RESPONSE_BYTES + " bytes");
+        }
     }
 
     /** Outcome of an in-process GraphQL call: the HTTP status the servlet set, and its body. */
@@ -98,10 +127,14 @@ public class InternalGraphQLClient {
      *
      * @param variables optional variables map (may be {@code null})
      * @throws IllegalStateException if the bound JCR user is missing or is not {@code ctx.username()}
-     * @throws IOException if the response exceeds {@value #MAX_RESPONSE_BYTES} bytes
+     * @throws ResponseTooLargeException if the response exceeds {@value #MAX_RESPONSE_BYTES} bytes
+     * @throws IOException if the servlet is unavailable or the call fails
      */
     public Response execute(final ToolContext ctx, final String query, final Object variables)
             throws IOException, ServletException {
+        if (graphQLServlet == null) {
+            throw new IOException("The GraphQL servlet is not available");
+        }
         final JahiaUser caller = CommunityMcpAccess.boundCaller(ctx).orElseThrow(() ->
                 new IllegalStateException("The MCP caller identity is not bound to this thread"));
         final JCRSessionFactory sessionFactory = JCRSessionFactory.getInstance();
@@ -127,7 +160,7 @@ public class InternalGraphQLClient {
         // body() flushes the writer: the cap can be crossed by that very flush, so check afterwards.
         final String body = response.body();
         if (response.overflow) {
-            throw new IOException("The GraphQL response exceeds " + MAX_RESPONSE_BYTES + " bytes");
+            throw new ResponseTooLargeException();
         }
         return new Response(response.status, body);
     }
