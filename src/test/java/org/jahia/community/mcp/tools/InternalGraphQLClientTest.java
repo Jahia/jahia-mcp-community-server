@@ -245,6 +245,22 @@ class InternalGraphQLClientTest {
     }
 
     @Test
+    @DisplayName("PRB-4: a writer that crosses the cap only in the final flush still fails, never truncated success")
+    void unflushed_writer_overflow_rejected() {
+        HttpServlet servlet = new HttpServlet() {
+            @Override
+            protected void service(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+                // Reaches the cap through the output stream, then leaves 500 chars in the writer buffer.
+                resp.getOutputStream().write(new byte[InternalGraphQLClient.MAX_RESPONSE_BYTES - 100]);
+                resp.getWriter().write("b".repeat(500));
+            }
+        };
+
+        assertThatThrownBy(() -> run(servlet, "{ x }", null))
+                .isInstanceOf(IOException.class).hasMessageContaining("exceeds");
+    }
+
+    @Test
     @DisplayName("a response exactly at the cap is accepted; single-byte writes are bounded too")
     void response_at_cap_accepted() throws Exception {
         HttpServlet servlet = new HttpServlet() {
