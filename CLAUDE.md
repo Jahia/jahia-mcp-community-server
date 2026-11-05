@@ -9,8 +9,9 @@ endpoint and no MCP SDK: `mcp-server` handles transport, authentication, JSON-RP
 
 Every community tool is administrator-only. `community.graphql.execute` is additionally gated by a
 whitelist that is read-only by default (queries allowed except under `admin`, mutations and subscriptions
-refused). Skills
-(Markdown instruction documents) are stored in JCR.
+refused). Read-only is not non-sensitive: every other query returns what the administrator can read
+(JCR-stored settings such as the mail server configuration, user data) to the AI client, so the docs
+recommend an explicit allow list in production. Skills (Markdown instruction documents) are stored in JCR.
 
 ## Source layout
 
@@ -74,7 +75,10 @@ bundle. graphql-dxm-provider reflects over the annotated extension classes in th
 ### Threading — read before touching auth or GraphQL dispatch
 
 mcp-server runs tools on Reactor worker threads. Around each call it binds the caller on the JCR thread
-state (`JCRSessionFactory` current user, locale) and cleans up after the call.
+state (`JCRSessionFactory` current user, locale) and cleans up after the call. This binding is an
+mcp-server implementation detail, not part of its tool SPI (which tells tools to use `ToolContext`, not
+thread-locals). The module depends on it upstream: if mcp-server stops binding the caller this way, every
+community tool denies (fail closed). Check it on every mcp-server upgrade (`07-mcpCallerIdentity`).
 
 - **Never** call `JcrSessionFilter.endRequest()` or `JCRSessionFactory.setCurrentUser(...)` to change the
   caller inside a tool. The only exception is `InternalGraphQLClient.execute`, which sets the bound
@@ -85,19 +89,24 @@ state (`JCRSessionFactory` current user, locale) and cleans up after the call.
   `CommunityMcpAccess.boundCaller(ctx)`, which requires that user's username to equal `ctx.username()`.
   It then opens a JCR session for that `JahiaUser` (its realm included) and checks
   `session.getRootNode().hasPermission("admin")`. Any missing binding, mismatch or repository error denies.
-- API-scope checks of graphql-dxm-provider do not apply to the in-process GraphQL call (SEC-4, see
-  Accepted risks). JCR ACLs do.
+- The tools also require an explicit `Authorization` header on the MCP request (API token or HTTP Basic).
+  A call authenticated only by a session cookie is refused with `forbidden`, so a cross-site form post
+  cannot drive them. mcp-server's own tools are outside this module and keep whatever cookie handling
+  mcp-server has (an upstream cross-site request risk).
+- API-scope checks of graphql-dxm-provider do not apply to the in-process GraphQL call (see Accepted
+  risks). JCR ACLs do.
 
 ### GraphQL dispatch (InternalGraphQLClient)
 
 - `execute(ctx, query, variables)` requires `boundCaller(ctx)` (throws `IllegalStateException` otherwise),
   sets it as the current user, dispatches, and restores the previous user in `finally`.
 - The request is a synthetic JSON POST: an `HttpServletRequestWrapper` with a no-op proxy delegate. Only
-  `Content-Type` is exposed as a header. No `Authorization` header is forwarded (SEC-10).
+  `Content-Type` is exposed as a header. No `Authorization` header is forwarded.
 - The response is captured by a wrapper that records `setStatus`, `sendError` and `getStatus`. The output
   stream and the writer share one UTF-8 byte buffer.
 - The buffer is capped at `MAX_RESPONSE_BYTES` = 5 MB. Beyond it the bytes are dropped, the overflow flag
-  is set, and `execute` throws `IOException`. Callers return `internal`.
+  is set, and `execute` fails. The tool returns `validation` with a hint to narrow the query (select fewer
+  fields, paginate), never "retry": the same document would overflow again.
 - The servlet is injected with a target on `(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)`.
   If that name changes, execute and introspect silently disappear from `tools/list`.
 
@@ -135,8 +144,7 @@ state (`JCRSessionFactory` current user, locale) and cleans up after the call.
   activation only); it is idempotent.
   It never changes skill content: 1.x skills must be reviewed by an administrator (README upgrade notes).
 - Listing uses JCR-SQL2 `ISDESCENDANTNODE` under the skills root.
-- The `mcp:` CND prefix is generic. It is kept for compatibility (ARCH-18 deferred); a rename is a
-  breaking JCR change.
+- The `mcp:` CND prefix is generic. It is kept for compatibility; a rename is a breaking JCR change.
 
 ### Access control (GraphQLWhitelistGate)
 
@@ -172,19 +180,24 @@ Entry syntax (`WhitelistEntries`):
   under it. The gate refuses them in every state, including when a broader entry such as `mutation:admin`
   covers them, and `saveWhitelist` refuses entries for them. The second path is needed because the
   generic `configuration(pid, …)` mutation under `admin` could rewrite this module's own configuration.
+- Privilege-granting mutations are never allowed either: `grantRoles` and `revokeRoles` at any depth (for
+  example `mutation.jcr.mutateNode.grantRoles`) and `mutation.admin.personalApiTokens`. Their denial says
+  the operation `can never be run`, like the paths above. A broad entry such as `mutation:jcr` would
+  otherwise let a prompt-injected session escalate a user or mint a long-lived token.
 - Internal form puts the operation type first: `query.jcr.nodeByPath`, `mutation.jcr.deleteNode`.
   Denial messages and logs use the user-facing form (`display(...)`).
 
 Decision (`GraphQLWhitelistGate.check`):
 
-1. Parse with `graphql.parser.Parser`. Failure denies with `could not be parsed`, always.
-2. If the document has a named fragment spread, deny (SEC-2), in every state, read-only default included.
+1. Parse with `graphql.parser.Parser`. Failure denies with `could not be parsed`, always, with the line and
+   column of the syntax error (never the parser message, which can quote the document).
+2. If the document has a named fragment spread, deny, in every state, read-only default included.
    The gate does not expand spreads, so their content cannot be checked. Inline fragments are supported.
 3. Extract operation-qualified paths for every operation in the document, up to `maxDepth` segments.
    Inline fragments keep the parent's prefix and depth.
 4. Drop paths with an `__`-prefixed segment (introspection passes).
 5. For each remaining path:
-   - never-allowed: deny;
+   - never-allowed (including privilege-granting mutations): deny;
    - read-only default: `query.admin` and everything under it denies (the reason names `admin` and
      `query:admin`: the namespace exposes OSGi configuration values, secrets included); any other `query.*`
      passes; `mutation.*` denies with the read-only message; `subscription.*` denies; anything else denies;
@@ -192,13 +205,17 @@ Decision (`GraphQLWhitelistGate.check`):
      a more specific entry (`pathIsContainerOf`). Otherwise deny with `is not in the whitelist`.
 6. Each denial logs WARN with path, reason, user and IP. Named-spread and parse denials log without a path.
 
-Denial strings are client-safe and are returned as `forbidden` with `ToolError`. The hint is chosen by
-`GraphQLExecuteTool.hintForDenial`: keep the substrings `could not be parsed`, `named fragment`,
-`read-only`, `'mutation:` and `'mutation.` in sync with the gate, or the hints go wrong.
+Denial strings are client-safe and are returned with `ToolError`. The hint is chosen by
+`GraphQLExecuteTool.hintForDenial` from the denial text, in this order: `could not be parsed`,
+`named fragment`, `can never be run`, `subscriptions are not supported` or `'subscription:`,
+`mutations require an explicit` or `'mutation:`; anything else (the `admin` query denial included) gets the
+generic whitelist hint. The never-allowed check must come before `'mutation:`. Keep these substrings in sync
+with the denial texts of `GraphQLWhitelistGate`, or the hints go wrong.
 
 ### React admin UI
 
-- `Administration → MCP Server` (`register.jsx`, `requiredPermission: 'admin'`).
+- `Administration → MCP Server`, registered under `administration-server-configuration` (`register.jsx`,
+  `requiredPermission: 'admin'`).
 - The allow-list is a WAI-ARIA tree with roving tabindex. Operation roots are loaded in two documents, one
   for Query and one for Mutation, because of the bad-faith guard. Child fields load per type when a node is
   expanded, with a retry on error.
@@ -206,6 +223,10 @@ Denial strings are client-safe and are returned as `forbidden` with `ToolError`.
   (Clear, Clear queries/mutations, unchecking the last item, removing the last entry) is confirmed first
   (`edit()` in `CommunityMcpConfig.jsx`), because an empty list restores the read-only default. Clearing
   queries while mutations remain and allowing all mutations are confirmed too. Discard is never confirmed.
+  "Allow all queries" checks every query root except `admin` (it exposes configuration values, secrets
+  included), matching the read-only default.
+- `communityMcp { settings { clustered } }` tells the UI whether Jahia runs as a cluster; it then warns that
+  saving changes the allow list of the serving node only.
 - Operation paths are `query:<name>…` / `mutation:<name>…` (`operationTree.js`). Legacy entries are shown
   as `query:` entries and the form starts dirty, so it can be saved in the new form.
 - Locked: the never-allowed paths `mutation:communityMcp` and `mutation:admin.jahia.configuration` cannot
@@ -239,25 +260,31 @@ Denial strings are client-safe and are returned as `forbidden` with `ToolError`.
 
 ## Accepted risks
 
-| ID | Risk | Decision |
+| Topic | Risk | Decision |
 |---|---|---|
-| SEC-4 | Security-filter API scopes of graphql-dxm-provider are not applied to in-process calls | Accepted. Tools are admin-only; JCR ACLs and the admin gate are the boundary |
-| SEC-6 | A prefix entry grants everything below it (for example `mutation:jcr`) | Accepted and documented. Prefer exact paths |
-| SEC-6b | Self-protection is a deny list of two mutation paths; other state-changing mutations (module, bundle, provisioning, from any module) are guarded only by the admin's entries | Accepted and documented in the README security notes |
-| SEC-6c | A `root` caller with `mutation:jcr` whitelisted can rewrite skills through the generic JCR mutations (root bypasses the container ACL) | Accepted and documented. Policing it needs argument inspection |
-| RES-1 | The 5 MB response cap applies after the query ran and was serialized; no timeout or complexity limit | Accepted (admin-only) and documented |
-| ARCH-7 | Built against mcp-server 0.5.0-SNAPSHOT; the SPI version range is tight | Release only against a released mcp-server 0.5.x |
-| ARCH-18 | Generic `mcp:` CND prefix | Kept; renaming it is a breaking JCR change |
+| API scopes | Security-filter API scopes of graphql-dxm-provider are not applied to in-process calls | Accepted. Tools are admin-only; JCR ACLs and the admin gate are the boundary |
+| Prefix entries | A prefix entry grants everything below it (for example `mutation:jcr`) | Accepted and documented. Prefer exact paths |
+| Deny list | Self-protection is a deny list (two mutation paths and the privilege-granting mutations); other state-changing mutations (module, bundle, provisioning, from any module) are guarded only by the admin's entries | Accepted and documented in the README security notes |
+| Skills under `mutation:jcr` | A `root` caller with `mutation:jcr` whitelisted can rewrite skills through the generic JCR mutations (root bypasses the container ACL) | Accepted and documented. Policing it needs argument inspection |
+| Response cost | The 5 MB response cap applies after the query ran and was serialized; no timeout or complexity limit | Accepted (admin-only) and documented |
+| Read-only exposure | The read-only default lets every query outside `admin` run, JCR-stored settings and user data included, and sends the result to the AI client | Kept as the default; README, `.cfg` and CHANGELOG recommend an explicit allow list in production |
+| Snapshot build | Built against mcp-server 0.5.0-SNAPSHOT; the SPI version range is tight | Release only against a released mcp-server 0.5.x |
+| Caller binding (upstream) | The admin gate and the GraphQL call rely on mcp-server binding the caller on the worker thread, which the SPI does not guarantee | Documented upstream dependency; fails closed if it changes |
+| SPI versioning (upstream) | mcp-server exports the SPI package at its bundle version, so `[0.5,0.6)` leaves the whole bundle unresolved on mcp-server 0.6 even with an unchanged SPI | Documented upstream dependency; release a new version per mcp-server minor |
+| Upstream cross-site requests | mcp-server's own tools may accept cookie-authenticated calls | Outside this module; the community tools require an `Authorization` header |
+| `mcp:` CND prefix | Generic prefix | Kept; renaming it is a breaking JCR change |
 
 ## Build
 
 ```bash
-mvn clean install          # Java unit tests (JUnit 5) + Jest + React build + bundle
+mvn clean install          # Java unit tests (JUnit 5) + React (webpack) build + bundle
+yarn test                  # Jest: NOT run by Maven (the frontend plugin only runs yarn build:production)
 ```
 
 Requires `org.jahia.modules:mcp-server:0.5.0-SNAPSHOT` in a reachable Maven repository (Jahia public or
 snapshot Nexus, or `mvn install` of mcp-server locally). The `jahia-depends` value is
-`default,graphql-dxm-provider,mcp-server=[0.5,0.6)`.
+`default,graphql-dxm-provider,mcp-server=[0.5,0.6)`. graphql-dxm-provider is compiled against 3.4.0 and
+imported as `[3.4,4)`.
 
 ## Tests
 
@@ -273,6 +300,9 @@ snapshot Nexus, or `mvn install` of mcp-server locally). The `jahia-depends` val
   (or wait with `waitForWhitelist`) before asserting, and check "unchanged" with
   `expectWhitelistUnchanged`, which also reads the value stored in ConfigurationAdmin (written before the
   call returns), so an accepted-but-not-yet-applied write cannot pass for a refusal.
+  `support/e2e.js` resets the whitelist to empty before every spec. The suite needs its own Jahia: the
+  whitelist is server-wide and token, skill and probe names are fixed. Test names and comments describe
+  behaviour, never tracker ids.
 
 ```bash
 cd tests && cp .env.example .env && yarn install && ./ci.build.sh && ./ci.startup.sh
