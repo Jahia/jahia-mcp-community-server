@@ -1,17 +1,13 @@
-import {DocumentNode} from 'graphql';
 import {createUser, deleteUser} from '@jahia/cypress';
 import {
-    MCP_URL, TOOL, callTool, callToolAs, createApiToken, deleteApiToken, deleteSkill, getSkills, graphqlAs, listTools,
-    saveSkill, setWhitelist, toolPayload
+    MCP_URL, TOOL, callTool, callToolAs, createApiToken, deleteApiToken, deleteSkill, expectWhitelistUnchanged, getSkills, graphqlAs,
+    listTools, saveSkill, setWhitelist, toolPayload
 } from '../support/mcp';
 
 // The community module contributes its tools to mcp-server's /modules/mcp endpoint. mcp-server
 // admits any authenticated non-guest user, so the community tools enforce their own gate:
 // the caller must hold the 'admin' permission on the repository root.
 describe('MCP Community tools — catalog and administrator gate', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const getSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSettings.graphql');
-
     const TOKEN_NAME = 'mcp-cypress-catalog-token';
     const EDITOR = 'mcp-community-editor';
     const EDITOR_PASSWORD = 'Password123!';
@@ -105,12 +101,11 @@ describe('MCP Community tools — catalog and administrator gate', () => {
     });
 
     it('refuses saveSettings to a non-administrator and leaves the whitelist unchanged', () => {
+        setWhitelist(['query:currentUser']);
         graphqlAs(EDITOR, EDITOR_PASSWORD, 'mutation { communityMcp { saveSettings(whitelist: ["admin"]) } }').then(response => {
             refused(response.body);
         });
-        cy.apollo({query: getSettings}).then(result => {
-            expect(result.data.communityMcp.settings.whitelist).to.deep.eq(['query:currentUser']);
-        });
+        expectWhitelistUnchanged(['query:currentUser']);
     });
 
     it('refuses saveSkill to a non-administrator and stores nothing', () => {

@@ -1,9 +1,24 @@
 import {DocumentNode} from 'graphql';
-import {TOOL, callTool, createApiToken, deleteApiToken, setWhitelist} from '../support/mcp';
+import {TOOL, callTool, createApiToken, deleteApiToken, expectWhitelistUnchanged, setWhitelist, toolPayload} from '../support/mcp';
 
 describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const getSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSettings.graphql');
+    const getContentsChildren: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getContentsChildren.graphql');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const deleteNodeByPath: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteNodeByPath.graphql');
+
+    const PROBE = 'mcp-cypress-spread-probe';
+    const PROBE_PATH = `/sites/systemsite/contents/${PROBE}`;
+    const ADD_PROBE = `jcr { addNode(parentPathOrId: "/sites/systemsite/contents", name: "${PROBE}", primaryNodeType: "jnt:contentFolder") { uuid } }`;
+    const NAMED_SPREAD_DENIAL = 'Operation not allowed: named fragment spreads are not permitted ' +
+        '(use inline fragments \'... on Type { ... }\' instead)';
+    const CONFIGURATION_DENIAL = 'Operation not allowed: \'mutation:admin.jahia.configuration\' ' +
+        'can never be run through community.graphql.execute';
+
+    /** The probe node names found under /sites/systemsite/contents, read as root outside the gate. */
+    const probeNodes = () => cy.apollo({query: getContentsChildren, variables: {names: [PROBE]}})
+        .then(result => result.data.jcr.nodeByPath.children.nodes.map((n: {name: string}) => n.name));
+    const removeProbe = () => cy.apollo({mutation: deleteNodeByPath, variables: {path: PROBE_PATH}, errorPolicy: 'all'});
 
     const TOKEN_NAME = 'mcp-cypress-enforcement-token';
     let apiToken: string;
@@ -16,11 +31,13 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     });
 
     after(() => {
+        removeProbe();
         setWhitelist([]);
         deleteApiToken(TOKEN_NAME);
     });
 
     beforeEach(() => {
+        removeProbe();
         setWhitelist([]);
     });
 
@@ -53,9 +70,55 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
             expect(response.body.result.isError).to.eq(true);
             expect(response.body.result.content[0].text).to.include('can never be run through community.graphql.execute');
         });
-        cy.apollo({query: getSettings}).then(result => {
-            expect(result.data.communityMcp.settings.whitelist).to.deep.eq(['currentUser']);
+        expectWhitelistUnchanged(['currentUser']);
+    });
+
+    // ── Named fragment spreads: refused in EVERY state, the read-only default included ─────────
+    // The gate does not expand a spread, so `mutation { ...F }` has no path it could check. The
+    // control arm shows that the probe mutation really runs, and is really seen by the read-back,
+    // when it is allowed and written inline: only then does "no probe node" after the spread mean
+    // that the gate stopped it.
+
+    it('named spread control — the inline probe mutation runs when it is whitelisted', () => {
+        setWhitelist(['mutation:jcr.addNode']);
+        executeGraphQL(`mutation { ${ADD_PROBE} }`).its('body.result.isError').should('eq', false);
+        probeNodes().should('deep.equal', [PROBE]);
+    });
+
+    [[], ['mutation:jcr.addNode']].forEach(entries => {
+        it(`refuses a mutation hidden in a named fragment spread, and does not run it (whitelist ${JSON.stringify(entries)})`, () => {
+            setWhitelist(entries);
+            executeGraphQL(`mutation { ...F } fragment F on Mutation { ${ADD_PROBE} }`).then(response => {
+                expect(response.body.result.isError).to.eq(true);
+                expect(toolPayload(response).error.code).to.eq('forbidden');
+                expect(toolPayload(response).error.message).to.eq(NAMED_SPREAD_DENIAL);
+            });
+            probeNodes().should('deep.equal', []);
         });
+    });
+
+    it('refuses a query that uses a named fragment spread under the read-only default', () => {
+        // The same selection, inline, is allowed: only the spread is refused.
+        executeGraphQL('{ ... on Query { currentUser { name } } }').its('body.result.isError').should('eq', false);
+        executeGraphQL('{ ...Q } fragment Q on Query { currentUser { name } }').then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(toolPayload(response).error.message).to.eq(NAMED_SPREAD_DENIAL);
+        });
+    });
+
+    // ── admin.jahia.configuration: never runnable, even under a broader mutation:admin entry ──
+    // It could rewrite this module's own configuration (PID org.jahia.community.mcp). The stored
+    // configuration is read back afterwards: the mutation must not have run.
+
+    it('never runs mutation:admin.jahia.configuration, even with mutation:admin whitelisted', () => {
+        setWhitelist(['mutation:admin']);
+        executeGraphQL('mutation { admin { jahia { configuration(pid: "org.jahia.community.mcp") ' +
+            '{ value(name: "whitelist", value: "mutation:communityMcp") } } } }').then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(toolPayload(response).error.code).to.eq('forbidden');
+            expect(toolPayload(response).error.message).to.eq(CONFIGURATION_DENIAL);
+        });
+        expectWhitelistUnchanged(['mutation:admin']);
     });
 
     // SEC-364 — a multi-operation document is refused by the GATE, on op B's own merits: the gate

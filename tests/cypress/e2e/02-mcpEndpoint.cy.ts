@@ -1,9 +1,6 @@
-import {DocumentNode} from 'graphql';
-import {MCP_URL, TOOL, callTool, createApiToken, deleteApiToken, setWhitelist, toolText} from '../support/mcp';
+import {MCP_URL, TOOL, callTool, createApiToken, deleteApiToken, expectWhitelistUnchanged, setWhitelist, toolText} from '../support/mcp';
 
 describe('MCP Server — Endpoint Access Control', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const getSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSettings.graphql');
     const TOKEN_NAME = 'mcp-cypress-test-token';
     let apiToken: string;
 
@@ -158,9 +155,7 @@ describe('MCP Server — Endpoint Access Control', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('mutation { communityMcp { saveSettings(whitelist: ["admin"]) } }')
             .its('body.result.isError').should('eq', true);
-        cy.apollo({query: getSettings}).then(result => {
-            expect(result.data.communityMcp.settings.whitelist).to.deep.eq(['currentUser']);
-        });
+        expectWhitelistUnchanged(['currentUser']);
     });
 
     // --- Authentication ---

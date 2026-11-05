@@ -507,11 +507,11 @@ yarn install
 
 | Spec | What is tested |
 |---|---|
-| `01-mcpSettings.cy.ts` | Settings GraphQL API: read, write, round-trip, prefixed entries, rejection of malformed entries |
+| `01-mcpSettings.cy.ts` | Settings GraphQL API: read, write, round-trip, prefixed entries, rejection of malformed and never-allowed entries (`mutation:communityMcp`, `mutation:admin.jahia.configuration`) |
 | `02-mcpEndpoint.cy.ts` | `community.graphql.execute`: whitelist enforcement, path coverage, queries vs mutations, introspection pass-through, 401 when unauthenticated |
 | `03-mcpSkills.cy.ts` | Skills GraphQL API, `community.skill.list` → `community.skill.get` round-trip, default skill seeding |
 | `04-mcpToolCatalogAndGate.cy.ts` | Tools listed in the `mcp-server` catalog with safety annotations; non-administrators refused (HTTP Basic, user created with `createUser`) |
 | `05-mcpToolGating.cy.ts` | Gating per tool: a narrow whitelist does not affect introspection or skills; bounded introspection (default, `typeNames`, cap) |
-| `06-mcpWhitelistEnforcement.cy.ts` | Fail-closed guards: named fragments, multi-operation documents, unparseable documents |
+| `06-mcpWhitelistEnforcement.cy.ts` | Fail-closed guards: named fragment spreads (refused under the read-only default too, and the hidden mutation does not run), `mutation:admin.jahia.configuration` refused even with `mutation:admin` whitelisted, multi-operation documents, unparseable documents |
 | `07-mcpCallerIdentity.cy.ts` | GraphQL runs as the calling user (`currentUser` returns the caller) |
-| `08-mcpAdminUi.cy.ts` | Administration UI smoke test only: loads at the admin route, shows the Queries and Mutations groups, persists a checked entry when saved. Keyboard, confirmations, locked entries and error display are covered by Jest only |
+| `08-mcpAdminUi.cy.ts` | Administration UI smoke test only: loads at the admin route, shows the Queries and Mutations groups, persists a checked entry when saved, shows `mutation:admin.jahia.configuration` locked. Keyboard, confirmations, problem entries and error display are covered by Jest only |

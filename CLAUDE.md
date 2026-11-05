@@ -258,6 +258,10 @@ snapshot Nexus, or `mvn install` of mcp-server locally). The `jahia-depends` val
 - **Jest** (`src/javascript/CommunityMcpConfig/__tests__`): tree and allow-list helpers and the component.
 - **Cypress** (`tests/`): calls `/modules/mcp` through `tests/cypress/support/mcp.ts`. Provisioning installs
   `mcp-server`. Non-admin coverage uses HTTP Basic with a user created with `createUser`.
+  The configuration is applied asynchronously (DS `@Modified`): write the whitelist with `setWhitelist`
+  (or wait with `waitForWhitelist`) before asserting, and check "unchanged" with
+  `expectWhitelistUnchanged`, which also reads the value stored in ConfigurationAdmin (written before the
+  call returns), so an accepted-but-not-yet-applied write cannot pass for a refusal.
 
 ```bash
 cd tests && cp .env.example .env && yarn install && ./ci.build.sh && ./ci.startup.sh

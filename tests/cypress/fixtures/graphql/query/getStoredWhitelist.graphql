@@ -1,0 +1,9 @@
+query McpGetStoredWhitelist {
+    admin {
+        jahia {
+            configuration(pid: "org.jahia.community.mcp") {
+                value(name: "whitelist")
+            }
+        }
+    }
+}

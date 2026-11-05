@@ -77,20 +77,53 @@ const saveSkillDoc = require('graphql-tag/loader!../fixtures/graphql/mutation/sa
 const deleteSkillDoc = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteSkill.graphql');
 const getSettingsDoc = require('graphql-tag/loader!../fixtures/graphql/query/getSettings.graphql');
 const getSkillsDoc = require('graphql-tag/loader!../fixtures/graphql/query/getSkills.graphql');
+const getStoredWhitelistDoc = require('graphql-tag/loader!../fixtures/graphql/query/getStoredWhitelist.graphql');
 /* eslint-enable @typescript-eslint/no-var-requires */
+
+const sameEntries = (current: string[], expected: string[]) =>
+    current.length === expected.length && current.every((entry, i) => entry === expected[i]);
+
+/** The whitelist the module serves (its applied snapshot), as the logged-in administrator. */
+export const getWhitelist = (): Cypress.Chainable<string[]> =>
+    cy.apollo({query: getSettingsDoc}).then(result => result.data.communityMcp.settings.whitelist as string[]);
+
+/**
+ * The `whitelist` value stored in ConfigurationAdmin, read through Jahia's own configuration query.
+ * ConfigurationAdmin stores a write before the writing call returns, whereas the module applies it
+ * later (DS @Modified is asynchronous): this read is the one that proves whether a write happened.
+ */
+export const getStoredWhitelist = (): Cypress.Chainable<string> =>
+    cy.apollo({query: getStoredWhitelistDoc})
+        .then(result => (result.data.admin.jahia.configuration?.value ?? '') as string);
+
+/** Wait until the module serves `whitelist` (the configuration is applied asynchronously). */
+export const waitForWhitelist = (whitelist: string[]) => {
+    cy.waitUntil(() => getWhitelist().then(current => sameEntries(current, whitelist)),
+        {errorMsg: `The whitelist ${JSON.stringify(whitelist)} was not applied`, timeout: 10000, interval: 200});
+};
 
 /**
  * Set the whitelist as the logged-in administrator (cy.login() must have run), then wait until the
  * server reports it back: the configuration is applied asynchronously, and a request fired before
- * that would still be gated by the previous whitelist.
+ * that would still be gated by the previous whitelist. The stored value is checked too, which keeps
+ * {@link expectWhitelistUnchanged} honest: its stored read is shown here to see every write.
  */
 export const setWhitelist = (whitelist: string[]) => {
     cy.apollo({mutation: saveSettingsDoc, variables: {whitelist}})
         .its('data.communityMcp.saveSettings').should('eq', true);
-    cy.waitUntil(() => cy.apollo({query: getSettingsDoc}).then(result => {
-        const current: string[] = result.data.communityMcp.settings.whitelist;
-        return current.length === whitelist.length && current.every((entry, i) => entry === whitelist[i]);
-    }), {errorMsg: `The whitelist ${JSON.stringify(whitelist)} was not applied`, timeout: 10000, interval: 200});
+    waitForWhitelist(whitelist);
+    getStoredWhitelist().should('eq', whitelist.join(','));
+};
+
+/**
+ * Assert that a call which must not change the whitelist did not: the stored configuration still
+ * holds `expected` (a write is stored before the call returns, so it cannot hide behind the
+ * asynchronous apply), and the module still serves it. `expected` must have been set with
+ * {@link setWhitelist} first, so the served value is not a stale one.
+ */
+export const expectWhitelistUnchanged = (expected: string[]) => {
+    getStoredWhitelist().should('eq', expected.join(','));
+    getWhitelist().should('deep.equal', expected);
 };
 
 /** Create an API token under `name` (replacing a stale one of the same name) and return its value. */
