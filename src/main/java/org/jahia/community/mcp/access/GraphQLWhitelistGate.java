@@ -11,12 +11,13 @@ import graphql.language.SelectionSet;
 import graphql.parser.Parser;
 import org.jahia.community.mcp.config.McpConfigService;
 import org.jahia.community.mcp.config.WhitelistEntries;
+import org.jahia.community.mcp.config.WhitelistSnapshot;
+import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
@@ -29,18 +30,27 @@ import java.util.Set;
  * every query under {@code admin}, {@code mutation:jcr.deleteNode} covers only that mutation. A
  * legacy entry without a prefix is query-only (see {@link WhitelistEntries}). Introspection fields
  * ({@code __schema}, {@code __type}, {@code __typename}) always pass.</p>
+ *
+ * <p>An EMPTY whitelist is the read-only default: every query is allowed, no mutation and no
+ * subscription is. The {@code communityMcp} mutations are denied whatever the whitelist says: the
+ * data plane must not rewrite its own guard. (Whitelisting broad mutation roots such as
+ * {@code mutation:jcr} or {@code mutation:admin} is allowed but grants everything below them to
+ * administrators — prefer exact paths.)</p>
  */
 @Component(service = GraphQLWhitelistGate.class)
 public class GraphQLWhitelistGate {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphQLWhitelistGate.class);
     private static final String ANONYMOUS_USER = "anonymous";
+    private static final String QUERY_PREFIX = "query.";
+    private static final String MUTATION_PREFIX = "mutation.";
+    private static final String SUBSCRIPTION_PREFIX = "subscription.";
+    private static final String DENIED = "Operation not allowed: ";
 
-    // volatile: written on the OSGi bind thread, read on MCP worker threads
-    private volatile McpConfigService mcpConfigService;
+    private final McpConfigService mcpConfigService;
 
-    @Reference
-    public void setMcpConfigService(McpConfigService mcpConfigService) {
+    @Activate
+    public GraphQLWhitelistGate(@Reference final McpConfigService mcpConfigService) {
         this.mcpConfigService = mcpConfigService;
     }
 
@@ -52,19 +62,7 @@ public class GraphQLWhitelistGate {
      */
     public Optional<String> check(final String query, final String username, final String clientIp) {
         final String who = username != null ? username : ANONYMOUS_USER;
-        final Set<String> whitelist = mcpConfigService.getWhitelist();
-
-        if (whitelist.isEmpty()) {
-            // SECURITY POSTURE (intentional default — do NOT change the meaning here without
-            // maintainer sign-off): an EMPTY whitelist means ALLOW-ALL so the module is usable out
-            // of the box. Backstops: the community tools are admin-only (CommunityMcpAccess), and
-            // every document still runs as the calling user, bounded by JCR ACLs. Flipping
-            // empty→deny-all is a breaking change that needs a major version.
-            LOGGER.warn("MCP GraphQL gate is running in ALLOW-ALL mode (whitelist is empty). "
-                    + "All GraphQL operations are permitted for administrators. "
-                    + "For least-privilege configure a whitelist in Administration -> MCP Server.");
-            return Optional.empty();
-        }
+        final WhitelistSnapshot snapshot = mcpConfigService.snapshot();
 
         // SEC-364: parse ONCE with the real GraphQL grammar; a document the gate cannot parse is
         // DENIED (the old hand-written scanner let `query,{...}` through).
@@ -73,38 +71,54 @@ public class GraphQLWhitelistGate {
             document = Parser.parse(query);
         } catch (RuntimeException ex) {
             // The parser message can quote document content — keep it in the audit log only.
-            LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed while a whitelist "
-                    + "is active, user='{}', ip='{}', reason='{}'", who, clientIp, ex.getMessage());
-            return Optional.of("Operation not allowed: the GraphQL document could not be parsed");
+            LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed, "
+                    + "user='{}', ip='{}', reason='{}'", who, clientIp, ex.getMessage());
+            return Optional.of(DENIED + "the GraphQL document could not be parsed");
         }
 
-        // SEC-2: named fragment spreads cannot be resolved against the whitelist without the
-        // fragment definitions — fail closed rather than allowing a bypass.
-        if (containsNamedFragmentSpread(document)) {
+        // SEC-2: named fragment spreads cannot be resolved against whitelist entries without the
+        // fragment definitions — fail closed. In read-only mode only the operation type matters
+        // (a fragment cannot turn a query into a mutation), so spreads are harmless there.
+        if (!snapshot.isReadOnlyDefault() && containsNamedFragmentSpread(document)) {
             LOGGER.warn("MCP operation blocked: named fragment spreads not permitted when "
                     + "whitelist is active, user='{}', ip='{}'", who, clientIp);
-            return Optional.of("Operation not allowed: "
-                    + "named fragment spreads are not permitted when a whitelist is active");
-        }
-
-        // Operation-qualified entries ("query.jcr", "mutation.jcr.deleteNode"). Malformed entries
-        // normalize to nothing; the whitelist is still non-empty, so they deny rather than allow-all.
-        final Set<String> entries = WhitelistEntries.normalize(whitelist);
-        int maxDepth = 2;
-        for (final String e : entries) {
-            maxDepth = Math.max(maxDepth, segmentCount(e));
+            return Optional.of(DENIED + "named fragment spreads are not permitted when a whitelist is active");
         }
 
         // An empty set after a SUCCESSFUL parse means the document selects only introspection.
-        for (final String path : withoutIntrospectionPaths(extractOperationPaths(document, maxDepth))) {
-            if (!isPathAllowed(path, entries)) {
-                final String shown = WhitelistEntries.display(path);
-                LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
-                        shown, who, clientIp);
-                return Optional.of("Operation not allowed: '" + shown + "' is not in the whitelist");
+        for (final String path : withoutIntrospectionPaths(extractOperationPaths(document, snapshot.maxDepth()))) {
+            final Optional<String> denial = denialFor(path, snapshot);
+            if (denial.isPresent()) {
+                LOGGER.warn("MCP operation blocked: path='{}', reason='{}', user='{}', ip='{}'",
+                        WhitelistEntries.display(path), denial.get(), who, clientIp);
+                return denial.map(reason -> DENIED + reason);
             }
         }
         return Optional.empty();
+    }
+
+    /** Denial reason (without the common prefix) for one operation-qualified path, if any. */
+    private static Optional<String> denialFor(final String path, final WhitelistSnapshot snapshot) {
+        final String shown = WhitelistEntries.display(path);
+        if (WhitelistEntries.isNeverAllowed(path)) {
+            return Optional.of("'" + shown + "' can never be run through community.graphql.execute");
+        }
+        if (snapshot.isReadOnlyDefault()) {
+            if (path.startsWith(QUERY_PREFIX)) {
+                return Optional.empty();
+            }
+            if (path.startsWith(MUTATION_PREFIX)) {
+                return Optional.of("mutations require an explicit mutation:<path> whitelist entry "
+                        + "(the whitelist is empty, which allows queries only); '" + shown + "' is not allowed");
+            }
+            if (path.startsWith(SUBSCRIPTION_PREFIX)) {
+                return Optional.of("subscriptions are not supported");
+            }
+            return Optional.of("'" + shown + "' is not allowed");
+        }
+        return isPathAllowed(path, snapshot.normalized())
+                ? Optional.empty()
+                : Optional.of("'" + shown + "' is not in the whitelist");
     }
 
     /**
@@ -122,11 +136,6 @@ public class GraphQLWhitelistGate {
             }
         }
         return paths;
-    }
-
-    /** Extracts field paths from the query and removes introspection segments. */
-    static Set<String> collectNonIntrospectionPaths(final String query, final int maxDepth) {
-        return withoutIntrospectionPaths(extractFieldPaths(query, maxDepth));
     }
 
     private static Set<String> withoutIntrospectionPaths(final Set<String> extracted) {
@@ -161,30 +170,10 @@ public class GraphQLWhitelistGate {
         return entry.startsWith(path + ".");
     }
 
-    private static int segmentCount(final String entry) {
-        int n = 1;
-        for (int k = 0; k < entry.length(); k++) {
-            if (entry.charAt(k) == '.') {
-                n++;
-            }
-        }
-        return n;
-    }
-
     /**
-     * Returns {@code true} if the query contains a named fragment spread ({@code ...Name}).
+     * Returns {@code true} if the document contains a named fragment spread ({@code ...Name}).
      * Inline fragments ({@code ... on Type { ... }}) are allowed.
-     *
-     * @throws graphql.parser.InvalidSyntaxException if the document cannot be parsed
      */
-    static boolean containsNamedFragmentSpread(final String query) {
-        if (query == null || query.isBlank()) {
-            return false;
-        }
-        return containsNamedFragmentSpread(Parser.parse(query));
-    }
-
-    /** AST form of {@link #containsNamedFragmentSpread(String)}. */
     static boolean containsNamedFragmentSpread(final Document doc) {
         for (final Definition<?> def : doc.getDefinitions()) {
             if (def instanceof OperationDefinition
@@ -212,30 +201,6 @@ public class GraphQLWhitelistGate {
             }
         }
         return false;
-    }
-
-    /**
-     * Extracts all field paths up to {@code maxDepth}. Aliases resolve to the real field name,
-     * inline fragments contribute to the enclosing prefix, and every operation is walked.
-     *
-     * @throws graphql.parser.InvalidSyntaxException if the document cannot be parsed
-     */
-    static Set<String> extractFieldPaths(final String query, final int maxDepth) {
-        if (query == null || query.isBlank()) {
-            return Collections.emptySet();
-        }
-        return extractFieldPaths(Parser.parse(query), maxDepth);
-    }
-
-    /** AST form of {@link #extractFieldPaths(String, int)}. */
-    static Set<String> extractFieldPaths(final Document doc, final int maxDepth) {
-        final Set<String> paths = new LinkedHashSet<>();
-        for (final Definition<?> def : doc.getDefinitions()) {
-            if (def instanceof OperationDefinition) {
-                collectPaths(((OperationDefinition) def).getSelectionSet(), "", 0, maxDepth, paths);
-            }
-        }
-        return paths;
     }
 
     private static void collectPaths(final SelectionSet selectionSet, final String prefix,

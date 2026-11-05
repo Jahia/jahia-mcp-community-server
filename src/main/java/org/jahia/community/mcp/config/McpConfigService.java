@@ -1,51 +1,110 @@
 package org.jahia.community.mcp.config;
 
+import org.osgi.service.cm.Configuration;
+import org.osgi.service.cm.ConfigurationAdmin;
+import org.osgi.service.component.annotations.Activate;
+import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.ConfigurationPolicy;
+import org.osgi.service.component.annotations.Modified;
+import org.osgi.service.component.annotations.Reference;
+import org.osgi.service.metatype.annotations.AttributeDefinition;
+import org.osgi.service.metatype.annotations.Designate;
+import org.osgi.service.metatype.annotations.ObjectClassDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.osgi.framework.Constants;
-import org.osgi.service.cm.ConfigurationException;
-import org.osgi.service.cm.ManagedService;
-import org.osgi.service.component.annotations.Component;
-
+import java.io.IOException;
 import java.util.Collections;
 import java.util.Dictionary;
+import java.util.Hashtable;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
-@Component(immediate = true, service = {McpConfigService.class, ManagedService.class},
-        property = Constants.SERVICE_PID + "=org.jahia.community.mcp")
-public class McpConfigService implements ManagedService {
+/**
+ * Holder of the whitelist configuration ({@value #PID}).
+ *
+ * <p>Fail-closed lifecycle: the component requires its configuration
+ * ({@link ConfigurationPolicy#REQUIRE}); the shipped default {@code .cfg} provides it. Until the
+ * configuration is delivered (startup) and after it is deleted, this service is not active, so the
+ * gate and the tools that reference it are not active either — nothing runs on a guessed default.</p>
+ *
+ * <p>An empty whitelist is the read-only default (queries only), see {@link WhitelistSnapshot}.</p>
+ */
+@Component(immediate = true, service = McpConfigService.class,
+        configurationPid = McpConfigService.PID, configurationPolicy = ConfigurationPolicy.REQUIRE)
+@Designate(ocd = McpConfigService.Config.class)
+public class McpConfigService {
+
+    /** Configuration PID of this module. */
+    public static final String PID = "org.jahia.community.mcp";
+    /** Configuration key holding the whitelist. */
+    public static final String KEY_WHITELIST = "whitelist";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpConfigService.class);
+    private static final int MAX_SHOWN_ENTRY_LENGTH = 100;
 
-    @SuppressWarnings("java:S3077")
-    private volatile Set<String> whitelist = Collections.emptySet();
+    /** Typed view of the configuration. A CSV string ({@code a,b}) and a String[] are both accepted. */
+    @ObjectClassDefinition(name = "Jahia MCP Community Server",
+            description = "Operation whitelist of the community.graphql.execute tool")
+    public @interface Config {
+        @AttributeDefinition(name = "Whitelist",
+                description = "query:<path> / mutation:<path> entries. Empty: every query is allowed, "
+                        + "no mutation and no subscription.")
+        String[] whitelist() default {};
+    }
 
-    @Override
-    public void updated(Dictionary<String, ?> dictionary) throws ConfigurationException {
-        if (dictionary == null) {
-            whitelist = Collections.emptySet();
+    private final ConfigurationAdmin configurationAdmin;
+    // One immutable object, replaced as a whole: readers always see a consistent snapshot.
+    private volatile WhitelistSnapshot snapshot;
+
+    @Activate
+    public McpConfigService(@Reference final ConfigurationAdmin configurationAdmin, final Config config) {
+        this.configurationAdmin = configurationAdmin;
+        apply(config);
+    }
+
+    @Modified
+    void modified(final Config config) {
+        apply(config);
+    }
+
+    private void apply(final Config config) {
+        final String joined = config == null || config.whitelist() == null
+                ? "" : String.join(",", config.whitelist());
+        final WhitelistSnapshot next = WhitelistSnapshot.of(parseList(joined));
+        final WhitelistSnapshot previous = snapshot;
+        snapshot = next;
+        logChange(previous, next);
+    }
+
+    private static void logChange(final WhitelistSnapshot previous, final WhitelistSnapshot next) {
+        if (previous != null && previous.equals(next)) {
             return;
         }
-        whitelist = parseList(dictionary.get("whitelist"));
-        final Set<String> legacy = WhitelistEntries.legacyEntries(whitelist);
+        if (next.isReadOnlyDefault()) {
+            LOGGER.info("MCP GraphQL gate is in READ-ONLY mode (whitelist is empty): every query is allowed, "
+                    + "mutations and subscriptions are denied. Add 'mutation:<path>' entries in "
+                    + "Administration -> MCP Server to allow specific mutations.");
+        }
+        final Set<String> legacy = WhitelistEntries.legacyEntries(next.raw());
         if (!legacy.isEmpty()) {
             LOGGER.warn("MCP whitelist entries without an operation prefix are treated as query-only: {}. "
                     + "Rewrite them as 'query:<path>', and add 'mutation:<path>' entries for mutations.", legacy);
         }
-        for (final String entry : whitelist) {
+        for (final String entry : next.raw()) {
             if (!WhitelistEntries.isValid(entry)) {
                 LOGGER.warn("Ignoring malformed MCP whitelist entry '{}' (expected query:<path> or mutation:<path>)", entry);
+            } else if (WhitelistEntries.isNeverAllowedEntry(entry)) {
+                LOGGER.warn("Ignoring MCP whitelist entry '{}': the communityMcp mutations can never be run "
+                        + "through community.graphql.execute", entry);
             }
         }
     }
 
-    private static Set<String> parseList(Object value) {
-        if (value == null) {
-            return Collections.emptySet();
-        }
-        final String str = value.toString().trim();
+    /** Splits a comma-separated value; a non-blank value without any entry is kept as one malformed entry. */
+    private static Set<String> parseList(final String value) {
+        final String str = value.trim();
         if (str.isEmpty()) {
             return Collections.emptySet();
         }
@@ -55,12 +114,56 @@ public class McpConfigService implements ManagedService {
                 entries.add(token.trim());
             }
         }
-        // A non-blank value with no entry in it (e.g. "," hand-written in the .cfg) is NOT an empty
-        // whitelist: keeping it as one (malformed) entry makes the gate deny instead of allow-all.
-        return Collections.unmodifiableSet(entries.isEmpty() ? new LinkedHashSet<>(Set.of(str)) : entries);
+        // A value made only of separators (e.g. "," in the .cfg) is NOT an empty whitelist: keeping
+        // it as one malformed entry makes the gate deny everything instead of falling back to read-only.
+        return entries.isEmpty() ? Set.of(str) : entries;
     }
 
+    /** The current immutable configuration snapshot. */
+    public WhitelistSnapshot snapshot() {
+        return snapshot;
+    }
+
+    /** The whitelist entries as configured. */
     public Set<String> getWhitelist() {
-        return whitelist;
+        return snapshot.raw();
+    }
+
+    /**
+     * Validates and persists {@code entries} as the new whitelist (an empty list selects the
+     * read-only default).
+     *
+     * @throws IllegalArgumentException if an entry is malformed or can never take effect; the
+     *         message names the offending entry and nothing is persisted
+     * @throws IOException if ConfigurationAdmin cannot store the configuration
+     */
+    public void saveWhitelist(final List<String> entries) throws IOException {
+        if (entries == null) {
+            throw new IllegalArgumentException("The whitelist must not be null");
+        }
+        for (final String entry : entries) {
+            if (!WhitelistEntries.isValid(entry)) {
+                throw new IllegalArgumentException("Malformed whitelist entry '" + shown(entry)
+                        + "': expected query:<path> or mutation:<path>, where <path> is dot-separated GraphQL names");
+            }
+            if (WhitelistEntries.isNeverAllowedEntry(entry)) {
+                throw new IllegalArgumentException("Whitelist entry '" + shown(entry)
+                        + "' is refused: the communityMcp mutations can never be run through community.graphql.execute");
+            }
+        }
+        final Configuration config = configurationAdmin.getConfiguration(PID, null);
+        Dictionary<String, Object> props = config.getProperties();
+        if (props == null) {
+            props = new Hashtable<>();
+        }
+        props.put(KEY_WHITELIST, String.join(",", entries));
+        config.update(props);
+    }
+
+    private static String shown(final String entry) {
+        if (entry == null) {
+            return "null";
+        }
+        return entry.length() <= MAX_SHOWN_ENTRY_LENGTH ? entry : entry.substring(0, MAX_SHOWN_ENTRY_LENGTH) + "...";
     }
 }

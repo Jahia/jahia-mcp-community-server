@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  * allowed explicitly.</p>
  *
  * <p>Internal form: the operation type is the first path segment ({@code mutation.jcr.deleteNode}),
- * matching the paths {@link GraphQLWhitelistGate} extracts from a document. Malformed entries and
+ * matching the paths {@code org.jahia.community.mcp.access.GraphQLWhitelistGate} extracts from a document. Malformed entries and
  * other operation types (e.g. {@code subscription:}) normalize to nothing — they grant no access.</p>
  */
 public final class WhitelistEntries {
@@ -22,10 +22,21 @@ public final class WhitelistEntries {
     static final String QUERY = "query";
     static final String MUTATION = "mutation";
     private static final String PREFIX_SEPARATOR = ":";
-    private static final String GRAPHQL_NAME = "[_A-Za-z][_0-9A-Za-z]*";
-    private static final Pattern FIELD_PATH = Pattern.compile(GRAPHQL_NAME + "(?:\\." + GRAPHQL_NAME + ")*");
+    /** Internal path of the namespace that must never be reachable through the data plane. */
+    public static final String NEVER_ALLOWED = "mutation.communityMcp";
+    // Possessive quantifiers: no backtracking, linear on any input (S5998).
+    private static final String GRAPHQL_NAME = "[_A-Za-z][_0-9A-Za-z]*+";
+    private static final Pattern FIELD_PATH = Pattern.compile(GRAPHQL_NAME + "(?:\\." + GRAPHQL_NAME + ")*+");
 
     private WhitelistEntries() {
+    }
+
+    /**
+     * True if {@code entry} is well-formed but could never take effect because the gate always
+     * denies it ({@code mutation:communityMcp...}); such an entry is refused when saving.
+     */
+    public static boolean isNeverAllowedEntry(final String entry) {
+        return isNeverAllowed(toInternal(entry));
     }
 
     /** True if {@code entry} is a well-formed prefixed or legacy entry. */
@@ -54,6 +65,14 @@ public final class WhitelistEntries {
             }
         }
         return legacy;
+    }
+
+    /**
+     * True if the internal {@code path} is, or lies under, the {@code communityMcp} mutation
+     * namespace: the data plane must not rewrite its own guard, whatever the whitelist says.
+     */
+    public static boolean isNeverAllowed(final String path) {
+        return path != null && (path.equals(NEVER_ALLOWED) || path.startsWith(NEVER_ALLOWED + "."));
     }
 
     /** User-facing form of an internal path: {@code mutation.jcr.x} → {@code mutation:jcr.x}. */
