@@ -367,15 +367,27 @@ through `communityMcp { saveSettings }`.
 - **Keyboard.** The tree follows the WAI-ARIA tree pattern: Up and Down move between items, Home and
   End go to the first and last item, Right expands or enters the children, Left collapses or moves to
   the parent, Space or Enter checks or unchecks an item.
-- **Confirmations.** Clearing the whole list, clearing queries while mutations remain, and allowing all
-  mutations ask for confirmation first.
+- **Confirmations.** Any edit that empties a non-empty list asks for confirmation first, because an
+  empty list restores the read-only default, which allows every query: Clear, Clear queries or Clear
+  mutations, unchecking the last checked item, and removing the last entry. Clearing queries while
+  mutations remain, and allowing all mutations, are confirmed too. Discard changes is never confirmed:
+  it restores the saved list.
 - **Locked operations.** The never-allowed paths, `mutation:communityMcp` and `mutation:admin.jahia.configuration`,
   are shown but cannot be checked.
-- **Unknown entries.** Entries whose root operation is missing from the current schema, or that are
-  locked, are listed under "Entries that need your attention" with a Remove action.
+- **Entries that need your attention.** Entries whose root operation is missing from the current
+  schema, entries that are locked, and entries the server ignores (another operation type such as
+  `subscription:`, or a malformed entry) are kept in the list and shown there as such, each with a
+  Remove action. They are never dropped silently. When the list only holds ignored entries, the policy
+  banner says that every operation is refused.
+- **Save.** Save is refused, with a message naming the entries, while invalid or locked entries remain:
+  the server would reject them. Remove them first.
 - **Filter.** Matches the names and paths of all root operations and of fields already loaded.
 - **Unsaved changes.** The page shows an indicator and warns before you leave. **Discard changes**
-  restores the saved list.
+  restores the saved list. The save bar sits at the end of the panel and is not sticky, so it never
+  covers the focused control.
+- **Focus.** Focus never gets lost. After a confirmed edit whose control disappears, it goes to the
+  allow-list heading; after Discard changes or Dismiss, to Save; after Remove, to the next entry of the
+  same list (the previous one at the end), else to the list summary or the allow-list heading.
 - **Messages.** Status messages never time out. A success or info message clears on the next edit; an
   error stays until it is dismissed or the save is retried. A failed save shows the server's reason.
 - The UI targets WCAG 2.2 Level AAA.

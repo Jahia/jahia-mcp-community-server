@@ -194,14 +194,22 @@ Denial strings are client-safe and are returned as `forbidden` with `ToolError`.
 - The allow-list is a WAI-ARIA tree with roving tabindex. Operation roots are loaded in two documents, one
   for Query and one for Mutation, because of the bad-faith guard. Child fields load per type when a node is
   expanded, with a retry on error.
-- Queries and mutations are separate groups with bulk actions. Clearing the list, clearing queries while
-  mutations remain, and allowing all mutations go through a confirmation dialog.
+- Queries and mutations are separate groups with bulk actions. Every edit that empties a non-empty list
+  (Clear, Clear queries/mutations, unchecking the last item, removing the last entry) is confirmed first
+  (`edit()` in `CommunityMcpConfig.jsx`), because an empty list restores the read-only default. Clearing
+  queries while mutations remain and allowing all mutations are confirmed too. Discard is never confirmed.
 - Operation paths are `query:<name>…` / `mutation:<name>…` (`operationTree.js`). Legacy entries are shown
   as `query:` entries and the form starts dirty, so it can be saved in the new form.
-- Locked: the never-allowed paths `mutation:communityMcp` and `mutation:admin.jahia.configuration` cannot be checked. Entries that are locked or whose root is not in the
-  schema are listed as problem entries with Remove.
-- Save calls `communityMcp { saveSettings(whitelist) }`. Server GraphQL errors are displayed with the
-  server's message. Save is never disabled, so focus stays put.
+- Locked: the never-allowed paths `mutation:communityMcp` and `mutation:admin.jahia.configuration` cannot
+  be checked. Problem entries (`findProblemEntries`), each with Remove: locked, root not in the schema, and
+  invalid (another operation type or malformed: the server ignores them). Invalid entries are kept, never
+  dropped. A list holding only invalid entries shows the "everything refused" banner (`policyOf`).
+- Save calls `communityMcp { saveSettings(whitelist) }`. It is blocked client-side, with a message naming
+  the entries, while invalid or locked entries remain (`findBlockingEntries`). Server GraphQL errors are
+  displayed with the server's message. Save is never `disabled`, so focus stays put.
+- The save bar is at the end of the panel and is NOT sticky (a sticky bar hides the focused control,
+  WCAG 2.4.12). Focus rules: after a confirmed emptying edit, the panel heading; after Discard or Dismiss,
+  Save; after Remove, the next (else previous) entry of the same list, else the list summary or heading.
 
 ## Key implementation constraints
 
