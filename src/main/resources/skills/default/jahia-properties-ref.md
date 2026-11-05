@@ -1,6 +1,6 @@
 ---
 mcpName: Jahia 8.2 — All Properties Reference
-description: Complete reference for all ~90 Jahia 8.2 properties grouped by category with keys, default values, and descriptions. Use after consulting jahia-properties for the full listing.
+description: Complete reference for about 100 Jahia 8.2 properties grouped by category with keys, default values, and descriptions. Use after consulting jahia-properties for the full listing.
 ---
 ## Jahia Modes
 
@@ -74,7 +74,7 @@ description: Complete reference for all ~90 Jahia 8.2 properties grouped by cate
 |---|---|---|
 | `jahia.jackrabbit.consistencyCheck` | `false` | JCR workspace consistency check on startup |
 | `jahia.jackrabbit.consistencyFix` | `false` | Auto-fix workspace issues |
-| `repositoryDirectoryListingDisabled` | `false` | Disable `/repository` WebDAV listing |
+| `repositoryDirectoryListingDisabled` | `false` | `true` disables the `/repository` (WebDAV) directory listing, and WebDAV client access with it. Set `true` in production |
 | `repositoryAllowedNodeTypes` | `rep:root,jnt:virtualsitesFolder,jnt:virtualsite,jnt:folder,jnt:file` | Node types exposed via WebDAV |
 | `jahia.publication.versionedTypes` | `jmix:editorialContent,jnt:file` | Types versioned on publish |
 | `jahia.publication.excludedVersionedTypes` | _(empty)_ | Types excluded from versioning |
