@@ -34,10 +34,10 @@
   },
   "resolutions": {
     "internal-slot": "^1.1.0",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.3.2",
     "node-fetch": "^2.6.7",
     "normalize-package-data": "^7.0.0",
-    "serialize-javascript": "^7.0.5",
+    "serialize-javascript": "^7.1.3",
     "strip-ansi": "^6.0.1",
     "string-width": "^4.2.3",
     "wrap-ansi": "^7.0.0"
