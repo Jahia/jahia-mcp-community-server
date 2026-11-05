@@ -16,7 +16,7 @@ describe('MCP Community tools — forwarded caller identity', () => {
         deleteApiToken(TOKEN_NAME);
     });
 
-    // F17 — in-process GraphQL dispatch runs under the CALLER's forwarded identity, not an
+    // In-process GraphQL dispatch runs under the CALLER's forwarded identity, not an
     // escalated system/anonymous session. With the read-only default (empty whitelist, queries allowed), currentUser resolves
     // to the token user (the admin who created the token), proving identity forwarding.
     //
