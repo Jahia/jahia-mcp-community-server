@@ -15,6 +15,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 /** Small helpers shared by the community tools: schema loading, auditing, header access. */
 final class ToolSupport {
@@ -24,13 +25,20 @@ final class ToolSupport {
     static final String EVENT_OK = "tool.execute.ok";
     static final String EVENT_ERROR = "tool.execute.error";
 
+    /** Upper bound for any caller- or server-supplied text echoed into an error message. */
+    static final int MAX_ECHO_CHARS = 300;
+
     private ToolSupport() {
     }
 
     /** Loads {@code schemas/<toolName>.json} from this bundle. */
     static JsonNode loadSchema(final String toolName) {
+        return loadSchema(toolName, ToolSupport.class::getResourceAsStream);
+    }
+
+    static JsonNode loadSchema(final String toolName, final Function<String, InputStream> opener) {
         final String resource = "/schemas/" + toolName + ".json";
-        try (InputStream in = ToolSupport.class.getResourceAsStream(resource)) {
+        try (InputStream in = opener.apply(resource)) {
             if (in == null) {
                 throw new IllegalStateException("Missing tool schema resource " + resource);
             }
@@ -96,5 +104,17 @@ final class ToolSupport {
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /**
+     * Makes untrusted text safe to echo in an error: control characters (including line breaks)
+     * become spaces, and the result is cut to {@code maxChars} with an ellipsis.
+     */
+    static String sanitize(final String text, final int maxChars) {
+        if (text == null) {
+            return "";
+        }
+        final String cleaned = text.replaceAll("\\p{Cntrl}+", " ").strip();
+        return cleaned.length() <= maxChars ? cleaned : cleaned.substring(0, maxChars) + "…";
     }
 }

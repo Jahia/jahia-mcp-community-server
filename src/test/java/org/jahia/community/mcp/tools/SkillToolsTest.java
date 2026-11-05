@@ -38,8 +38,7 @@ class SkillToolsTest {
 
         @BeforeEach
         void setUp() {
-            tool = new SkillListTool();
-            tool.setSkillService(skills);
+            tool = new SkillListTool(skills);
         }
 
         @Test
@@ -94,8 +93,7 @@ class SkillToolsTest {
 
         @BeforeEach
         void setUp() {
-            tool = new SkillGetTool();
-            tool.setSkillService(skills);
+            tool = new SkillGetTool(skills);
         }
 
         private ObjectNode input(final String name) {

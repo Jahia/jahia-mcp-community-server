@@ -34,9 +34,7 @@ class GraphQLExecuteToolTest {
         client = mock(InternalGraphQLClient.class);
         gate = mock(GraphQLWhitelistGate.class);
         when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
-        tool = new GraphQLExecuteTool();
-        tool.setGraphQLClient(client);
-        tool.setWhitelistGate(gate);
+        tool = new GraphQLExecuteTool(client, gate);
     }
 
     private static ObjectNode input(final String query) {
