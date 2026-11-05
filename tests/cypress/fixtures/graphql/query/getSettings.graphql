@@ -1,5 +1,5 @@
 query McpGetSettings {
-    mcp {
+    communityMcp {
         settings {
             whitelist
         }

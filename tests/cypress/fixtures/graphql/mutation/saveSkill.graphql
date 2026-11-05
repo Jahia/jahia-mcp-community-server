@@ -1,5 +1,5 @@
 mutation SaveMcpSkill($name: String!, $mcpName: String, $description: String, $content: String!) {
-    mcp {
+    communityMcp {
         saveSkill(name: $name, mcpName: $mcpName, description: $description, content: $content)
     }
 }

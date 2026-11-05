@@ -2,7 +2,7 @@ import {gql} from '@apollo/client';
 
 export const GET_SETTINGS = gql`
     query McpGetSettings {
-        mcp {
+        communityMcp {
             settings {
                 whitelist
             }
@@ -12,7 +12,7 @@ export const GET_SETTINGS = gql`
 
 export const SAVE_SETTINGS = gql`
     mutation McpSaveSettings($whitelist: [String]!) {
-        mcp {
+        communityMcp {
             saveSettings(whitelist: $whitelist)
         }
     }

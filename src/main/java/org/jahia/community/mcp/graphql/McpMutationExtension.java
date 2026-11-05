@@ -14,9 +14,9 @@ public class McpMutationExtension {
     }
 
     @GraphQLField
-    @GraphQLName("mcp")
-    @GraphQLDescription("MCP mutation namespace")
-    public static McpMutation mcp() {
+    @GraphQLName("communityMcp")
+    @GraphQLDescription("Community MCP mutation namespace (whitelist settings, skills)")
+    public static McpMutation communityMcp() {
         return new McpMutation();
     }
 }

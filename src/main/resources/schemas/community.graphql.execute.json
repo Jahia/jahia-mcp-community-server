@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "GraphQL query or mutation document. Named fragment spreads are refused while a whitelist is active."
+    },
+    "variables": {
+      "type": "object",
+      "description": "Optional variables map for the operation."
+    }
+  },
+  "required": ["query"]
+}

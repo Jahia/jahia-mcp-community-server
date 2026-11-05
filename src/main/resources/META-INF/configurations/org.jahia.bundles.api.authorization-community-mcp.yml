@@ -1,8 +1,0 @@
-community-mcp:
-  description: Can access Community MCP servlet
-  metadata:
-    visible: true
-  constraints:
-    - user_permission: admin
-  grants:
-    - api: community-mcp

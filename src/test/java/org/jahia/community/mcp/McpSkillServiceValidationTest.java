@@ -120,4 +120,18 @@ class McpSkillServiceValidationTest {
             assertThat(McpSkillService.SKILL_NAME_PATTERN.matcher("a/b/c/d").matches()).isTrue();
         }
     }
+
+    @Test
+    @DisplayName("relativePath strips the skills root so the result is the key getSkill expects")
+    void relative_path_strips_skills_root() {
+        assertThat(McpSkillService.relativePath(McpSkillService.SKILLS_PATH + "/default/hello-jahia"))
+                .isEqualTo("default/hello-jahia");
+        assertThat(McpSkillService.relativePath(McpSkillService.SKILLS_PATH + "/top")).isEqualTo("top");
+    }
+
+    @Test
+    @DisplayName("the 4-argument SkillEntry keeps path equal to name (root-level skill)")
+    void four_arg_entry_path_defaults_to_name() {
+        assertThat(new McpSkillService.SkillEntry("a", "A", "d", "c").path).isEqualTo("a");
+    }
 }

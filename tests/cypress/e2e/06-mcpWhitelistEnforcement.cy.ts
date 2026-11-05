@@ -24,7 +24,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
                 cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
             });
         });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME, scopes: ['graphql', 'community-mcp']}}).then(result => {
+        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
             apiToken = result.data.admin.personalApiTokens.createToken;
         });
         cy.apollo({query: listTokens}).then(result => {
@@ -46,9 +46,9 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
 
     const executeGraphQL = (query: string) => cy.request({
         method: 'POST',
-        url: '/modules/community-mcp',
+        url: '/modules/mcp',
         headers: {'Content-Type': 'application/json', Authorization: `APIToken ${apiToken}`},
-        body: {jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'executeGraphQL', arguments: {query}}}
+        body: {jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'community.graphql.execute', arguments: {query}}}
     });
 
     // F8 (e2e) — named fragment spreads fail closed when a whitelist is active, proving the
@@ -74,12 +74,12 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     // whitelist gate, and the persisted whitelist is unchanged (the mutation never executed).
     it('blocks saveSettings whitelist-rewrite mutation and leaves the whitelist unchanged', () => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
-        executeGraphQL('mutation { mcp { saveSettings(whitelist: ["admin"]) } }').then(response => {
+        executeGraphQL('mutation { communityMcp { saveSettings(whitelist: ["admin"]) } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
             expect(response.body.result.content[0].text).to.include('not in the whitelist');
         });
         cy.apollo({query: getSettings}).then(result => {
-            expect(result.data.mcp.settings.whitelist).to.deep.eq(['currentUser']);
+            expect(result.data.communityMcp.settings.whitelist).to.deep.eq(['currentUser']);
         });
     });
 

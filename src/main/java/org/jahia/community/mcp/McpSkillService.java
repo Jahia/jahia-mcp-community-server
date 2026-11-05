@@ -121,14 +121,6 @@ public class McpSkillService {
             return;
         }
 
-        // Validate the bundled skill name defensively (resources come from the bundle itself,
-        // but belt-and-suspenders against unexpected file names in the JAR).
-        try {
-            validateSkillName(relNoExt);
-        } catch (IllegalArgumentException ex) {
-            LOGGER.error("Skipping bundled skill with unsafe name '{}': {}", relNoExt, ex.getMessage());
-            return;
-        }
         final String jcrPath = SKILLS_PATH + "/" + relNoExt;
         if (session.nodeExists(jcrPath)) {
             return;
@@ -321,9 +313,16 @@ public class McpSkillService {
         }
     }
 
+    /** Path of a skill node relative to {@link #SKILLS_PATH} — the key {@link #getSkill} expects. */
+    static String relativePath(final String nodePath) {
+        final String prefix = SKILLS_PATH + "/";
+        return nodePath.startsWith(prefix) ? nodePath.substring(prefix.length()) : nodePath;
+    }
+
     private SkillEntry toEntry(JCRNodeWrapper node) throws RepositoryException {
         return new SkillEntry(
                 node.getName(),
+                relativePath(node.getPath()),
                 node.hasProperty(PROP_NAME) ? node.getProperty(PROP_NAME).getString() : "",
                 node.hasProperty(PROP_DESCRIPTION) ? node.getProperty(PROP_DESCRIPTION).getString() : "",
                 node.hasProperty(PROP_CONTENT) ? node.getProperty(PROP_CONTENT).getString() : ""
@@ -331,16 +330,25 @@ public class McpSkillService {
     }
 
     public static final class SkillEntry {
+        /** JCR node name. */
         public final String name;
+        /** Path relative to the skills root (e.g. {@code default/hello-jahia}); the getSkill key. */
+        public final String path;
         public final String mcpName;
         public final String description;
         public final String content;
 
-        public SkillEntry(String name, String mcpName, String description, String content) {
+        public SkillEntry(String name, String path, String mcpName, String description, String content) {
             this.name = name;
+            this.path = path;
             this.mcpName = mcpName;
             this.description = description;
             this.content = content;
+        }
+
+        /** Root-level skill: the relative path is the node name. */
+        public SkillEntry(String name, String mcpName, String description, String content) {
+            this(name, name, mcpName, description, content);
         }
     }
 }

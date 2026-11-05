@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
+      "description": "Skill name as returned by community.skill.list, may include a sub-folder path (e.g. default/hello-jahia)."
+    }
+  },
+  "required": ["name"]
+}

@@ -1,0 +1,303 @@
+package org.jahia.community.mcp.tools;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.Reference;
+
+import javax.servlet.ReadListener;
+import javax.servlet.ServletException;
+import javax.servlet.ServletInputStream;
+import javax.servlet.ServletOutputStream;
+import javax.servlet.WriteListener;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletRequestWrapper;
+import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpServletResponseWrapper;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Executes a GraphQL document in-process against Jahia's {@code OsgiGraphQLHttpServlet}.
+ *
+ * <p>No HTTP hop: a synthetic POST is handed to the servlet. The caller identity is the JCR thread
+ * state already bound by mcp-server around each tool call, so JCR ACLs apply as for the caller.
+ * Do NOT call {@code JcrSessionFilter.endRequest()} here — mcp-server cleans the worker thread
+ * after the tool returns, and ending the request mid-tool would drop the caller identity.</p>
+ */
+@Component(service = InternalGraphQLClient.class)
+public class InternalGraphQLClient {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String CONTENT_TYPE_JSON = "application/json";
+    private static final String HEADER_CONTENT_TYPE = "Content-Type";
+    private static final String HEADER_AUTHORIZATION = "Authorization";
+    private static final int HTTP_OK = 200;
+    private static final int HTTP_ERROR_THRESHOLD = 400;
+
+    // volatile: written on the OSGi bind thread, read on MCP worker threads
+    private volatile HttpServlet graphQLServlet;
+
+    @Reference(service = HttpServlet.class,
+            target = "(component.name=graphql.kickstart.servlet.OsgiGraphQLHttpServlet)")
+    public void setGraphQLServlet(final HttpServlet graphQLServlet) {
+        this.graphQLServlet = graphQLServlet;
+    }
+
+    /** Outcome of an in-process GraphQL call: the HTTP status the servlet set, and its body. */
+    public static final class Response {
+        private final int status;
+        private final String body;
+
+        public Response(final int status, final String body) {
+            this.status = status;
+            this.body = body;
+        }
+
+        public int status() {
+            return status;
+        }
+
+        public String body() {
+            return body;
+        }
+
+        public boolean isHttpError() {
+            return status >= HTTP_ERROR_THRESHOLD;
+        }
+    }
+
+    /**
+     * @param variables     optional variables map (may be {@code null})
+     * @param authorization the caller's Authorization header, forwarded as-is (may be {@code null})
+     */
+    public Response execute(final String query, final Object variables, final String authorization)
+            throws IOException, ServletException {
+        final Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("query", query);
+        if (variables != null) {
+            payload.put("variables", variables);
+        }
+        final byte[] requestBody = MAPPER.writeValueAsBytes(payload);
+        final CapturingResponse response = new CapturingResponse();
+        graphQLServlet.service(new SyntheticPostRequest(requestBody, authorization), response);
+        return new Response(response.status, response.body());
+    }
+
+    /** No-op delegate required by the servlet wrappers; every call returns a type default. */
+    private static <T> T noOp(final Class<T> type) {
+        return type.cast(Proxy.newProxyInstance(InternalGraphQLClient.class.getClassLoader(),
+                new Class<?>[]{type},
+                (proxy, method, args) -> {
+                    final Class<?> rt = method.getReturnType();
+                    if (rt == boolean.class) {
+                        return false;
+                    }
+                    if (rt == int.class) {
+                        return 0;
+                    }
+                    if (rt == long.class) {
+                        return 0L;
+                    }
+                    return null;
+                }));
+    }
+
+    private static final class SyntheticPostRequest extends HttpServletRequestWrapper {
+        private final byte[] body;
+        private final String authorization;
+
+        SyntheticPostRequest(final byte[] body, final String authorization) {
+            super(noOp(HttpServletRequest.class));
+            this.body = body;
+            this.authorization = authorization;
+        }
+
+        @Override
+        public String getMethod() {
+            return "POST";
+        }
+
+        @Override
+        public String getContentType() {
+            return CONTENT_TYPE_JSON;
+        }
+
+        @Override
+        public String getCharacterEncoding() {
+            return StandardCharsets.UTF_8.name();
+        }
+
+        @Override
+        public int getContentLength() {
+            return body.length;
+        }
+
+        @Override
+        public long getContentLengthLong() {
+            return body.length;
+        }
+
+        @Override
+        public String getHeader(final String name) {
+            if (HEADER_CONTENT_TYPE.equalsIgnoreCase(name)) {
+                return CONTENT_TYPE_JSON;
+            }
+            if (HEADER_AUTHORIZATION.equalsIgnoreCase(name)) {
+                return authorization;
+            }
+            return null;
+        }
+
+        @Override
+        public Enumeration<String> getHeaders(final String name) {
+            final String value = getHeader(name);
+            return value == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(value));
+        }
+
+        @Override
+        public Enumeration<String> getHeaderNames() {
+            return Collections.enumeration(authorization != null
+                    ? List.of(HEADER_CONTENT_TYPE, HEADER_AUTHORIZATION)
+                    : List.of(HEADER_CONTENT_TYPE));
+        }
+
+        @Override
+        public ServletInputStream getInputStream() {
+            final ByteArrayInputStream in = new ByteArrayInputStream(body);
+            return new ServletInputStream() {
+                @Override
+                public int read() {
+                    return in.read();
+                }
+
+                @Override
+                public boolean isFinished() {
+                    return in.available() == 0;
+                }
+
+                @Override
+                public boolean isReady() {
+                    return true;
+                }
+
+                @Override
+                public void setReadListener(final ReadListener listener) {
+                    // synchronous only — no async lifecycle to drive
+                }
+            };
+        }
+
+        @Override
+        public BufferedReader getReader() {
+            return new BufferedReader(new InputStreamReader(new ByteArrayInputStream(body), StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public boolean isAsyncSupported() {
+            return false;
+        }
+    }
+
+    /**
+     * Captures status and body. Bytes from the output stream and characters from the writer go to
+     * one UTF-8 byte buffer (the previous wrapper cast each byte to a char, garbling non-ASCII text,
+     * and delegated getStatus() to a no-op proxy, so errors were never detected).
+     */
+    private static final class CapturingResponse extends HttpServletResponseWrapper {
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        private PrintWriter writer;
+        private int status = HTTP_OK;
+
+        CapturingResponse() {
+            super(noOp(HttpServletResponse.class));
+        }
+
+        String body() {
+            if (writer != null) {
+                writer.flush();
+            }
+            return buffer.toString(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public void setStatus(final int sc) {
+            this.status = sc;
+        }
+
+        @Override
+        public int getStatus() {
+            return status;
+        }
+
+        @Override
+        public void sendError(final int sc) {
+            this.status = sc;
+        }
+
+        @Override
+        public void sendError(final int sc, final String msg) {
+            this.status = sc;
+        }
+
+        @Override
+        public String getCharacterEncoding() {
+            return StandardCharsets.UTF_8.name();
+        }
+
+        @Override
+        public ServletOutputStream getOutputStream() {
+            return new ServletOutputStream() {
+                @Override
+                public void write(final int b) {
+                    buffer.write(b);
+                }
+
+                @Override
+                public void write(final byte[] b, final int off, final int len) {
+                    buffer.write(b, off, len);
+                }
+
+                @Override
+                public boolean isReady() {
+                    return true;
+                }
+
+                @Override
+                public void setWriteListener(final WriteListener listener) {
+                    // synchronous only
+                }
+            };
+        }
+
+        @Override
+        public PrintWriter getWriter() {
+            if (writer == null) {
+                writer = new PrintWriter(new OutputStreamWriter(buffer, StandardCharsets.UTF_8));
+            }
+            return writer;
+        }
+
+        @Override
+        public void setContentLength(final int len) {
+            // ignored: the body is buffered
+        }
+
+        @Override
+        public void setContentLengthLong(final long len) {
+            // ignored: the body is buffered
+        }
+    }
+}

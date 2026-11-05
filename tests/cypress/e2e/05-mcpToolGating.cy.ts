@@ -22,7 +22,7 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
                 cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
             });
         });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME, scopes: ['graphql', 'community-mcp']}}).then(result => {
+        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
             apiToken = result.data.admin.personalApiTokens.createToken;
         });
         cy.apollo({query: listTokens}).then(result => {
@@ -42,38 +42,38 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
 
     const callTool = (name: string, args: Record<string, unknown>) => cy.request({
         method: 'POST',
-        url: '/modules/community-mcp',
+        url: '/modules/mcp',
         headers: {'Content-Type': 'application/json', Authorization: `APIToken ${apiToken}`},
         body: {jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name, arguments: args}}
     });
 
-    // U3 — only executeGraphQL is whitelist-gated. introspectSchema/listSkills/getSkill rely
-    // solely on the endpoint permission check and are NOT subject to the whitelist.
-    it('executeGraphQL IS whitelist-gated (non-whitelisted op blocked)', () => {
-        callTool('executeGraphQL', {query: '{ admin { jahia { isAlive } } }'}).then(response => {
+    // U3 — only community.graphql.execute is whitelist-gated. The introspect and skill tools rely
+    // solely on the administrator gate (see 04-mcpToolCatalogAndGate) and ignore the whitelist.
+    it('community.graphql.execute IS whitelist-gated (non-whitelisted op blocked)', () => {
+        callTool('community.graphql.execute', {query: '{ admin { jahia { isAlive } } }'}).then(response => {
             expect(response.body.result.isError).to.eq(true);
             expect(response.body.result.content[0].text).to.include('not in the whitelist');
         });
     });
 
-    it('introspectSchema is NOT whitelist-gated', () => {
-        callTool('introspectSchema', {}).its('body.result.isError').should('eq', false);
+    it('community.graphql.introspect is NOT whitelist-gated', () => {
+        callTool('community.graphql.introspect', {}).its('body.result.isError').should('eq', false);
     });
 
-    it('listSkills is NOT whitelist-gated', () => {
-        callTool('listSkills', {}).its('body.result.isError').should('eq', false);
+    it('community.skill.list is NOT whitelist-gated', () => {
+        callTool('community.skill.list', {}).its('body.result.isError').should('eq', false);
     });
 
-    it('getSkill is NOT whitelist-gated', () => {
-        callTool('getSkill', {name: 'default/hello-jahia'})
+    it('community.skill.get is NOT whitelist-gated', () => {
+        callTool('community.skill.get', {name: 'default/hello-jahia'})
             .its('body.result.isError').should('eq', false);
     });
 
-    // F2 — introspectSchema runs the two-step __schema / per-type __type workaround without
+    // F2 — community.graphql.introspect runs the two-step __schema / per-type __type workaround without
     // tripping Jahia's bad-faith introspection guard, ignores the whitelist, and returns a
     // parsed schema picture containing query + mutation type names and per-type field details.
-    it('introspectSchema returns a schema with query/mutation types and per-type details', () => {
-        callTool('introspectSchema', {}).then(response => {
+    it('community.graphql.introspect returns a schema with query/mutation types and per-type details', () => {
+        callTool('community.graphql.introspect', {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
             const payload = JSON.parse(response.body.result.content[0].text);
             expect(payload.schema).to.exist;
@@ -87,20 +87,19 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
     });
 
     // U2 — Stage-7 candidate (benign/latent SYSTEM-session finding).
-    // listSkills/getSkill run under a SYSTEM JCR session (doExecuteWithSystemSession), so they
+    // The skill tools run under a SYSTEM JCR session (doExecuteWithSystemSession), so they
     // ignore BOTH the whitelist and the caller's per-node ACLs. This test can only pin
     // "reads succeed despite the whitelist"; it CANNOT demonstrate an exploitable ACL bypass,
-    // because community-mcp is granted only to admin-role users (every valid caller is already
-    // an admin with broad ACLs) and no restrictive ACL is set on the seeded skills. The bypass
+    // because the community tools are restricted to server administrators (every valid caller is
+    // already an admin with broad ACLs) and no restrictive ACL is set on the seeded skills. The bypass
     // becomes real only if the grant is broadened to non-admins or a deny-ACL is added later.
-    // See 05-implementation-report.md → Stage-7 handoff.
-    it('listSkills/getSkill succeed via SYSTEM session despite a whitelist that excludes them', () => {
-        callTool('listSkills', {}).then(response => {
+    it('skill tools succeed via SYSTEM session despite a whitelist that excludes them', () => {
+        callTool('community.skill.list', {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
-            const skills = JSON.parse(response.body.result.content[0].text);
-            expect(skills.map((s: {name: string}) => s.name)).to.include('hello-jahia');
+            const {skills} = JSON.parse(response.body.result.content[0].text);
+            expect(skills.map((s: {name: string}) => s.name)).to.include('default/hello-jahia');
         });
-        callTool('getSkill', {name: 'default/hello-jahia'}).then(response => {
+        callTool('community.skill.get', {name: 'default/hello-jahia'}).then(response => {
             expect(response.body.result.isError).to.eq(false);
             expect(response.body.result.content[0].text).to.include('Hello Jahian');
         });
