@@ -4,7 +4,7 @@
 <mcpmix = 'http://www.jahia.org/jahia/mcpmix/1.0'>
 <mix = 'http://www.jcp.org/jcr/mix/1.0'>
 
-[mcpmix:mcp] > jmix:accessControllableContent, jmix:droppableContent mixin
+[mcpmix:mcp] > jmix:accessControllableContent mixin
 
 [mcp:skill] > jnt:content, mcpmix:mcp, mix:title
  - mcp:description (string)

@@ -9,6 +9,7 @@ import org.osgi.service.component.annotations.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.jcr.ItemExistsException;
 import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
 import javax.jcr.query.Query;
@@ -81,18 +82,19 @@ public class McpSkillService {
     @Activate
     public void activate(BundleContext bundleContext) {
         final Enumeration<URL> entries = bundleContext.getBundle().findEntries(SKILLS_RESOURCE_DIR, "*.md", true);
-        if (entries == null) {
-            return;
-        }
         try {
             JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
+                // Once, here — not on the read path. Also hardens containers created by older versions.
                 ensureContainer(session);
-                while (entries.hasMoreElements()) {
+                while (entries != null && entries.hasMoreElements()) {
                     final URL url = entries.nextElement();
                     try {
                         importSkillEntry(session, url);
                     } catch (IOException ex) {
                         LOGGER.error("Cannot read skill file {}", url, ex);
+                    } catch (ItemExistsException ex) {
+                        // another cluster node seeded it first
+                        session.refresh(false);
                     }
                 }
                 return null;
@@ -126,21 +128,12 @@ public class McpSkillService {
             return;
         }
 
-        // Ensure intermediate folder nodes
         final String[] segments = relNoExt.split("/");
-        String parentPath = SKILLS_PATH;
-        for (int i = 0; i < segments.length - 1; i++) {
-            final String folderPath = parentPath + "/" + segments[i];
-            if (!session.nodeExists(folderPath)) {
-                session.getNode(parentPath).addNode(segments[i], "jnt:contentList");
-                session.save();
-            }
-            parentPath = folderPath;
-        }
+        final JCRNodeWrapper parent = ensureFolders(session, segments);
 
         // Parse file and create skill node
         final String[] parsed = parseFrontmatter(url);
-        final JCRNodeWrapper skill = session.getNode(parentPath).addNode(segments[segments.length - 1], SKILL_NODE_TYPE);
+        final JCRNodeWrapper skill = parent.addNode(segments[segments.length - 1], SKILL_NODE_TYPE);
         if (!parsed[0].isEmpty()) skill.setProperty(PROP_NAME, parsed[0]);
         if (!parsed[1].isEmpty()) skill.setProperty(PROP_DESCRIPTION, parsed[1]);
         skill.setProperty(PROP_CONTENT, parsed[2]);
@@ -186,16 +179,11 @@ public class McpSkillService {
 
     public List<SkillEntry> listSkills() {
         try {
-            // SECURITY POSTURE (intentional, ACL-bypassing — benign as shipped): skill reads run
-            // under a SYSTEM JCR session, so unlike executeGraphQL they do NOT run as the caller
-            // and do NOT pass through the whitelist. Skills are shared instruction documents meant
-            // to be readable by every MCP client, and the community-mcp scope is admin-only, so no
-            // caller is denied anything here that their own ACLs would otherwise permit, and no
-            // restrictive per-skill ACL ships. This becomes a real ACL bypass to revisit ONLY if
-            // the community-mcp grant is broadened beyond admin, or deny-ACLs are added to skill
-            // nodes — at which point these reads should run as the caller instead of SYSTEM.
+            // Reads run under a SYSTEM session on purpose: the skills container has its ACL
+            // inheritance broken (see ensureContainer), so no ordinary role can see or write it
+            // through generic JCR paths, and the only entry points (the tools and the communityMcp
+            // GraphQL operations) are admin-gated.
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
-                ensureContainer(session);
                 final Query query = session.getWorkspace().getQueryManager().createQuery(LIST_SKILLS_SQL, Query.JCR_SQL2);
                 final QueryResult result = query.execute();
                 final List<SkillEntry> skills = new ArrayList<>();
@@ -219,11 +207,8 @@ public class McpSkillService {
             return null;
         }
         try {
-            // SECURITY POSTURE: see listSkills() — this read also runs as SYSTEM, intentionally
-            // bypassing the caller's ACLs and the whitelist. Benign under the admin-only
-            // community-mcp scope; revisit (run-as-caller) if the scope broadens or skills gain
-            // restrictive ACLs. The name is still validated (validateSkillName + assertDescendant)
-            // so this cannot be used for path traversal outside SKILLS_PATH.
+            // SYSTEM session, see listSkills(). The name is still validated (validateSkillName +
+            // assertDescendant) so it cannot reach a node outside SKILLS_PATH.
             return JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 final String path = SKILLS_PATH + "/" + name;
                 assertDescendant(path);
@@ -257,8 +242,14 @@ public class McpSkillService {
                 final JCRNodeWrapper node;
                 if (session.nodeExists(path)) {
                     node = session.getNode(path);
+                    if (!node.isNodeType(SKILL_NODE_TYPE)) {
+                        LOGGER.warn("saveSkill refused: '{}' exists and is not an {} node", name, SKILL_NODE_TYPE);
+                        return false;
+                    }
                 } else {
-                    node = session.getNode(SKILLS_PATH).addNode(name, SKILL_NODE_TYPE);
+                    final String[] segments = name.split("/");
+                    final JCRNodeWrapper parent = ensureFolders(session, segments);
+                    node = parent.addNode(segments[segments.length - 1], SKILL_NODE_TYPE);
                 }
                 if (mcpName != null) {
                     node.setProperty(PROP_NAME, mcpName);
@@ -270,8 +261,8 @@ public class McpSkillService {
                 session.save();
                 return true;
             });
-        } catch (SecurityException ex) {
-            LOGGER.warn("saveSkill path-traversal attempt blocked: {}", ex.getMessage());
+        } catch (SecurityException | IllegalArgumentException ex) {
+            LOGGER.warn("saveSkill refused: {}", ex.getMessage());
             return false;
         } catch (RepositoryException e) {
             LOGGER.error("Error saving MCP skill: {}", name, e);
@@ -293,7 +284,12 @@ public class McpSkillService {
                 if (!session.nodeExists(path)) {
                     return false;
                 }
-                session.getNode(path).remove();
+                final JCRNodeWrapper node = session.getNode(path);
+                if (!node.isNodeType(SKILL_NODE_TYPE)) {
+                    LOGGER.warn("deleteSkill refused: '{}' is not an {} node", name, SKILL_NODE_TYPE);
+                    return false;
+                }
+                node.remove();
                 session.save();
                 return true;
             });
@@ -306,11 +302,49 @@ public class McpSkillService {
         }
     }
 
+    /**
+     * Creates the skills container if missing and breaks its ACL inheritance (idempotent): with no
+     * role granted on it, only the system session can write skills, so a content author cannot
+     * plant instructions that an administrator's AI client would later read and follow.
+     */
     private void ensureContainer(JCRSessionWrapper session) throws RepositoryException {
         if (!session.nodeExists(SKILLS_PATH)) {
-            session.getNode("/sites/systemsite/contents").addNode("mcp-skills", "jnt:contentList");
-            session.save();
+            try {
+                session.getNode("/sites/systemsite/contents").addNode("mcp-skills", "jnt:contentList");
+                session.save();
+            } catch (ItemExistsException ex) {
+                // created concurrently by another cluster node
+                session.refresh(false);
+            }
         }
+        final JCRNodeWrapper container = session.getNode(SKILLS_PATH);
+        if (!container.getAclInheritanceBreak()) {
+            container.setAclInheritanceBreak(true);
+            session.save();
+            LOGGER.info("Broke ACL inheritance on {}: only the system session may write skills", SKILLS_PATH);
+        }
+    }
+
+    /**
+     * Returns the folder that must hold the skill {@code segments[last]}, creating the intermediate
+     * folders. An intermediate segment that is itself a skill cannot become a folder.
+     */
+    private static JCRNodeWrapper ensureFolders(final JCRSessionWrapper session, final String[] segments)
+            throws RepositoryException {
+        JCRNodeWrapper parent = session.getNode(SKILLS_PATH);
+        for (int i = 0; i < segments.length - 1; i++) {
+            final String folderPath = parent.getPath() + "/" + segments[i];
+            if (session.nodeExists(folderPath)) {
+                parent = session.getNode(folderPath);
+                if (parent.isNodeType(SKILL_NODE_TYPE)) {
+                    throw new IllegalArgumentException("'" + segments[i] + "' is a skill and cannot be used as a folder");
+                }
+            } else {
+                parent = parent.addNode(segments[i], "jnt:contentList");
+                session.save();
+            }
+        }
+        return parent;
     }
 
     /** Path of a skill node relative to {@link #SKILLS_PATH} — the key {@link #getSkill} expects. */
