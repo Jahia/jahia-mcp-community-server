@@ -5,70 +5,19 @@ import {CommunityMcpConfigAdmin} from '../CommunityMcpConfig';
 // Mounts the real admin editor against the __mocks__ Apollo/moonstone/i18next layer
 // (the i18next mock echoes translation keys, so visible strings are the raw keys).
 
-const QUERY_FIELDS = [
-    {name: 'admin', description: 'Admin queries', type: {name: 'AdminQuery', kind: 'OBJECT'}},
-    {name: 'currentUser', description: '', type: {name: 'User', kind: 'OBJECT'}}
-];
-const MUTATION_FIELDS = [
-    {name: 'admin', description: '', type: {name: 'AdminMutation', kind: 'OBJECT'}},
-    {name: 'communityMcp', description: '', type: {name: 'CommunityMcpMutation', kind: 'OBJECT'}}
-];
-const ADMIN_TYPE_FIELDS = [
-    {name: 'jahia', description: '', type: {name: 'JahiaQuery', kind: 'OBJECT'}},
-    {name: 'version', description: '', type: {name: 'String', kind: 'SCALAR'}}
-];
-
-const ok = {data: {communityMcp: {saveSettings: true}}};
-
-function installApolloMock({whitelist = [], clustered = false, saveSpy, querySpy, errors = {}, loading = false, refetch} = {}) {
-    // Stable result objects: the real @apollo/client returns referentially-stable results,
-    // and the component's useEffect([settingsData]) would loop forever on fresh objects.
-    const refetchSpy = refetch || jest.fn();
-    const make = (data, error) => ({
-        loading,
-        error,
-        data: error || loading ? undefined : data,
-        refetch: refetchSpy
-    });
-    const results = {
-        queryFields: make({queryFields: {fields: QUERY_FIELDS}}, errors.queryFields),
-        mutationFields: make({mutationFields: {fields: MUTATION_FIELDS}}, errors.mutationFields),
-        settings: make({communityMcp: {settings: {whitelist, clustered}}}, errors.settings)
-    };
-
-    const useQuery = query => {
-        const q = String(query);
-        if (q.includes('queryFields')) {
-            return results.queryFields;
-        }
-
-        if (q.includes('mutationFields')) {
-            return results.mutationFields;
-        }
-
-        return results.settings;
-    };
-
-    const save = saveSpy || jest.fn().mockResolvedValue(ok);
-    const useMutation = () => [save, {loading: false}];
-    const apolloClient = {
-        query: querySpy || jest.fn().mockResolvedValue({data: {typeFields: {fields: ADMIN_TYPE_FIELDS}}})
-    };
-
-    window.__apolloMock = {useQuery, useMutation, apolloClient};
-    return {save, apolloClient, refetch: refetchSpy};
-}
-
-const queriesTree = () => screen.getByRole('tree', {name: 'label.queriesHeading'});
-const mutationsTree = () => screen.getByRole('tree', {name: 'label.mutationsHeading'});
-const item = (tree, name) => within(tree).getByRole('treeitem', {name});
-const saveButton = () => screen.getByRole('button', {name: 'label.save'});
-const liveRegion = () => document.getElementById('mcp-live');
-const panelHeading = () => screen.getByRole('heading', {name: 'label.allowList'});
-const problemsRegion = () => screen.getByRole('region', {name: 'label.problemEntriesTitle'});
-const policyText = key => screen.getByText(key, {selector: 'p'});
-const confirmEmptying = () => fireEvent.click(
-    within(screen.getByRole('alertdialog', {name: 'label.confirmClearTitle'})).getByRole('button', {name: 'label.confirmClearAction'}));
+import {
+    ADMIN_TYPE_FIELDS,
+    confirmEmptying,
+    installApolloMock,
+    item,
+    liveRegion,
+    mutationsTree,
+    panelHeading,
+    policyText,
+    problemsRegion,
+    queriesTree,
+    saveButton
+} from './fixture';
 
 afterEach(() => {
     delete window.__apolloMock;
