@@ -9,11 +9,21 @@ export const ConfirmDialog = ({title, body, confirmLabel, cancelLabel, onConfirm
     const dialogRef = useRef(null);
     const cancelRef = useRef(null);
 
+    // The rest of the panel is inert while the dialog is open, so screen readers with weak
+    // aria-modal support cannot reach it either (A11Y-12). The live region stays reachable.
+    // Declared first: its cleanup runs before focus returns to the opener, which must not be inert.
+    useEffect(() => {
+        const backdrop = dialogRef.current.parentElement;
+        const others = [...backdrop.parentElement.children].filter(el => el !== backdrop && el.id !== 'mcp-live');
+        others.forEach(el => el.setAttribute('inert', ''));
+        return () => others.forEach(el => el.removeAttribute('inert'));
+    }, []);
+
     useEffect(() => {
         const opener = document.activeElement;
         cancelRef.current.focus();
-        // The page behind is not inert: focus that still reaches it (a click outside the
-        // dialog, assistive technology) is sent back to Cancel, the safe choice.
+        // Where inert is not supported, focus that still reaches the page behind (a click outside
+        // the dialog, assistive technology) is sent back to Cancel, the safe choice.
         const keepFocusInside = e => {
             if (dialogRef.current && !dialogRef.current.contains(e.target)) {
                 cancelRef.current?.focus();

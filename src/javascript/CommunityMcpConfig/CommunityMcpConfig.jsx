@@ -19,17 +19,27 @@ import {
     setsEqual,
     toggleWhitelistPath
 } from './operationTree';
+import {isReadOnlyProtected} from './policyRules';
 import {OperationTree} from './OperationTree';
 import {ConfirmDialog} from './ConfirmDialog';
 import {AllEntries, ProblemEntries} from './AllowListEntries';
 import {SaveBar} from './SaveBar';
 import {isFocusLost, LiveRegion, useAnnouncer, useFocusRecovery} from './a11y';
-import {useMcpTranslation} from './i18n';
+import {useMcpLanguage, useMcpTranslation} from './i18n';
+import {takeDraft, useDraftPersistence} from './draft';
 
 const EMPTY = new Set();
 
-// Turn a failed save into a message: the server's own reason when it gave one (UX-6).
+// An expired Jahia session answers 401 (or 403 once the session is gone).
+const isSessionExpired = err => [401, 403].includes(err?.networkError?.statusCode);
+
+// Turn a failed save into a message: the server's own reason when it gave one (UX-6), or the
+// remedy for an expired session (log in again; the edits are kept, A11Y-5).
 const saveFailure = (err, t) => {
+    if (isSessionExpired(err)) {
+        return {kind: 'error', message: t('label.saveSessionExpired')};
+    }
+
     if (err?.networkError) {
         return {kind: 'error', message: t('label.saveNetworkError')};
     }
@@ -79,6 +89,22 @@ const Help = ({t}) => (
     </details>
 );
 
+// The policy of the edited list, and, while it is not saved, the policy the server still applies
+// (UX-4): an unsaved restriction must never read as if it were already in force.
+const PolicyBanner = ({policy, savedPolicy, t}) => {
+    const alertClass = kind => `${styles.mcp_alert} ${styles[`mcp_alert--${kind}`]}`;
+    if (!savedPolicy) {
+        return <p className={alertClass(policy.kind)}>{t(policy.key)}</p>;
+    }
+
+    return (
+        <>
+            <p className={alertClass(policy.kind)}><strong>{t('label.policyPendingPrefix')}</strong> {t(policy.key)}</p>
+            <p className={alertClass(savedPolicy.kind)}><strong>{t('label.policyInForce')}</strong> {t(savedPolicy.key)}</p>
+        </>
+    );
+};
+
 const OperationGroup = ({id, heading, count, note, roots, actions, treeProps}) => (
     <section className={styles.mcp_group} aria-labelledby={`mcp-group-${id}`}>
         <div className={styles.mcp_groupHeader}>
@@ -101,6 +127,7 @@ const OperationGroup = ({id, heading, count, note, roots, actions, treeProps}) =
 
 export const CommunityMcpConfigAdmin = () => {
     const t = useMcpTranslation();
+    const lang = useMcpLanguage();
     const rootRef = useRef(null);
     const requestFocus = useFocusRecovery(rootRef);
     const [announcement, announce] = useAnnouncer();
@@ -122,6 +149,7 @@ export const CommunityMcpConfigAdmin = () => {
     const [expanded, setExpanded] = useState(EMPTY);
     const [filterInput, setFilterInput] = useState('');
     const [confirm, setConfirm] = useState(null);
+    const [isSettingsReady, setSettingsReady] = useState(false);
 
     const setStatus = next => {
         statusSeq.current += 1;
@@ -129,6 +157,8 @@ export const CommunityMcpConfigAdmin = () => {
     };
 
     const settingsData = settingsResult.data;
+    // The allow list is stored per node: in a cluster, saving here changes this node only (UX-2).
+    const isClustered = Boolean(settingsData?.communityMcp?.settings?.clustered);
     // Read by the sync effect below without re-running it on every edit.
     const editState = useRef({isDirty: false, saved: EMPTY});
     // Sync server settings into local state via an effect rather than `onCompleted`, which
@@ -154,16 +184,27 @@ export const CommunityMcpConfigAdmin = () => {
             return;
         }
 
-        setWhitelist(entries);
+        // Edits kept in this tab before a session expiry come back, if the server still holds the
+        // list they were made against (A11Y-5).
+        const draft = takeDraft(entries);
+        const isDraftRestored = draft !== null && !setsEqual(draft, entries);
+        setWhitelist(isDraftRestored ? draft : entries);
         setSaved(entries);
         setMigrated(migrated);
+        setSettingsReady(true);
+        if (isDraftRestored) {
+            setStatus({kind: 'info', message: t('label.draftRestored')});
+        }
+
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [settingsData]);
 
     const isLoading = queryFieldsResult.loading || mutationFieldsResult.loading || settingsResult.loading;
     const failedResults = [settingsResult, queryFieldsResult, mutationFieldsResult].filter(r => r.error);
     let loadErrorKey = null;
-    if (settingsResult.error) {
+    if (isSessionExpired(settingsResult.error)) {
+        loadErrorKey = 'label.loadSessionExpired';
+    } else if (settingsResult.error) {
         loadErrorKey = 'label.loadError';
     } else if (failedResults.length > 0) {
         loadErrorKey = 'label.schemaLoadError';
@@ -208,6 +249,7 @@ export const CommunityMcpConfigAdmin = () => {
     const isDirty = isMigrated || !setsEqual(whitelist, saved);
     editState.current = {isDirty, saved};
     useUnsavedChangesGuard(isDirty);
+    useDraftPersistence(isSettingsReady, saved, whitelist);
 
     const operations = buildOperationMap(
         queryFieldsResult.data?.queryFields?.fields,
@@ -290,6 +332,17 @@ export const CommunityMcpConfigAdmin = () => {
         }
     };
 
+    // Checking the admin query namespace (or a field under it) exposes configuration values,
+    // secrets included: a deliberate action, confirmed each time (UX-1). Unchecking is not.
+    const togglePath = path => {
+        const isAdding = !whitelist.has(path);
+        if (isAdding && isReadOnlyProtected(path)) {
+            askConfirm('confirmAllowAdmin', () => edit(s => toggleWhitelistPath(s, path)));
+        } else {
+            edit(s => toggleWhitelistPath(s, path));
+        }
+    };
+
     const clearAll = () => edit(() => EMPTY);
     const allowAllMutations = () => askConfirm('confirmAllowMutations', () => edit(s => allowAllOfType(s, operations, false)));
     const clearQueries = () => {
@@ -334,7 +387,7 @@ export const CommunityMcpConfigAdmin = () => {
             if (result.data?.communityMcp?.saveSettings) {
                 setSaved(toSave);
                 setMigrated(false);
-                setStatus({kind: 'success', message: t('label.saveSuccess')});
+                setStatus({kind: 'success', message: t(isClustered ? 'label.saveSuccessCluster' : 'label.saveSuccess')});
             } else {
                 setStatus({kind: 'error', message: t('label.saveError')});
             }
@@ -388,9 +441,10 @@ export const CommunityMcpConfigAdmin = () => {
         }
 
         const policy = policyOf(whitelist);
+        const hasPendingEdits = !setsEqual(whitelist, saved);
         const treeProps = {
             selected: whitelist, typeFields, expanded, filter, t,
-            onToggle: path => edit(s => toggleWhitelistPath(s, path)),
+            onToggle: togglePath,
             onSetExpanded: setNodeExpanded,
             onAnnounce: announce
         };
@@ -410,7 +464,8 @@ export const CommunityMcpConfigAdmin = () => {
                         )}
                     </div>
                     {/* Not a live region: a change of policy is announced once by applyEdit. */}
-                    <p className={`${styles.mcp_alert} ${styles[`mcp_alert--${policy.kind}`]}`}>{t(policy.key)}</p>
+                    <PolicyBanner policy={policy} savedPolicy={hasPendingEdits ? policyOf(saved) : null} t={t}/>
+                    {isClustered && <p className={`${styles.mcp_alert} ${styles['mcp_alert--warning']}`}>{t('label.clusterNote')}</p>}
                     {isMigrated && <p className={`${styles.mcp_alert} ${styles['mcp_alert--info']}`}>{t('label.migrated')}</p>}
                     <ProblemEntries problems={findProblemEntries(whitelist, operations)} t={t} onRemove={removeOne}/>
                     <div className={styles.mcp_filter}>
@@ -452,7 +507,7 @@ export const CommunityMcpConfigAdmin = () => {
                     <AllEntries entries={[...whitelist].sort()} t={t} onRemove={removeOne}/>
                 </section>
                 <SaveBar isDirty={isDirty}
-                         hasChangesToDiscard={!setsEqual(whitelist, saved)}
+                         hasChangesToDiscard={hasPendingEdits}
                          isSaving={isSaving}
                          status={status}
                          t={t}
@@ -464,7 +519,7 @@ export const CommunityMcpConfigAdmin = () => {
     };
 
     return (
-        <section ref={rootRef} className={styles.mcp_container} aria-labelledby="mcp-title">
+        <section ref={rootRef} lang={lang} className={styles.mcp_container} aria-labelledby="mcp-title">
             <LiveRegion message={announcement} className={styles.mcp_visuallyHidden}/>
             <h2 id="mcp-title" className={styles.mcp_title}>{t('label.title')}</h2>
             <p className={styles.mcp_description}>{t('label.description')}</p>

@@ -25,5 +25,21 @@ module.exports = {
         '^react-i18next$': '<rootDir>/src/javascript/__mocks__/react-i18next.js',
         '^@apollo/client$': '<rootDir>/src/javascript/__mocks__/apollo-client.js'
     },
-    clearMocks: true
+    clearMocks: true,
+    // Coverage is measured on every `yarn test` and guarded by thresholds (TEST-10). Console
+    // reporters only: no coverage/ directory is written into the working tree.
+    collectCoverage: true,
+    collectCoverageFrom: [
+        'src/javascript/**/*.{js,jsx}',
+        '!src/javascript/**/__tests__/**',
+        '!src/javascript/**/__mocks__/**',
+        // Webpack/Jahia entry points: module registration only, exercised in Jahia, not in Jest.
+        '!src/javascript/index.js',
+        '!src/javascript/init.js',
+        '!src/javascript/CommunityMcpConfig/register.jsx'
+    ],
+    coverageReporters: ['text', 'text-summary'],
+    coverageThreshold: {
+        global: {statements: 95, lines: 95, branches: 90, functions: 95}
+    }
 };

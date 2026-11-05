@@ -12,10 +12,16 @@ import styles from './CommunityMcpConfig.scss';
 export const SaveBar = ({isDirty, hasChangesToDiscard, isSaving, status, onSave, onDiscard, onDismiss, t}) => {
     const isError = status?.kind === 'error';
     const politeText = status && !isError ? status.message : '';
+    // "Saving…" is shown as well as announced (A11Y-6).
+    const shownKind = isSaving ? 'info' : status?.kind;
+    const isOutputShown = isSaving || Boolean(politeText);
     return (
         <div className={styles.mcp_actions} role="region" aria-label={t('label.saveBar')}>
             <div className={styles.mcp_actionsRow}>
-                {isDirty && <span className={styles.mcp_unsaved}>{t('label.unsavedChanges')}</span>}
+                {/* Persistent status container: the indicator appearing is announced (WCAG 4.1.3). */}
+                <span role="status" data-testid="mcp-unsaved">
+                    {isDirty && <span className={styles.mcp_unsaved}>{t('label.unsavedChanges')}</span>}
+                </span>
                 <div className={styles.mcp_actionsButtons}>
                     {hasChangesToDiscard && (
                         <button type="button" className={styles.mcp_btn} onClick={onDiscard}>{t('label.discard')}</button>
@@ -23,7 +29,6 @@ export const SaveBar = ({isDirty, hasChangesToDiscard, isSaving, status, onSave,
                     <button type="button"
                             id="mcp-save"
                             className={`${styles.mcp_btn} ${styles['mcp_btn--primary']}`}
-                            aria-busy={isSaving || undefined}
                             onClick={onSave}
                     >
                         {t('label.save')}
@@ -33,7 +38,7 @@ export const SaveBar = ({isDirty, hasChangesToDiscard, isSaving, status, onSave,
             <div className={styles.mcp_statusRow}>
                 <output aria-live="polite"
                         aria-atomic="true"
-                        className={politeText ? `${styles.mcp_alert} ${styles[`mcp_alert--${status.kind}`]}` : styles.mcp_visuallyHidden}
+                        className={isOutputShown ? `${styles.mcp_alert} ${styles[`mcp_alert--${shownKind}`]}` : styles.mcp_visuallyHidden}
                 >
                     {isSaving ? t('label.saving') : politeText && <span key={status.id}>{politeText}</span>}
                 </output>

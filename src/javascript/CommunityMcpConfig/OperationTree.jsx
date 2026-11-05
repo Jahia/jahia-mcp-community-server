@@ -11,6 +11,7 @@ import {
     lockOf,
     matchesFilter
 } from './operationTree';
+import {READ_ONLY_PROTECTED_QUERIES} from './policyRules';
 
 // WAI-ARIA APG "tree view" with checkable items (aria-checked true/false/mixed).
 // One tab stop per tree (roving tabindex); Up/Down/Home/End move, Right expands or enters the
@@ -64,6 +65,12 @@ const CheckMark = ({state}) => {
     return null;
 };
 
+const LOCK_NOTE_KEYS = {
+    settings: 'label.lockedNode',
+    configuration: 'label.lockedConfigurationNode',
+    privilege: 'label.lockedPrivilegeNode'
+};
+
 const checkedState = (path, selected, coveringAncestor) => {
     if (selected.has(path) || coveringAncestor) {
         return 'true';
@@ -113,9 +120,10 @@ const describeNode = (node, depth, isUnfiltered, {selected, typeFields, expanded
     const coveringAncestor = isLocked ? null : findCoveringAncestor(node.path, selected);
     const id = `mcp-node-${node.path}`;
     const notes = [
+        READ_ONLY_PROTECTED_QUERIES.includes(node.path) && {id: `${id}-protected`, className: styles.mcp_note, text: t('label.adminQueryNode')},
         node.description && {id: `${id}-desc`, className: styles.mcp_operationDesc, text: node.description, lang: 'en'},
         coveringAncestor && {id: `${id}-covered`, className: styles.mcp_note, text: t('label.coveredBy', {parent: displayPath(coveringAncestor)})},
-        isLocked && {id: `${id}-locked`, className: styles.mcp_note, text: t(lock === 'configuration' ? 'label.lockedConfigurationNode' : 'label.lockedNode')}
+        isLocked && {id: `${id}-locked`, className: styles.mcp_note, text: t(LOCK_NOTE_KEYS[lock])}
     ].filter(Boolean);
 
     return {

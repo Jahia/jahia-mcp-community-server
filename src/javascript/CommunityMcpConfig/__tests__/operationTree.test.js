@@ -27,6 +27,14 @@ describe('getNamedType', () => {
     });
 });
 
+describe('getNamedType: [X!]! fields (UX-6)', () => {
+    test('unwraps NON_NULL -> LIST -> NON_NULL -> OBJECT', () => {
+        const wrapped = {name: null, kind: 'NON_NULL', ofType: {name: null, kind: 'LIST',
+            ofType: {name: null, kind: 'NON_NULL', ofType: {name: 'JCRNode', kind: 'OBJECT'}}}};
+        expect(getNamedType(wrapped)).toEqual({name: 'JCRNode', kind: 'OBJECT'});
+    });
+});
+
 describe('buildOperationMap', () => {
     test('returns an empty array when both inputs are missing', () => {
         expect(buildOperationMap(null, null)).toEqual([]);

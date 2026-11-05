@@ -11,7 +11,13 @@ const t = (key, vars) => {
     return key;
 };
 
-const translation = {t, i18n: {language: 'en', changeLanguage: () => Promise.resolve()}};
+const i18n = {
+    language: 'en',
+    languages: ['en'],
+    hasResourceBundle: () => true,
+    changeLanguage: () => Promise.resolve()
+};
+const translation = {t, i18n};
 
 export const useTranslation = () => translation;
 
