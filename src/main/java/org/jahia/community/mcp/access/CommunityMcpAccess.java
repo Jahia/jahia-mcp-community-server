@@ -1,5 +1,6 @@
 package org.jahia.community.mcp.access;
 
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
 import org.jahia.modules.mcp.spi.tool.ToolError;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
@@ -52,7 +53,7 @@ public final class CommunityMcpAccess {
      *         thread user is missing or is not the context user.
      */
     public static Optional<ToolResult> requireAdministrator(final ToolContext ctx) {
-        final String username = ctx.username();
+        final String username = LogSupport.clean(ctx.username());
         boolean allowed = false;
         try {
             final Optional<JahiaUser> caller = boundCaller(ctx);

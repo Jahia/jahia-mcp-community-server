@@ -2,6 +2,7 @@ package org.jahia.community.mcp.tools;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.TextNode;
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.community.mcp.access.CommunityMcpAccess;
 import org.jahia.community.mcp.access.GraphQLWhitelistGate;
 import org.jahia.modules.mcp.spi.tool.JahiaMcpTool;
@@ -44,6 +45,8 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
             + "it in Administration -> MCP Server, or use a read-only query instead.";
     static final String HINT_NEVER = "This operation can never be run through community.graphql.execute, "
             + "whatever the whitelist says. Do not retry; tell the user to use the Administration UI instead.";
+    static final String HINT_SUBSCRIPTION = "Subscriptions are not supported by community.graphql.execute and "
+            + "cannot be whitelisted. Do not retry; use a query instead.";
     static final String HINT_NOT_WHITELISTED = "Do not retry this operation. Tell the user it must be added "
             + "to the whitelist in Administration -> MCP Server, or use a different, allowed operation.";
     static final String HINT_BAD_QUERY = "Fix the GraphQL document (check names with "
@@ -67,7 +70,9 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
     public String description() {
         return "Execute a GraphQL query or mutation against Jahia's GraphQL API as the calling administrator. "
                 + "Mutations take effect immediately (delete, publish, permissions) and are refused unless "
-                + "explicitly whitelisted; queries are allowed by default. Prefer the built-in site.*, page.* "
+                + "explicitly whitelisted; queries are allowed by default, except the privileged 'admin' namespace "
+                + "(configuration values), which needs an explicit 'query:admin' entry. Once the administrator "
+                + "adds any entry, ONLY the listed operations run (queries included). Prefer the built-in site.*, page.* "
                 + "and content.* tools when one fits. Call community.graphql.introspect first to find "
                 + "operation and argument names. GraphQL-level errors arrive inside a successful result: "
                 + "check the 'errors' array of the returned response even when the call succeeds. "
@@ -122,7 +127,7 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         try {
             return toResult(graphQLClient.execute(ctx, query, variables));
         } catch (IOException | ServletException | RuntimeException ex) {
-            LOGGER.error("{} failed for user='{}'", NAME, ctx.username(), ex);
+            LOGGER.error("{} failed for user='{}'", NAME, LogSupport.clean(ctx.username()), ex);
             return ToolResult.error(ToolError.CODE_INTERNAL, "The GraphQL operation could not be executed.",
                     "Retry; if the failure persists, check the Jahia logs.");
         }
@@ -139,7 +144,10 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         if (reason.contains("can never be run")) {
             return HINT_NEVER;
         }
-        if (reason.contains("read-only") || reason.contains("'mutation:")) {
+        if (reason.contains("subscriptions are not supported") || reason.contains("'subscription:")) {
+            return HINT_SUBSCRIPTION;
+        }
+        if (reason.contains("mutations require an explicit") || reason.contains("'mutation:")) {
             return HINT_MUTATION;
         }
         return HINT_NOT_WHITELISTED;

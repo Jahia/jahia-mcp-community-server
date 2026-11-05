@@ -10,8 +10,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.jcr.ItemExistsException;
+import javax.jcr.Node;
 import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
+import javax.jcr.Value;
 import javax.jcr.query.Query;
 import javax.jcr.query.QueryResult;
 import java.io.BufferedReader;
@@ -31,6 +33,7 @@ public class McpSkillService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpSkillService.class);
     static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
+    private static final String ACL_NODE = "j:acl";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
     /**
      * Type of the skills container and of its sub-folders: the type 1.x created, so an upgraded
@@ -93,6 +96,7 @@ public class McpSkillService {
             JCRTemplate.getInstance().doExecuteWithSystemSession(session -> {
                 // Once, here — not on the read path. Also hardens containers created by older versions.
                 ensureContainer(session);
+                purgeLocalGrants(session);
                 while (entries != null && entries.hasMoreElements()) {
                     final URL url = entries.nextElement();
                     try {
@@ -336,13 +340,77 @@ public class McpSkillService {
                 session.save();
                 LOGGER.info("Broke ACL inheritance on {}: only the system session may write skills", SKILLS_PATH);
             } catch (RepositoryException ex) {
-                // Cluster activation race: another node broke it first. Idempotent: the next
-                // activation checks again, so this is logged, never fatal for the skill import.
+                // Cluster activation race, or a real failure: either way the container is still open to
+                // inherited roles, so this is an ERROR. Idempotent: the next activation checks again.
                 session.refresh(false);
-                LOGGER.warn("Could not break ACL inheritance on {} now ({}); it will be retried at the next "
-                        + "activation", SKILLS_PATH, ex.toString());
+                LOGGER.error("Could not break ACL inheritance on {} ({}): skills stay readable and writable by "
+                        + "inherited roles until it is retried at the next activation; saveSkill retries it "
+                        + "too", SKILLS_PATH, ex.toString());
             }
         }
+    }
+
+    /**
+     * Removes every local ACE (role grant) on the skills container and on each node below it, in the
+     * default workspace (the only one skills are read from). A 1.x install let administrators grant
+     * roles on these nodes, which would still let editors write skills after the inheritance break.
+     * Idempotent; the {@code j:acl} nodes themselves stay, so the container remains broken.
+     */
+    private void purgeLocalGrants(final JCRSessionWrapper session) {
+        try {
+            final List<String> removed = new ArrayList<>();
+            collectAndRemoveAces(session.getNode(SKILLS_PATH), removed);
+            if (!removed.isEmpty()) {
+                session.save();
+                for (final String grant : removed) {
+                    LOGGER.info("Removed local ACL grant {} (skills must only be writable by the system session)",
+                            grant);
+                }
+                LOGGER.info("Removed {} local ACL grant(s) under {}; review the existing skills, they may have "
+                        + "been written by users who held those grants", removed.size(), SKILLS_PATH);
+            }
+        } catch (RepositoryException | RuntimeException ex) {
+            try {
+                session.refresh(false);
+            } catch (RepositoryException refreshFailure) {
+                LOGGER.debug("refresh after a failed ACL purge failed", refreshFailure);
+            }
+            LOGGER.error("Could not remove the local ACL grants under {}; they will be retried at the next "
+                    + "activation", SKILLS_PATH, ex);
+        }
+    }
+
+    private static void collectAndRemoveAces(final JCRNodeWrapper node, final List<String> removed)
+            throws RepositoryException {
+        if (node.hasNode(ACL_NODE)) {
+            final NodeIterator aces = node.getNode(ACL_NODE).getNodes();
+            while (aces != null && aces.hasNext()) {
+                final Node ace = aces.nextNode();
+                if (ace.isNodeType("jnt:ace")) {
+                    removed.add(describeAce(node.getPath(), ace));
+                    ace.remove();
+                }
+            }
+        }
+        final NodeIterator children = node.getNodes();
+        while (children != null && children.hasNext()) {
+            final Node child = children.nextNode();
+            if (!ACL_NODE.equals(child.getName()) && child instanceof JCRNodeWrapper) {
+                collectAndRemoveAces((JCRNodeWrapper) child, removed);
+            }
+        }
+    }
+
+    private static String describeAce(final String path, final Node ace) throws RepositoryException {
+        final String principal = ace.hasProperty("j:principal") ? ace.getProperty("j:principal").getString() : "?";
+        final StringBuilder roles = new StringBuilder();
+        if (ace.hasProperty("j:roles")) {
+            for (final Value role : ace.getProperty("j:roles").getValues()) {
+                roles.append(roles.length() == 0 ? "" : ",").append(role.getString());
+            }
+        }
+        return "on '" + LogSupport.clean(path) + "' for '" + LogSupport.clean(principal)
+                + "' roles [" + LogSupport.clean(roles.toString()) + "]";
     }
 
     /**
@@ -398,11 +466,6 @@ public class McpSkillService {
             this.mcpName = mcpName;
             this.description = description;
             this.content = content;
-        }
-
-        /** Root-level skill: the relative path is the node name. */
-        public SkillEntry(String name, String mcpName, String description, String content) {
-            this(name, name, mcpName, description, content);
         }
     }
 }

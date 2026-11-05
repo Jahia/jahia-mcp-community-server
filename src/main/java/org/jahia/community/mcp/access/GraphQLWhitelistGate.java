@@ -32,8 +32,9 @@ import java.util.Set;
  * legacy entry without a prefix is query-only (see {@link WhitelistEntries}). Introspection fields
  * ({@code __schema}, {@code __type}, {@code __typename}) always pass.</p>
  *
- * <p>An EMPTY whitelist is the read-only default: every query is allowed, no mutation and no
- * subscription is. The {@code communityMcp} mutations are denied whatever the whitelist says: the
+ * <p>An EMPTY whitelist is the read-only default: every query is allowed EXCEPT those under the
+ * privileged {@code admin} namespace (it exposes OSGi configuration values, secrets included; an
+ * explicit {@code query:admin...} entry re-enables it), no mutation and no subscription is. The {@code communityMcp} mutations are denied whatever the whitelist says: the
  * data plane must not rewrite its own guard. (Whitelisting broad mutation roots such as
  * {@code mutation:jcr} or {@code mutation:admin} is allowed but grants everything below them to
  * administrators — prefer exact paths.)</p>
@@ -59,6 +60,10 @@ public class GraphQLWhitelistGate {
     private static final String MUTATION_PREFIX = "mutation.";
     private static final String SUBSCRIPTION_PREFIX = "subscription.";
     private static final String DENIED = "Operation not allowed: ";
+    /** Start of the denial for the admin query namespace in the read-only default. */
+    public static final String PROTECTED_QUERY_REASON_PREFIX = "queries under 'admin' require an explicit "
+            + "query:admin<.path> whitelist entry (the read-only default excludes them: they expose OSGi "
+            + "configuration values)";
     /** Client-facing reason for a named fragment spread; the execute tool maps it to a hint. */
     static final String NAMED_SPREAD_REASON =
             "named fragment spreads are not permitted (use inline fragments '... on Type { ... }' instead)";
@@ -141,7 +146,9 @@ public class GraphQLWhitelistGate {
         }
         if (snapshot.isReadOnlyDefault()) {
             if (path.startsWith(QUERY_PREFIX)) {
-                return Optional.empty();
+                return WhitelistEntries.isReadOnlyProtected(path)
+                        ? Optional.of(PROTECTED_QUERY_REASON_PREFIX + "; '" + shown + "' is not allowed")
+                        : Optional.empty();
             }
             if (path.startsWith(MUTATION_PREFIX)) {
                 return Optional.of("mutations require an explicit mutation:<path> whitelist entry "

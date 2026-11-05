@@ -127,7 +127,7 @@ class McpSkillServiceHardeningTest {
     }
 
     @Test
-    @DisplayName("cluster race on the ACL break is logged and tolerated, the bundled import goes on, retry next time")
+    @DisplayName("failed ACL break (cluster race or not) is logged at ERROR and tolerated, the bundled import goes on, retry next time")
     void acl_break_race_tolerated() throws Exception {
         when(container.getAclInheritanceBreak()).thenReturn(false);
         doThrow(new InvalidItemStateException("another node saved first")).when(session).save();
@@ -140,8 +140,7 @@ class McpSkillServiceHardeningTest {
 
         verify(container).setAclInheritanceBreak(true);
         verify(session).refresh(false);
-        assertThat(messages(Level.WARN)).anySatisfy(m -> assertThat(m).contains("retried at the next activation"));
-        assertThat(messages(Level.ERROR)).as("not reported as an import failure").isEmpty();
+        assertThat(messages(Level.ERROR)).anySatisfy(m -> assertThat(m).contains("retried at the next activation"));
     }
 
     @Test

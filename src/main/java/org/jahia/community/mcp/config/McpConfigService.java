@@ -1,5 +1,6 @@
 package org.jahia.community.mcp.config;
 
+import org.jahia.community.mcp.LogSupport;
 import org.osgi.service.cm.Configuration;
 import org.osgi.service.cm.ConfigurationAdmin;
 import org.osgi.service.component.annotations.Activate;
@@ -85,8 +86,9 @@ public class McpConfigService {
             return;
         }
         if (next.isReadOnlyDefault()) {
-            LOGGER.info("MCP GraphQL gate is in READ-ONLY mode (whitelist is empty): every query is allowed, "
-                    + "mutations and subscriptions are denied. Add 'mutation:<path>' entries in "
+            LOGGER.info("MCP GraphQL gate is in READ-ONLY mode (whitelist is empty): every query is allowed "
+                    + "except those under 'admin' (OSGi configuration values), mutations and subscriptions "
+                    + "are denied. Add 'mutation:<path>' entries in "
                     + "Administration -> MCP Server to allow specific mutations.");
         }
         final Set<String> legacy = WhitelistEntries.legacyEntries(next.raw());
@@ -96,10 +98,12 @@ public class McpConfigService {
         }
         for (final String entry : next.raw()) {
             if (!WhitelistEntries.isValid(entry)) {
-                LOGGER.warn("Ignoring malformed MCP whitelist entry '{}' (expected query:<path> or mutation:<path>)", entry);
+                LOGGER.warn("Ignoring malformed MCP whitelist entry '{}' (expected query:<path> or mutation:<path>)",
+                        LogSupport.clean(entry));
             } else if (WhitelistEntries.isNeverAllowedEntry(entry)) {
                 LOGGER.warn("Ignoring MCP whitelist entry '{}': the communityMcp and admin.jahia.configuration "
-                        + "mutations can never be run through community.graphql.execute", entry);
+                        + "mutations can never be run through community.graphql.execute",
+                        LogSupport.clean(entry));
             }
         }
     }
@@ -133,7 +137,7 @@ public class McpConfigService {
 
     /** Logs a refused whitelist at WARN and returns the exception to throw (message is client-safe). */
     private static IllegalArgumentException rejected(final String message) {
-        LOGGER.warn("Rejected MCP whitelist: {}", message);
+        LOGGER.warn("Rejected MCP whitelist: {}", LogSupport.clean(message));
         return new IllegalArgumentException(message);
     }
 
@@ -173,6 +177,8 @@ public class McpConfigService {
         if (entry == null) {
             return "null";
         }
-        return entry.length() <= MAX_SHOWN_ENTRY_LENGTH ? entry : entry.substring(0, MAX_SHOWN_ENTRY_LENGTH) + "...";
+        final String cleaned = LogSupport.clean(entry);
+        return cleaned.length() <= MAX_SHOWN_ENTRY_LENGTH ? cleaned
+                : cleaned.substring(0, MAX_SHOWN_ENTRY_LENGTH) + "...";
     }
 }

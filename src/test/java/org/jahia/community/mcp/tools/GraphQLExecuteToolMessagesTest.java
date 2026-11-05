@@ -39,7 +39,8 @@ class GraphQLExecuteToolMessagesTest {
     @Test
     void should_describe_errors_in_successful_results_and_whitelisted_mutations() {
         assertThat(tool.description()).contains("'errors' array").contains("successful")
-                .contains("explicitly whitelisted").contains("queries are allowed by default");
+                .contains("explicitly whitelisted").contains("queries are allowed by default")
+                .contains("'admin'").contains("ONLY the listed operations");
         assertThat(tool.tags()).contains("reads-ugc", "destructive");
         assertThat(tool.inputSchema().toString()).contains("errors").contains("whitelisted");
     }
@@ -49,7 +50,10 @@ class GraphQLExecuteToolMessagesTest {
         "Operation not allowed: the GraphQL document could not be parsed|Fix the syntax",
         "Operation not allowed: named fragment spreads are not permitted (use inline fragments '... on Type { ... }' instead)|inline fragments",
         "Operation not allowed: 'mutation:jcr.deleteNode' is not in the whitelist|'mutation:<field>' entry",
-        "Operation not allowed: mutations are refused by the read-only default|'mutation:<field>' entry",
+        "Operation not allowed: mutations require an explicit mutation:<path> whitelist entry (the whitelist is empty, which allows queries only); 'mutation:jcr.x' is not allowed|'mutation:<field>' entry",
+        "Operation not allowed: subscriptions are not supported|Subscriptions are not supported",
+        "Operation not allowed: 'subscription:x' is not in the whitelist|cannot be whitelisted",
+        "Operation not allowed: queries under 'admin' require an explicit query:admin<.path> whitelist entry (x); 'query:admin' is not allowed|added to the whitelist",
         "Operation not allowed: 'mutation:communityMcp.saveSettings' can never be run through community.graphql.execute|can never be run",
         "Operation not allowed: 'query:jcr' is not in the whitelist|added to the whitelist"})
     void should_give_a_distinct_hint_per_denial_cause(final String reason, final String hintPart) {

@@ -126,7 +126,7 @@ class McpGraphQLTest {
     void skills_use_relative_path_as_name() {
         when(skills.listSkills()).thenReturn(List.of(
                 new McpSkillService.SkillEntry("hello-jahia", "default/hello-jahia", "Hello", "Says hi", "# Hi"),
-                new McpSkillService.SkillEntry("root", "Root", "d", "c")));
+                new McpSkillService.SkillEntry("root", "root", "Root", "d", "c")));
 
         List<McpQuery.GqlMcpSkill> result = new McpQuery().getSkills();
 

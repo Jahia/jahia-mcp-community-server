@@ -29,11 +29,13 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Executes a GraphQL document in-process against Jahia's {@code OsgiGraphQLHttpServlet}.
@@ -151,6 +153,9 @@ public class InternalGraphQLClient {
 
     private static final class SyntheticPostRequest extends HttpServletRequestWrapper {
         private final byte[] body;
+        // graphql-dxm-provider stores per-request state (variables, fragments) as request attributes
+        // and reads it back: they must round-trip, the no-op delegate would return null.
+        private final Map<String, Object> attributes = new ConcurrentHashMap<>();
 
         SyntheticPostRequest(final byte[] body) {
             super(noOp(HttpServletRequest.class));
@@ -160,6 +165,30 @@ public class InternalGraphQLClient {
         @Override
         public String getMethod() {
             return "POST";
+        }
+
+        @Override
+        public void setAttribute(final String name, final Object value) {
+            if (value == null) {
+                attributes.remove(name);
+            } else {
+                attributes.put(name, value);
+            }
+        }
+
+        @Override
+        public Object getAttribute(final String name) {
+            return attributes.get(name);
+        }
+
+        @Override
+        public void removeAttribute(final String name) {
+            attributes.remove(name);
+        }
+
+        @Override
+        public Enumeration<String> getAttributeNames() {
+            return Collections.enumeration(new ArrayList<>(attributes.keySet()));
         }
 
         @Override

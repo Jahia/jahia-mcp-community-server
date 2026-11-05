@@ -3,6 +3,7 @@ package org.jahia.community.mcp.tools;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.modules.mcp.spi.tool.JahiaMcpTool;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
 import org.jahia.modules.mcp.spi.tool.ToolError;
@@ -111,7 +112,7 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
             fetchTypeDetails(wanted, ctx, result);
             return ToolResult.ok(result);
         } catch (IOException | ServletException | RuntimeException ex) {
-            LOGGER.error("{} failed for user='{}'", NAME, ctx.username(), ex);
+            LOGGER.error("{} failed for user='{}'", NAME, LogSupport.clean(ctx.username()), ex);
             return internalError();
         }
     }

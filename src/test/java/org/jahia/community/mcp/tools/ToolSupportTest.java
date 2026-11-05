@@ -55,7 +55,7 @@ class ToolSupportTest {
     void should_audit_ok_and_error_results_with_extra_details() {
         final ToolContextFixture f = ToolContextFixture.administrator();
         final ToolResult ok = ToolResult.ok(mock(JsonNode.class));
-        assertThat(ToolSupport.audited(f.ctx, "t", ok)).isSameAs(ok);
+        assertThat(ToolSupport.audited(f.ctx, "t", ok, Map.of())).isSameAs(ok);
         ToolSupport.audited(f.ctx, "t", ToolResult.error(ToolError.CODE_NOT_FOUND, "m", "h"), Map.of("k", "v"));
         assertThat(f.auditEvents).containsExactly(ToolSupport.EVENT_OK, ToolSupport.EVENT_ERROR);
         assertThat(f.auditDetails.get(1)).containsEntry("code", ToolError.CODE_NOT_FOUND).containsEntry("k", "v")
@@ -68,7 +68,7 @@ class ToolSupportTest {
         when(ctx.username()).thenReturn("root");
         when(ctx.audit()).thenThrow(new IllegalStateException("down"));
         final ToolResult ok = ToolResult.ok(mock(JsonNode.class));
-        assertThat(ToolSupport.audited(ctx, "t", ok)).isSameAs(ok);
+        assertThat(ToolSupport.audited(ctx, "t", ok, Map.of())).isSameAs(ok);
     }
 
     @Test

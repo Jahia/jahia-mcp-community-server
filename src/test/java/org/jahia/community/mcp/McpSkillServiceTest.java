@@ -479,15 +479,4 @@ class McpSkillServiceTest {
         assertThat(McpSkillService.relativePath(ROOT + "/a/b")).isEqualTo("a/b");
         assertThat(McpSkillService.relativePath("/elsewhere/a")).isEqualTo("/elsewhere/a");
     }
-
-    @Test
-    @DisplayName("both SkillEntry constructors are kept; the 4-arg form is a root-level skill")
-    void skill_entry_constructors() {
-        final McpSkillService.SkillEntry four = new McpSkillService.SkillEntry("n", "m", "d", "c");
-        final McpSkillService.SkillEntry five = new McpSkillService.SkillEntry("n", "p/n", "m", "d", "c");
-
-        assertThat(four.path).isEqualTo("n");
-        assertThat(five.path).isEqualTo("p/n");
-        assertThat(five.name).isEqualTo("n");
-    }
 }
