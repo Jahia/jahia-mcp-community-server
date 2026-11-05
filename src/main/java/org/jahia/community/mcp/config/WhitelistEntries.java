@@ -17,11 +17,12 @@ import java.util.regex.Pattern;
  * matching the paths {@code org.jahia.community.mcp.access.GraphQLWhitelistGate} extracts from a document. Malformed entries and
  * other operation types (e.g. {@code subscription:}) normalize to nothing — they grant no access.</p>
  *
- * <p>Threat model note (PRB2-3, PRB2-12): the never-allowed list is deliberately short. A root caller
- * can still rewrite skills through a whitelisted {@code mutation:jcr...}, and any other mutation that
- * changes module state, configuration or code (from another module) is protected only by the
- * administrator's choice of entries; prefer exact leaf paths over broad roots such as
- * {@code mutation:jcr} or {@code mutation:admin}.</p>
+ * <p>Threat model note: the never-allowed list is deliberately short. It covers this module's own
+ * guard, OSGi configuration writes, and the mutations that grant privileges or mint credentials
+ * (see {@link #isNeverAllowed}). A root caller can still rewrite skills through a whitelisted
+ * {@code mutation:jcr...}, and any other mutation that changes module state, configuration or code
+ * (from another module) is protected only by the administrator's choice of entries; prefer exact
+ * leaf paths over broad roots such as {@code mutation:jcr} or {@code mutation:admin}.</p>
  */
 public final class WhitelistEntries {
 
@@ -41,15 +42,20 @@ public final class WhitelistEntries {
      * entry re-enables it.
      */
     public static final String READ_ONLY_PROTECTED_QUERY = "query.admin";
-    private static final java.util.List<String> NEVER_ALLOWED_ROOTS =
-            java.util.List.of(NEVER_ALLOWED, NEVER_ALLOWED_CONFIGURATION);
-    // Possessive quantifiers: no backtracking, linear on any input (S5998).
     /**
-     * Segments (operation type included) the gate must extract so that a never-allowed path is
-     * always reached, whatever the whitelist depth: a broad entry such as {@code mutation:admin}
-     * must not stop the extraction short of {@code mutation.admin.jahia.configuration}.
+     * Internal path of the personal API token mutations (create, update, delete): minting a
+     * credential is a privilege escalation, so the whole namespace is denied.
      */
-    public static final int NEVER_ALLOWED_DEPTH = 4;
+    public static final String NEVER_ALLOWED_API_TOKENS = "mutation.admin.personalApiTokens";
+    private static final java.util.List<String> NEVER_ALLOWED_ROOTS =
+            java.util.List.of(NEVER_ALLOWED, NEVER_ALLOWED_CONFIGURATION, NEVER_ALLOWED_API_TOKENS);
+    /**
+     * Mutation field names that grant or withdraw roles. They sit at varying depths (for example
+     * {@code mutation.jcr.mutateNode.grantRoles}), so a mutation path is refused when ANY of its
+     * segments is one of these.
+     */
+    private static final Set<String> NEVER_ALLOWED_SEGMENTS = Set.of("grantRoles", "revokeRoles");
+    // Possessive quantifiers: no backtracking, linear on any input (S5998).
     private static final String GRAPHQL_NAME = "[_A-Za-z]\\w*+";
     private static final Pattern FIELD_PATH = Pattern.compile(GRAPHQL_NAME + "(?:\\." + GRAPHQL_NAME + ")*+");
 
@@ -58,7 +64,7 @@ public final class WhitelistEntries {
 
     /**
      * True if {@code entry} is well-formed but could never take effect because the gate always
-     * denies it ({@code mutation:communityMcp...}, {@code mutation:admin.jahia.configuration...}); such an entry is refused when saving.
+     * denies it (see {@link #isNeverAllowed}); such an entry is refused when saving.
      */
     public static boolean isNeverAllowedEntry(final String entry) {
         return isNeverAllowed(toInternal(entry));
@@ -93,9 +99,14 @@ public final class WhitelistEntries {
     }
 
     /**
-     * True if the internal {@code path} is, or lies under, the {@code communityMcp} mutation
-     * namespace or the OSGi {@code admin.jahia.configuration} mutation: the data plane must not
-     * rewrite its own guard, whatever the whitelist says.
+     * True if the internal {@code path} must never run, whatever the whitelist says:
+     * <ul>
+     *   <li>it is, or lies under, the {@code communityMcp} mutation namespace, the OSGi
+     *       {@code admin.jahia.configuration} mutation (the data plane must not rewrite its own
+     *       guard) or the {@code admin.personalApiTokens} mutations (credential creation);</li>
+     *   <li>it is a mutation path with a {@code grantRoles} or {@code revokeRoles} segment at any
+     *       depth (privilege escalation).</li>
+     * </ul>
      */
     public static boolean isNeverAllowed(final String path) {
         if (path == null) {
@@ -104,6 +115,13 @@ public final class WhitelistEntries {
         for (final String root : NEVER_ALLOWED_ROOTS) {
             if (path.equals(root) || path.startsWith(root + ".")) {
                 return true;
+            }
+        }
+        if (path.startsWith(MUTATION + ".")) {
+            for (final String segment : path.split("\\.")) {
+                if (NEVER_ALLOWED_SEGMENTS.contains(segment)) {
+                    return true;
+                }
             }
         }
         return false;

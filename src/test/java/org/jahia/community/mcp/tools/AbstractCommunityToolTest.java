@@ -89,4 +89,63 @@ class AbstractCommunityToolTest {
     void should_fail_construction_when_the_schema_is_missing() {
         assertThatThrownBy(() -> new Probe("community.missing")).isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void should_refuse_a_session_only_administrator_before_doExecute_and_audit_it() {
+        final Probe tool = new Probe("community.skill.list");
+        final ToolContextFixture f = ToolContextFixture.administrator();
+        org.mockito.Mockito.when(f.request.getHeader("Authorization")).thenReturn(null);
+
+        final ToolResult result = tool.execute(ToolSupport.MAPPER.createObjectNode(), f.ctx);
+
+        assertThat(result.error().code()).isEqualTo(ToolError.CODE_FORBIDDEN);
+        assertThat(result.error().message()).contains("explicit Authorization header");
+        assertThat(tool.runs).hasValue(0);
+        assertThat(f.auditEvents).containsExactly(ToolSupport.EVENT_ERROR);
+    }
+
+    private static final class Failing extends AbstractCommunityTool {
+        private final Error error;
+
+        Failing(final Error error) {
+            super("community.skill.list");
+            this.error = error;
+        }
+
+        @Override
+        public String description() {
+            return "failing";
+        }
+
+        @Override
+        public ToolSafety safety() {
+            return ToolSafety.READ_ONLY;
+        }
+
+        @Override
+        protected ToolResult doExecute(final JsonNode input, final ToolContext ctx) {
+            throw error;
+        }
+    }
+
+    @Test
+    void should_turn_a_stack_overflow_into_an_audited_internal_error() {
+        final ToolContextFixture f = ToolContextFixture.administrator();
+
+        final ToolResult result = new Failing(new StackOverflowError())
+                .execute(ToolSupport.MAPPER.createObjectNode(), f.ctx);
+
+        assertThat(result.error().code()).isEqualTo(ToolError.CODE_INTERNAL);
+        assertThat(f.auditEvents).containsExactly(ToolSupport.EVENT_ERROR);
+    }
+
+    @Test
+    void should_audit_any_other_error_and_let_it_propagate() {
+        final ToolContextFixture f = ToolContextFixture.administrator();
+        final OutOfMemoryError oom = new OutOfMemoryError("test");
+
+        assertThatThrownBy(() -> new Failing(oom).execute(ToolSupport.MAPPER.createObjectNode(), f.ctx))
+                .isSameAs(oom);
+        assertThat(f.auditEvents).containsExactly(ToolSupport.EVENT_ERROR);
+    }
 }

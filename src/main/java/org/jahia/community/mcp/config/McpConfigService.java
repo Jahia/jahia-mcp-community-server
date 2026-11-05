@@ -44,6 +44,11 @@ public class McpConfigService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpConfigService.class);
     private static final int MAX_SHOWN_ENTRY_LENGTH = 100;
+    /** A deliberately malformed entry: a snapshot holding only this one denies everything. */
+    private static final String UNREADABLE_ENTRY = "<unreadable configuration>";
+    private static final String NEVER_ALLOWED_EXPLANATION = "the communityMcp, admin.jahia.configuration and "
+            + "admin.personalApiTokens mutations and any grantRoles/revokeRoles mutation can never be run "
+            + "through community.graphql.execute";
 
     /** Typed view of the configuration. A CSV string ({@code a,b}) and a String[] are both accepted. */
     @ObjectClassDefinition(name = "Jahia MCP Community Server",
@@ -73,10 +78,23 @@ public class McpConfigService {
     }
 
     private void apply(final Config config) {
-        final String joined = config == null || config.whitelist() == null
-                ? "" : String.join(",", config.whitelist());
-        final WhitelistSnapshot next = WhitelistSnapshot.of(parseList(joined));
         final WhitelistSnapshot previous = snapshot;
+        final WhitelistSnapshot next;
+        try {
+            final String joined = config == null || config.whitelist() == null
+                    ? "" : String.join(",", config.whitelist());
+            next = WhitelistSnapshot.of(parseList(joined));
+        } catch (RuntimeException ex) {
+            if (previous != null) {
+                // A garbled update must not silently widen (or reset) the policy: keep what is enforced.
+                LOGGER.error("Unreadable MCP configuration update; keeping the previous whitelist", ex);
+                return;
+            }
+            // Unreadable at activation: nothing valid to keep, so enforce a policy that denies everything.
+            LOGGER.error("Unreadable MCP configuration at activation; denying every operation until it is fixed", ex);
+            snapshot = WhitelistSnapshot.of(Set.of(UNREADABLE_ENTRY));
+            return;
+        }
         snapshot = next;
         logChange(previous, next);
     }
@@ -104,9 +122,8 @@ public class McpConfigService {
                 LOGGER.warn("Ignoring malformed MCP whitelist entry '{}' (expected query:<path> or mutation:<path>)",
                         LogSupport.clean(entry));
             } else if (WhitelistEntries.isNeverAllowedEntry(entry)) {
-                LOGGER.warn("Ignoring MCP whitelist entry '{}': the communityMcp and admin.jahia.configuration "
-                        + "mutations can never be run through community.graphql.execute",
-                        LogSupport.clean(entry));
+                LOGGER.warn("Ignoring MCP whitelist entry '{}': {}",
+                        LogSupport.clean(entry), NEVER_ALLOWED_EXPLANATION);
             }
         }
     }
@@ -165,8 +182,7 @@ public class McpConfigService {
             }
             if (WhitelistEntries.isNeverAllowedEntry(entry)) {
                 throw rejected("Whitelist entry '" + shown(entry)
-                        + "' is refused: the communityMcp and admin.jahia.configuration mutations can never be run "
-                        + "through community.graphql.execute");
+                        + "' is refused: " + NEVER_ALLOWED_EXPLANATION);
             }
         }
         final Configuration config = configurationAdmin.getConfiguration(PID, null);

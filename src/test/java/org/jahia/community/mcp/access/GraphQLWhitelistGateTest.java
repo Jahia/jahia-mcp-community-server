@@ -23,7 +23,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * F10 — audit-logging + decision tests for the REAL {@link GraphQLWhitelistGate#check} method
+ * Audit-logging + decision tests for the REAL {@link GraphQLWhitelistGate#check} method
  * (package-private after the visibility refactor). A mocked {@link McpConfigService} drives the
  * two branches; a logback {@link ListAppender} captures the WARN audit trail, which is the
  * module's only real-time visibility into blocked operations.
@@ -202,7 +202,7 @@ class GraphQLWhitelistGateTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // SEC-364 / GHSA-9vrc-45qw-x759 — whitelist bypass via a document the gate could not parse
+    // whitelist bypass via a document the gate could not parse
     //
     // checkAccess used to read an EMPTY extracted path set as "this document requests nothing I
     // need to police", but the hand-written scanner also produced an empty set for every document
@@ -214,7 +214,7 @@ class GraphQLWhitelistGateTest {
     // ─────────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("SEC-364 leading comma before the selection set → blocked (the reported PoC)")
+    @DisplayName("leading comma before the selection set → blocked (the reported PoC)")
     void sec364_leading_comma_blocked() {
         whitelist(Set.of("currentUser"));
 
@@ -226,7 +226,7 @@ class GraphQLWhitelistGateTest {
     }
 
     @Test
-    @DisplayName("SEC-364 comma before the operation keyword → blocked")
+    @DisplayName("comma before the operation keyword → blocked")
     void sec364_comma_before_keyword_blocked() {
         whitelist(Set.of("currentUser"));
 
@@ -237,7 +237,7 @@ class GraphQLWhitelistGateTest {
     }
 
     @Test
-    @DisplayName("SEC-364 leading byte-order mark → blocked")
+    @DisplayName("leading byte-order mark → blocked")
     void sec364_leading_bom_blocked() {
         whitelist(Set.of("currentUser"));
 
@@ -251,7 +251,7 @@ class GraphQLWhitelistGateTest {
     }
 
     @Test
-    @DisplayName("SEC-364 unbalanced paren in a string argument no longer hides a sibling field")
+    @DisplayName("unbalanced paren in a string argument no longer hides a sibling field")
     void sec364_unbalanced_paren_in_string_arg_blocked() {
         whitelist(Set.of("jcr.nodeByPath"));
 
@@ -267,7 +267,7 @@ class GraphQLWhitelistGateTest {
     }
 
     @Test
-    @DisplayName("SEC-364 multi-operation document: the second operation is inspected too")
+    @DisplayName("multi-operation document: the second operation is inspected too")
     void sec364_multi_operation_second_op_blocked() {
         whitelist(Set.of("currentUser"));
 

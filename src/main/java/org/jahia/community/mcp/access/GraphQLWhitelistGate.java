@@ -19,7 +19,9 @@ import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -40,7 +42,9 @@ import java.util.Set;
  * administrators — prefer exact paths.)</p>
  *
  * <p>Also never allowed: {@code mutation:admin.jahia.configuration} (OSGi configuration writes
- * could rewrite this module's own whitelist PID) and every named fragment spread ({@code ...Name}),
+ * could rewrite this module's own whitelist PID), {@code mutation:admin.personalApiTokens}
+ * (credential creation), every mutation path with a {@code grantRoles} or {@code revokeRoles}
+ * segment at any depth (privilege escalation), and every named fragment spread ({@code ...Name}),
  * in every mode: spreads are not expanded, so the fields behind one would escape the path checks.
  * Use inline fragments instead. Directives ({@code @include}, {@code @skip}) never hide a field:
  * the gate walks every selection whatever its condition.</p>
@@ -50,6 +54,12 @@ import java.util.Set;
  * therefore also lets the intermediate field {@code jcr.addNode} run, and an intermediate mutation
  * field may act by itself (create a node, for instance) even when only a field below it was meant.
  * Whitelist a mutation entry only if every segment of its path is acceptable to run on its own.</p>
+ *
+ * <p>Known limits (documented, not closed): graphql-dxm-provider's {@code fieldFilter},
+ * {@code fieldSorter} and {@code fieldGrouping} arguments name fields that need not appear in the
+ * document and are resolved without the permission instrumentation, so they can probe fields that a
+ * narrow query entry did not list (query side only). And a mutation container field with only
+ * {@code __typename} selected beneath it runs on its own under the container rule above.</p>
  */
 @Component(service = GraphQLWhitelistGate.class)
 public class GraphQLWhitelistGate {
@@ -60,13 +70,17 @@ public class GraphQLWhitelistGate {
     private static final String MUTATION_PREFIX = "mutation.";
     private static final String SUBSCRIPTION_PREFIX = "subscription.";
     private static final String DENIED = "Operation not allowed: ";
+    private static final String UNANALYSABLE_REASON = "the GraphQL document could not be analysed "
+            + "(too deeply nested or unsupported)";
     /** End of every per-path denial reason. */
     private static final String NOT_ALLOWED_SUFFIX = "' is not allowed";
     /** Start of the denial for the admin query namespace in the read-only default. */
     public static final String PROTECTED_QUERY_REASON_PREFIX = "queries under 'admin' require an explicit "
             + "query:admin<.path> whitelist entry (the read-only default excludes them: they expose OSGi "
             + "configuration values)";
-    /** Client-facing reason for a named fragment spread; the execute tool maps it to a hint. */
+    /** Start of the client-facing reason for a document that is not valid GraphQL. */
+    static final String PARSE_REASON = "The GraphQL document could not be parsed";
+    /** Client-facing reason for a named fragment spread. */
     static final String NAMED_SPREAD_REASON =
             "named fragment spreads are not permitted (use inline fragments '... on Type { ... }' instead)";
 
@@ -84,49 +98,77 @@ public class GraphQLWhitelistGate {
      *         (never echoes document content back)
      */
     public Optional<String> check(final String query, final String username, final String clientIp) {
+        return evaluate(query, username, clientIp).map(Denial::message);
+    }
+
+    /**
+     * Decides whether {@code query} may run.
+     *
+     * @return empty when the document is allowed, otherwise the typed, client-safe denial
+     */
+    public Optional<Denial> evaluate(final String query, final String username, final String clientIp) {
         final String who = LogSupport.clean(username != null ? username : ANONYMOUS_USER);
         final String ip = LogSupport.clean(clientIp);
         final WhitelistSnapshot snapshot = mcpConfigService.snapshot();
+        try {
+            return evaluate(query, snapshot, who, ip);
+        } catch (StackOverflowError ex) {
+            // A pathologically nested document: refuse it, never let the Error escape.
+            LOGGER.warn("MCP operation blocked: document nesting exhausted the stack, user='{}', ip='{}'", who, ip);
+            return Optional.of(new Denial(Denial.Kind.UNANALYSABLE, DENIED + UNANALYSABLE_REASON));
+        }
+    }
 
-        // SEC-364: parse ONCE with the real GraphQL grammar; a document the gate cannot parse is
-        // DENIED (the old hand-written scanner let `query,{...}` through).
+    private static Optional<Denial> evaluate(final String query, final WhitelistSnapshot snapshot,
+            final String who, final String ip) {
+        // Parse ONCE with the real GraphQL grammar; a document the gate cannot parse is DENIED
+        // (a hand-written scanner once let `query,{...}` through).
         final Document document;
         try {
             document = Parser.parse(query);
         } catch (RuntimeException ex) {
-            // The parser message can quote document content (inline secrets): log the position only.
+            // The parser message can quote document content (inline secrets): only the position is
+            // exposed, to the log and to the client.
+            final String position = position(ex);
             LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed, "
-                    + "user='{}', ip='{}', at={}", who, ip, position(ex));
-            return Optional.of(DENIED + "the GraphQL document could not be parsed");
+                    + "user='{}', ip='{}', at={}", who, ip, position);
+            return Optional.of(new Denial(Denial.Kind.PARSE, PARSE_REASON
+                    + ("unknown".equals(position) ? "" : " (syntax error at " + position + ")")));
         }
 
-        // PRB-1: named fragment spreads are never expanded, so the fields behind one would escape every
+        // Named fragment spreads are never expanded, so the fields behind one would escape every
         // path check (a mutation reduced to `mutation { ...F }` has no path at all). Refused in EVERY
         // mode, queries included: inline fragments (... on Type { ... }) cover the same need.
         if (containsNamedFragmentSpread(document)) {
             LOGGER.warn("MCP operation blocked: named fragment spreads are not permitted, "
                     + "user='{}', ip='{}'", who, ip);
-            return Optional.of(DENIED + NAMED_SPREAD_REASON);
+            return Optional.of(new Denial(Denial.Kind.NAMED_SPREAD, DENIED + NAMED_SPREAD_REASON));
         }
 
         final Set<String> extracted;
         try {
-            extracted = extractOperationPaths(document,
-                    Math.max(snapshot.maxDepth(), WhitelistEntries.NEVER_ALLOWED_DEPTH));
+            // No depth cut-off: a never-allowed segment (grantRoles...) can sit at any depth.
+            extracted = extractOperationPaths(document, Integer.MAX_VALUE);
         } catch (RuntimeException ex) {
             // A selection the gate cannot account for must never be allowed.
             LOGGER.warn("MCP operation blocked: selection could not be analysed, user='{}', ip='{}'", who, ip);
-            return Optional.of(DENIED + "the GraphQL document could not be analysed");
+            return Optional.of(new Denial(Denial.Kind.UNANALYSABLE, DENIED + UNANALYSABLE_REASON));
         }
         // An empty set after a SUCCESSFUL parse means the document selects only introspection.
-        for (final String path : withoutIntrospectionPaths(extracted)) {
-            final Optional<String> denial = denialFor(path, snapshot);
+        // Never-allowed paths are reported first, so the client learns that no whitelist entry can
+        // ever help rather than being told to ask for one.
+        final Set<String> paths = withoutIntrospectionPaths(extracted);
+        final List<String> ordered = new ArrayList<>(paths.size());
+        paths.stream().filter(WhitelistEntries::isNeverAllowed).forEach(ordered::add);
+        paths.stream().filter(p -> !WhitelistEntries.isNeverAllowed(p)).forEach(ordered::add);
+        for (final String path : ordered) {
+            final Optional<Denial> denial = denialFor(path, snapshot);
             if (denial.isPresent()) {
                 if (LOGGER.isWarnEnabled()) {
                     LOGGER.warn("MCP operation blocked: path='{}', reason='{}', user='{}', ip='{}'",
-                            WhitelistEntries.display(path), denial.get(), who, ip);
+                            WhitelistEntries.display(path), denial.get().message(), who, ip);
                 }
-                return denial.map(reason -> DENIED + reason);
+                return denial.map(d -> new Denial(d.kind(), DENIED + d.message()));
             }
         }
         return Optional.empty();
@@ -140,30 +182,43 @@ public class GraphQLWhitelistGate {
         return "unknown";
     }
 
-    /** Denial reason (without the common prefix) for one operation-qualified path, if any. */
-    private static Optional<String> denialFor(final String path, final WhitelistSnapshot snapshot) {
+    /** Denial (message without the common prefix) for one operation-qualified path, if any. */
+    private static Optional<Denial> denialFor(final String path, final WhitelistSnapshot snapshot) {
         final String shown = WhitelistEntries.display(path);
         if (WhitelistEntries.isNeverAllowed(path)) {
-            return Optional.of("'" + shown + "' can never be run through community.graphql.execute");
+            return denial(Denial.Kind.NEVER_ALLOWED, "'" + shown + "' can never be run through community.graphql.execute");
         }
         if (snapshot.isReadOnlyDefault()) {
             if (path.startsWith(QUERY_PREFIX)) {
                 return WhitelistEntries.isReadOnlyProtected(path)
-                        ? Optional.of(PROTECTED_QUERY_REASON_PREFIX + "; '" + shown + NOT_ALLOWED_SUFFIX)
+                        ? denial(Denial.Kind.PROTECTED_QUERY,
+                                PROTECTED_QUERY_REASON_PREFIX + "; '" + shown + NOT_ALLOWED_SUFFIX)
                         : Optional.empty();
             }
             if (path.startsWith(MUTATION_PREFIX)) {
-                return Optional.of("mutations require an explicit mutation:<path> whitelist entry "
-                        + "(the whitelist is empty, which allows queries only); '" + shown + NOT_ALLOWED_SUFFIX);
+                return denial(Denial.Kind.MUTATION_NOT_ALLOWED, "mutations require an explicit mutation:<path> "
+                        + "whitelist entry (the whitelist is empty, which allows queries only); '" + shown
+                        + NOT_ALLOWED_SUFFIX);
             }
             if (path.startsWith(SUBSCRIPTION_PREFIX)) {
-                return Optional.of("subscriptions are not supported");
+                return denial(Denial.Kind.SUBSCRIPTION, "subscriptions are not supported");
             }
-            return Optional.of("'" + shown + NOT_ALLOWED_SUFFIX);
+            return denial(Denial.Kind.NOT_WHITELISTED, "'" + shown + NOT_ALLOWED_SUFFIX);
         }
         return isPathAllowed(path, snapshot.normalized())
                 ? Optional.empty()
-                : Optional.of("'" + shown + "' is not in the whitelist");
+                : denial(kindOfUnlisted(path), "'" + shown + "' is not in the whitelist");
+    }
+
+    private static Denial.Kind kindOfUnlisted(final String path) {
+        if (path.startsWith(SUBSCRIPTION_PREFIX)) {
+            return Denial.Kind.SUBSCRIPTION;
+        }
+        return path.startsWith(MUTATION_PREFIX) ? Denial.Kind.MUTATION_NOT_ALLOWED : Denial.Kind.NOT_WHITELISTED;
+    }
+
+    private static Optional<Denial> denial(final Denial.Kind kind, final String message) {
+        return Optional.of(new Denial(kind, message));
     }
 
     /**

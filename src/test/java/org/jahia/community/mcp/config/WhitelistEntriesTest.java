@@ -64,9 +64,6 @@ class WhitelistEntriesTest {
         assertThat(WhitelistEntries.isNeverAllowed("mutation.communityMcpX")).isFalse();
         assertThat(WhitelistEntries.isNeverAllowed("query.communityMcp")).isFalse();
         assertThat(WhitelistEntries.isNeverAllowed(null)).isFalse();
-        assertThat(WhitelistEntries.NEVER_ALLOWED_DEPTH)
-                .as("deep enough to reach every never-allowed root")
-                .isGreaterThanOrEqualTo("mutation.admin.jahia.configuration".split("\\.").length);
         assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.jahia.configuration")).isTrue();
         assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.jahia.configuration.value")).isTrue();
         assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.jahia.configurationX")).isFalse();
@@ -84,5 +81,34 @@ class WhitelistEntriesTest {
         String evil = "a".repeat(50_000) + "!";
         org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2),
                 () -> assertThat(WhitelistEntries.isValid(evil)).isFalse());
+    }
+
+    @Test
+    @DisplayName("role grants at any depth and the API token mutations are never allowed")
+    void privilege_granting_mutations_are_never_allowed() {
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.jcr.mutateNode.grantRoles")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.jcr.mutateNode.revokeRoles")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.jcr.mutateNode.mutateDescendant.mutateChildren.grantRoles"))
+                .isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.grantRoles")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.personalApiTokens")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.personalApiTokens.createToken")).isTrue();
+        // near misses and other operation types are not caught
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.jcr.mutateNode.grantRolesX")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.jcr.mutateNode.grantroles")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed("query.jcr.nodeByPath.grantRoles")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.personalApiTokensX")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin")).isFalse();
+    }
+
+    @Test
+    @DisplayName("entries that can only whitelist privilege-granting paths are refused; broad roots are not")
+    void entries_for_privilege_granting_paths_are_never_allowed_entries() {
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:jcr.mutateNode.grantRoles")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:jcr.mutateNode.revokeRoles")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:admin.personalApiTokens.createToken")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:admin.personalApiTokens")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:jcr")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:admin")).isFalse();
     }
 }
