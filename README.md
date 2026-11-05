@@ -174,8 +174,10 @@ returns `not_found`.
 ## Skills
 
 Skills are Markdown documents stored as `mcp:skill` JCR nodes under
-`/sites/systemsite/contents/mcp-skills/`. They deliver Jahia-specific knowledge and instructions to any
-MCP client session.
+`/sites/systemsite/contents/mcp-skills/` (a `jnt:contentList`, with `jnt:contentList` sub-folders). They
+deliver Jahia-specific knowledge and instructions to any MCP client session. Skills are hidden from the
+editors' content-creation pickers (`jmix:hiddenType`), and editing is restricted by the container's ACL
+(see [Security notes](#security-notes)).
 
 A skill's **key** is its path relative to the skills root (`default/hello-jahia`). The same key is
 returned by `skills { name }`, accepted by `saveSkill`, `deleteSkill` and `community.skill.get`.
@@ -378,7 +380,9 @@ through `communityMcp { saveSettings }`.
   per-node ACLs and the whitelist. This is deliberate: skills are shared instruction documents that every
   MCP client may read, and the only write paths are the administrator-gated `saveSkill` and `deleteSkill`
   operations and the module's own seeding. The skills container has its ACL inheritance broken, so no
-  ordinary role can write skills through generic JCR paths. Revisit this if the gate is broadened beyond
+  ordinary role can write skills through generic JCR paths. This also applies to a container created by a 1.x
+  install: its inheritance is broken on the next activation. The skill type carries `jmix:hiddenType`, so
+  skills are hidden from the editors' content-creation pickers. Revisit this if the gate is broadened beyond
   administrators or deny ACLs are added to skill nodes.
 - **Named fragment spreads** and **unparseable documents** are refused while a whitelist is active
   (an unparseable document is refused in any state).

@@ -1,3 +1,4 @@
+import {DocumentNode} from 'graphql';
 import {TOOL, callTool, createApiToken, deleteApiToken, deleteSkill, getSkills, saveSkill, toolPayload, toolText} from '../support/mcp';
 
 describe('MCP Server — Skills', () => {
@@ -8,6 +9,9 @@ describe('MCP Server — Skills', () => {
     // A skill this spec owns, so nothing depends on what the module seeded or on other specs.
     const OWN_SKILL = 'cypress-owned-skill';
     const OWN_CONTENT = 'Content owned by the skills spec';
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const getSkillStorage: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSkillStorage.graphql');
 
     let apiToken: string;
 
@@ -81,6 +85,17 @@ describe('MCP Server — Skills', () => {
 
     it('deleteSkill returns false for a non-existent skill', () => {
         deleteSkill('does-not-exist').its('data.communityMcp.deleteSkill').should('eq', false);
+    });
+
+    it('stores skills in jnt:contentList folders, as 1.x did, with a type hidden from content pickers', () => {
+        cy.apollo({query: getSkillStorage}).then(result => {
+            const jcr = result.data.jcr;
+            expect(jcr.container.primaryNodeType.name).to.eq('jnt:contentList');
+            expect(jcr.folder.primaryNodeType.name).to.eq('jnt:contentList');
+            expect(jcr.skill.primaryNodeType.name).to.eq('mcp:skill');
+            expect(jcr.skill.hidden, 'mcp:skill is a jmix:hiddenType').to.eq(true);
+            expect(jcr.skill.droppable, 'mcp:skill is droppable into jnt:contentList').to.eq(true);
+        });
     });
 
     // --- Nested skills ---

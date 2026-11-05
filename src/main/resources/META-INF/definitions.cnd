@@ -4,13 +4,10 @@
 <mcpmix = 'http://www.jahia.org/jahia/mcpmix/1.0'>
 <mix = 'http://www.jcp.org/jcr/mix/1.0'>
 
-[mcpmix:mcp] > jmix:accessControllableContent mixin
-
-// jmix:droppableContent is only here so that /sites/systemsite/contents (a jnt:contentFolder, which
-// accepts nothing else) accepts the skills container; the skills themselves stay non-droppable.
-[mcp:skillFolder] > jnt:content, mcpmix:mcp, mix:title, jmix:droppableContent
- + * (mcp:skill) = mcp:skill
- + * (mcp:skillFolder) = mcp:skillFolder
+// jmix:droppableContent: the skills container and its sub-folders are jnt:contentList (as created by
+// 1.x), which only accepts droppable children. jmix:hiddenType keeps the module's types out of the
+// editors' content-creation pickers. Editing is restricted by the container's ACL (inheritance broken).
+[mcpmix:mcp] > jmix:accessControllableContent, jmix:droppableContent, jmix:hiddenType mixin
 
 [mcp:skill] > jnt:content, mcpmix:mcp, mix:title
  - mcp:description (string)

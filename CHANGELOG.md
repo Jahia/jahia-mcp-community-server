@@ -85,8 +85,11 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   read-only default.
 - **Response handling.** GraphQL-level errors stay in the `errors` array of a successful result, so clients see them.
 - **Skills.** Bundled default skills are seeded only when absent. Editing a bundled file does not update an
-  existing installation. The `jmix:droppableContent` mixin is removed from `mcp:skill`, so skills no longer
-  appear in content pickers.
+  existing installation. `mcpmix:mcp` now carries `jmix:hiddenType`, so skills no longer appear in the
+  editors' content-creation pickers. The skills container and its sub-folders stay `jnt:contentList`, as
+  created by 1.x, so an upgrade needs no content migration. Editing is restricted by the container's ACL:
+  its inheritance is broken on activation, including on a container that a 1.x install created, so only the
+  system session (the administrator-gated GraphQL operations and the module's seeding) writes skills.
 - **Build.** Built against `mcp-server` 0.5.0-SNAPSHOT. The `graphql-java-servlet` dependency is removed.
 
 ### Notes

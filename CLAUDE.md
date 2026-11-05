@@ -41,7 +41,7 @@ src/main/java/org/jahia/community/mcp/
 
 src/main/resources/
     schemas/community.*.json               # Hand-written JSON Schemas (draft 2020-12), one per tool
-    META-INF/definitions.cnd               # mcp:skill node type (mixins mcpmix:mcp, mix:title)
+    META-INF/definitions.cnd               # mcp:skill node type; mcpmix:mcp (droppable, hidden from pickers)
     META-INF/configurations/org.jahia.community.mcp.cfg   # Default whitelist (empty); first line is fixed
     skills/default/*.md                    # Default skills, seeded into JCR when absent
     javascript/locales/{en,fr}.json        # Admin UI strings
@@ -125,7 +125,8 @@ state (`JCRSessionFactory` current user, locale) and cleans up after the call.
   node cannot become a folder. An existing node must be `mcp:skill`, otherwise the call is refused.
 - Reads, writes and seeding run in a system session (`doExecuteWithSystemSession`). The container
   `mcp-skills` has its ACL inheritance broken, so no ordinary role can write it through generic paths.
-  Only the admin-gated GraphQL operations and the module's own seeding write skills.
+  Only the admin-gated GraphQL operations and the module's own seeding write skills. `ensureContainer` runs
+  on every activation and breaks the inheritance of an existing (1.x) container too; it is idempotent.
 - Listing uses JCR-SQL2 `ISDESCENDANTNODE` under the skills root.
 - The `mcp:` CND prefix is generic. It is kept for compatibility (ARCH-18 deferred); a rename is a
   breaking JCR change.
@@ -204,7 +205,10 @@ Denial strings are client-safe and are returned as `forbidden` with `ToolError`.
   `CommunityMcpSkill`. A duplicate name breaks the whole schema.
 - The `src/main/import` initial content is removed: the module does not ship JCR import content.
   Skills are seeded by code.
-- Do not use `jmix:droppableContent` on `mcp:skill`: it would put skills into content pickers.
+- `mcpmix:mcp` carries `jmix:droppableContent` (the `jnt:contentList` container and folders only accept
+  droppable children) and `jmix:hiddenType` (keeps the types out of the editors' content-creation pickers).
+  Keep both. Do not introduce a custom folder type: the container and folders are `jnt:contentList` as 1.x
+  created them, so upgrades need no migration. Editing is restricted by the container ACL, not by the type.
 
 ## Accepted risks
 

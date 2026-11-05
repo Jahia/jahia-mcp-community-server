@@ -1,0 +1,15 @@
+query getSkillStorage {
+    jcr {
+        container: nodeByPath(path: "/sites/systemsite/contents/mcp-skills") {
+            primaryNodeType { name }
+        }
+        folder: nodeByPath(path: "/sites/systemsite/contents/mcp-skills/default") {
+            primaryNodeType { name }
+        }
+        skill: nodeByPath(path: "/sites/systemsite/contents/mcp-skills/default/hello-jahia") {
+            primaryNodeType { name }
+            hidden: isNodeType(type: {types: ["jmix:hiddenType"]})
+            droppable: isNodeType(type: {types: ["jmix:droppableContent"]})
+        }
+    }
+}

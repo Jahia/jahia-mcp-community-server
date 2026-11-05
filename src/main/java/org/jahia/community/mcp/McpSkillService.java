@@ -33,12 +33,12 @@ public class McpSkillService {
     static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
     /**
-     * Type of the skills container and of its sub-folders. Jahia's own list types
-     * ({@code jnt:contentList}, {@code jnt:contentFolder}) only accept {@code jmix:droppableContent}
-     * children, which {@code mcpmix:mcp} deliberately does not carry, so skills could not be
-     * created under them; {@code mcp:skillFolder} accepts skills and sub-folders only.
+     * Type of the skills container and of its sub-folders: the type 1.x created, so an upgraded
+     * install needs no migration. {@code mcpmix:mcp} carries {@code jmix:droppableContent}, which this
+     * list type requires of its children, and {@code jmix:hiddenType}, which keeps skills out of the
+     * editors' content-creation pickers.
      */
-    static final String FOLDER_NODE_TYPE = "mcp:skillFolder";
+    static final String FOLDER_NODE_TYPE = "jnt:contentList";
     private static final String PROP_NAME = "jcr:title";
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";

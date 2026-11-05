@@ -47,6 +47,8 @@ import static org.mockito.Mockito.when;
 class McpSkillServiceTest {
 
     private static final String ROOT = McpSkillService.SKILLS_PATH;
+    /** The type 1.x created for the container and its sub-folders, kept so upgrades need no migration. */
+    private static final String CONTENT_LIST = "jnt:contentList";
 
     /** Just enough JCR: a path-to-node map, addNode registering children, a stubbed query. */
     private static final class FakeJcr {
@@ -65,7 +67,7 @@ class McpSkillServiceTest {
                 }
                 return n;
             });
-            nodes.put("/sites/systemsite/contents", node("/sites/systemsite/contents", McpSkillService.FOLDER_NODE_TYPE));
+            nodes.put("/sites/systemsite/contents", node("/sites/systemsite/contents", "jnt:contentFolder"));
         }
 
         JCRNodeWrapper node(final String path, final String type) throws RepositoryException {
@@ -90,7 +92,7 @@ class McpSkillServiceTest {
         }
 
         JCRNodeWrapper container() throws RepositoryException {
-            return node(ROOT, McpSkillService.FOLDER_NODE_TYPE);
+            return node(ROOT, CONTENT_LIST);
         }
 
         JCRNodeWrapper skill(final String relative, final String title, final String description, final String content)
@@ -176,9 +178,8 @@ class McpSkillServiceTest {
         final JCRNodeWrapper container = jcr.nodes.get(ROOT);
         assertThat(container).isNotNull();
         verify(container).setAclInheritanceBreak(true);
-        // Jahia's jnt:contentList / jnt:contentFolder only accept jmix:droppableContent children,
-        // which mcp:skill does not carry: the container must be the module's own folder type.
-        assertThat(jcr.types.get(ROOT)).isEqualTo("mcp:skillFolder");
+        // Same type as 1.x created, so an upgraded install needs no migration of the container.
+        assertThat(jcr.types.get(ROOT)).isEqualTo(CONTENT_LIST);
         verify(jcr.session, org.mockito.Mockito.atLeastOnce()).save();
     }
 
@@ -192,6 +193,25 @@ class McpSkillServiceTest {
 
         service.activate(bundleWith(null));
         verify(container, org.mockito.Mockito.times(1)).setAclInheritanceBreak(true);
+    }
+
+    @Test
+    @DisplayName("activate hardens a container left by a 1.x install and imports into its existing folders")
+    void activate_hardens_legacy_container(@TempDir final Path dir) throws Exception {
+        // 1.x created the container and its sub-folders as jnt:contentList, with ACL inheritance kept
+        final JCRNodeWrapper container = jcr.container();
+        final JCRNodeWrapper legacyFolder = jcr.node(ROOT + "/default", CONTENT_LIST);
+        jcr.skill("default/hello-jahia", "Hello", "d", "c");
+        final java.net.URL added = skillFile(dir, "default/new-skill.md", "New");
+
+        service.activate(bundleWith(Collections.enumeration(List.of(added))));
+
+        verify(container).setAclInheritanceBreak(true);
+        assertThat(jcr.aclBreak).containsEntry(ROOT, true);
+        verify(container, never()).addNode(anyString(), anyString());
+        verify(legacyFolder).addNode("new-skill", "mcp:skill");
+        assertThat(jcr.types.get(ROOT)).isEqualTo(CONTENT_LIST);
+        assertThat(jcr.types.get(ROOT + "/default")).isEqualTo(CONTENT_LIST);
     }
 
     @Test
@@ -223,7 +243,7 @@ class McpSkillServiceTest {
         service.activate(bundleWith(Collections.enumeration(List.of(fresh, plain, existing))));
 
         final JCRNodeWrapper hello = jcr.nodes.get(ROOT + "/default/hello");
-        assertThat(jcr.types.get(ROOT + "/default")).isEqualTo(McpSkillService.FOLDER_NODE_TYPE);
+        assertThat(jcr.types.get(ROOT + "/default")).isEqualTo(CONTENT_LIST);
         verify(hello).setProperty("jcr:title", "Hello");
         verify(hello).setProperty("mcp:description", "Says hi");
         verify(hello).setProperty("mcp:content", "Line one\nLine two");
@@ -326,7 +346,7 @@ class McpSkillServiceTest {
     @DisplayName("getSkill returns null for a missing node and for a node that is not a skill")
     void get_missing_or_foreign() throws Exception {
         jcr.container();
-        jcr.node(ROOT + "/folder", McpSkillService.FOLDER_NODE_TYPE);
+        jcr.node(ROOT + "/folder", CONTENT_LIST);
 
         assertThat(service.getSkill("nothing")).isNull();
         assertThat(service.getSkill("folder")).isNull();
@@ -364,8 +384,8 @@ class McpSkillServiceTest {
 
         assertThat(service.saveSkill("team/sub/my-skill", null, null, "# Body")).isTrue();
 
-        assertThat(jcr.types.get(ROOT + "/team")).isEqualTo(McpSkillService.FOLDER_NODE_TYPE);
-        assertThat(jcr.types.get(ROOT + "/team/sub")).isEqualTo(McpSkillService.FOLDER_NODE_TYPE);
+        assertThat(jcr.types.get(ROOT + "/team")).isEqualTo(CONTENT_LIST);
+        assertThat(jcr.types.get(ROOT + "/team/sub")).isEqualTo(CONTENT_LIST);
         assertThat(jcr.types.get(ROOT + "/team/sub/my-skill")).isEqualTo("mcp:skill");
         final JCRNodeWrapper node = jcr.nodes.get(ROOT + "/team/sub/my-skill");
         verify(node, never()).setProperty(eq("jcr:title"), anyString());
@@ -376,7 +396,7 @@ class McpSkillServiceTest {
     @DisplayName("saveSkill reuses existing folders and updates an existing skill in place")
     void save_updates_existing() throws Exception {
         jcr.container();
-        jcr.node(ROOT + "/team", McpSkillService.FOLDER_NODE_TYPE);
+        jcr.node(ROOT + "/team", CONTENT_LIST);
         final JCRNodeWrapper existing = jcr.skill("team/s", "old", "old", "old");
 
         assertThat(service.saveSkill("team/s", "new", "newd", "newc")).isTrue();
@@ -390,7 +410,7 @@ class McpSkillServiceTest {
     @DisplayName("saveSkill never overwrites a node that is not a skill")
     void save_refuses_foreign_node() throws Exception {
         jcr.container();
-        final JCRNodeWrapper folder = jcr.node(ROOT + "/folder", McpSkillService.FOLDER_NODE_TYPE);
+        final JCRNodeWrapper folder = jcr.node(ROOT + "/folder", CONTENT_LIST);
 
         assertThat(service.saveSkill("folder", "t", "d", "c")).isFalse();
 
@@ -432,7 +452,7 @@ class McpSkillServiceTest {
     @DisplayName("deleteSkill never removes a node that is not a skill")
     void delete_refuses_foreign_node() throws Exception {
         jcr.container();
-        final JCRNodeWrapper folder = jcr.node(ROOT + "/folder", McpSkillService.FOLDER_NODE_TYPE);
+        final JCRNodeWrapper folder = jcr.node(ROOT + "/folder", CONTENT_LIST);
 
         assertThat(service.deleteSkill("folder")).isFalse();
 
