@@ -168,8 +168,9 @@ class GraphQLWhitelistGateHostileTest {
     void parse_failure_does_not_log_document_text() {
         assertThat(check("mutation { createUser(password: \"s3cr3t-p4ss\" ")).isPresent();
 
-        assertThat(appender.list).isNotEmpty().noneSatisfy(e -> assertThat(e.getFormattedMessage()).contains("s3cr3t"));
-        assertThat(appender.list).anySatisfy(e -> assertThat(e.getFormattedMessage()).contains("line 1"));
+        assertThat(appender.list).isNotEmpty()
+                .noneSatisfy(e -> assertThat(e.getFormattedMessage()).contains("s3cr3t"))
+                .anySatisfy(e -> assertThat(e.getFormattedMessage()).contains("line 1"));
     }
 
     @Test

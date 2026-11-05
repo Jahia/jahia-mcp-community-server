@@ -41,8 +41,10 @@ public class McpMutation {
         }
         try {
             config.saveWhitelist(whitelist);
-            LOGGER.info("MCP whitelist updated by user '{}': {} entries", LogSupport.actingUser(),
-                    whitelist.size());
+            if (LOGGER.isInfoEnabled()) {
+                LOGGER.info("MCP whitelist updated by user '{}': {} entries", LogSupport.actingUser(),
+                        whitelist.size());
+            }
             return Boolean.TRUE;
         } catch (IllegalArgumentException e) {
             // McpConfigService already logged the rejection; its message is client-safe.

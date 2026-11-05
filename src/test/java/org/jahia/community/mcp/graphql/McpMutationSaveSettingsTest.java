@@ -49,7 +49,7 @@ class McpMutationSaveSettingsTest {
 
     @Test
     @DisplayName("a saved whitelist is audited at INFO with the acting administrator")
-    void save_is_audited() throws IOException {
+    void save_is_audited() {
         final ch.qos.logback.classic.Logger logger =
                 (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(McpMutation.class);
         final ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
