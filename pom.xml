@@ -24,10 +24,10 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <yarn.arguments>build:production</yarn.arguments>
-        <jahia-depends>default,graphql-dxm-provider,mcp-server</jahia-depends>
+        <jahia-depends>default,graphql-dxm-provider,mcp-server=[0.5,0.6)</jahia-depends>
         <mcp-server.version>0.5.0-SNAPSHOT</mcp-server.version>
         <require-capability>
-            osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)",osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
+            osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
         </require-capability>
     </properties>
 
@@ -50,12 +50,6 @@
             <groupId>com.graphql-java</groupId>
             <artifactId>graphql-java</artifactId>
             <version>${graphql-java.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.graphql-java-kickstart</groupId>
-            <artifactId>graphql-java-servlet</artifactId>
-            <version>${graphql-java-servlet.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -159,6 +153,10 @@
                 <configuration>
                     <instructions>
                         <_dsannotations>org.jahia.community.mcp.*</_dsannotations>
+                        <!-- Implementation packages are private. Only the graphql package stays exported:
+                             graphql-dxm-provider reflects over the annotated extension classes and their
+                             return types, and the bundle scan has not been verified to work without it. -->
+                        <Export-Package>org.jahia.community.mcp.graphql</Export-Package>
                         <!-- Tight range: the mcp-server SPI is pre-1.0 and may change between minor versions. -->
                         <Import-Package>
                             org.jahia.modules.mcp.spi.tool;version="[0.5,0.6)",
