@@ -18,8 +18,7 @@ import static org.mockito.Mockito.when;
 /**
  * Security-critical helpers of {@link GraphQLWhitelistGate} that production {@code check()} really
  * uses: {@code extractOperationPaths}, {@code containsNamedFragmentSpread(Document)} and
- * {@code isPathAllowed}, plus end-to-end {@code check()} cases for the properties that used to be
- * asserted on helpers production never called.
+ * {@code isPathAllowed}, plus end-to-end {@code check()} cases for the gate's security properties.
  */
 class GraphQLWhitelistGateHelpersTest {
 

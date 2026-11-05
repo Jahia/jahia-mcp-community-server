@@ -58,12 +58,10 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         });
     });
 
-    // SEC-364 (was U4) — a multi-operation document is now refused by the GATE, on op B's own
-    // merits. Previously checkAccess read only op A's selection set and forwarded the whole
-    // document; op B survived solely because executeGraphQL forwards no operationName, so
-    // graphql-java rejected the document wholesale (data: null + errors, inside a NON-error MCP
-    // envelope). That was a load-bearing accident of the dispatch, not a decision by the gate.
-    // The assertion therefore moved from "no operation executed" to "the gate said no".
+    // SEC-364 — a multi-operation document is refused by the GATE, on op B's own merits: the gate
+    // extracts the paths of every operation in the document. The assertion is "the gate said no",
+    // not "no operation executed": community.graphql.execute forwards no operationName, so
+    // graphql-java would reject the document anyway, and the test must not depend on that.
     it('blocks the second operation of a multi-operation document', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('query A { currentUser { name } } query B { admin { jahia { isAlive } } }')
@@ -75,9 +73,9 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     });
 
     // ── SEC-364 / GHSA-9vrc-45qw-x759 ───────────────────────────────────────────────────────
-    // The gate treated a document its extractor could not walk as PERMITTED. Each arm below is
-    // valid GraphQL that the old hand-written scanner mis-handled, so the operation the whitelist
-    // had just refused executed and returned data.
+    // The gate parses the document with graphql-java's parser and walks the AST of every operation;
+    // a document that does not parse is denied. Each arm below is valid GraphQL with tokens a naive
+    // scanner could mis-read (commas, parentheses inside string arguments), and must be policed.
     //
     // The three-arm shape is deliberate and mirrors the advisory's own proof: the SANITY arm shows
     // the whitelist is loaded and permits what it should, the CONTROL arm shows it genuinely
@@ -100,8 +98,8 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
 
     it('SEC-364 attack — one leading comma no longer escapes the whitelist', () => {
         setWhitelist(['currentUser']);
-        // A comma is an ignored token in the GraphQL grammar; the old skipWS() stopped dead on it,
-        // extractFieldPaths returned an empty set, and checkAccess read empty as "permit".
+        // A comma is an ignored token in the GraphQL grammar; the parser skips it, so the jcr
+        // selection is extracted and refused.
         executeGraphQL('query,{ jcr { nodeByPath(path:"/") { name } } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
             expect(response.body.result.content[0].text).to.include('not in the whitelist');
@@ -116,10 +114,8 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
 
     it('SEC-364 attack — an unbalanced paren in a string argument no longer hides a sibling', () => {
         setWhitelist(['jcr.nodeByPath']);
-        // This is the arm that "treat an empty path set as deny" would NOT have caught: the old
-        // scanner extracted {jcr, jcr.nodeByPath} — non-empty, and both whitelisted — because the
-        // '(' inside the path argument unbalanced skipBalanced()'s counter, which then ran to
-        // end-of-document and never saw the `admin` sibling.
+        // The '(' is inside a string value, so the parser treats it as data: the gate extracts both
+        // jcr.nodeByPath (whitelisted) and the `admin` sibling (not whitelisted), and refuses.
         executeGraphQL('{ jcr { nodeByPath(path: "/x(") { name } } admin { jahia { isAlive } } }')
             .then(response => {
                 expect(response.body.result.isError).to.eq(true);

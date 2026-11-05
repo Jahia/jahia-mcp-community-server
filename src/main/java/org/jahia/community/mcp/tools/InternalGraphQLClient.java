@@ -238,8 +238,8 @@ public class InternalGraphQLClient {
 
     /**
      * Captures status and body. Bytes from the output stream and characters from the writer go to
-     * one UTF-8 byte buffer (the previous wrapper cast each byte to a char, garbling non-ASCII text,
-     * and delegated getStatus() to a no-op proxy, so errors were never detected).
+     * one UTF-8 byte buffer, so non-ASCII text is preserved. {@code setStatus}, {@code sendError} and
+     * {@code getStatus} are recorded here, so an error status set by the servlet is detected.
      */
     private static final class CapturingResponse extends HttpServletResponseWrapper {
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();

@@ -270,9 +270,9 @@ class GraphQLWhitelistGateTest {
     void sec364_multi_operation_second_op_blocked() {
         whitelist(Set.of("currentUser"));
 
-        // Previously only op A was extracted; op B survived solely because executeGraphQL forwards
-        // no operationName, so graphql-java rejected the whole document. The gate now refuses op B
-        // on its own merits instead of relying on that.
+        // Every operation of the document is extracted, so op B is refused on its own merits. The
+        // gate does not rely on community.graphql.execute forwarding no operationName (which makes
+        // graphql-java reject a multi-operation document).
         String q = "query A { currentUser { name } } query B { admin { jahia { isAlive } } }";
         Optional<String> result = gate.check(q, "alice", "1.2.3.4");
 
