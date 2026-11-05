@@ -11,7 +11,7 @@ const QUERY_FIELDS = [
 ];
 const MUTATION_FIELDS = [
     {name: 'admin', description: '', type: {name: 'AdminMutation', kind: 'OBJECT'}},
-    {name: 'communityMcp', description: '', type: {name: 'McpMutation', kind: 'OBJECT'}}
+    {name: 'communityMcp', description: '', type: {name: 'CommunityMcpMutation', kind: 'OBJECT'}}
 ];
 const ADMIN_TYPE_FIELDS = [
     {name: 'jahia', description: '', type: {name: 'JahiaQuery', kind: 'OBJECT'}},
@@ -247,6 +247,23 @@ describe('save feedback', () => {
         const alert = await screen.findByRole('alert');
         expect(alert).toHaveTextContent('label.saveErrorServer');
         expect(within(alert).getByText('Invalid entry foo')).toHaveAttribute('lang', 'en');
+    });
+
+    test('a GraphQL error returned in the result (errorPolicy all) shows errors[0].message', async () => {
+        const saveSpy = jest.fn().mockResolvedValue({
+            data: {communityMcp: {saveSettings: null}},
+            errors: [{message: 'Invalid whitelist entry query:bad path'}]
+        });
+        installApolloMock({saveSpy});
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.keyDown(item(queriesTree(), 'admin'), {key: 'Enter'});
+        fireEvent.click(saveButton());
+
+        const alert = await screen.findByRole('alert');
+        expect(alert).toHaveTextContent('label.saveErrorServer');
+        expect(within(alert).getByText('Invalid whitelist entry query:bad path')).toBeInTheDocument();
+        expect(saveButton()).toBeEnabled();
     });
 
     test('an error without GraphQL details falls back to its message', async () => {

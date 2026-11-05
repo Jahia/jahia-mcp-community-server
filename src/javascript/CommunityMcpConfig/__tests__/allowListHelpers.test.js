@@ -17,7 +17,7 @@ const OPS = [
     {name: 'jcr', path: 'query:jcr', isQuery: true, isMutation: false, typeName: 'JCRQuery', typeKind: 'OBJECT'},
     {name: 'admin', path: 'query:admin', isQuery: true, isMutation: false, typeName: 'AdminQuery', typeKind: 'OBJECT'},
     {name: 'jcr', path: 'mutation:jcr', isQuery: false, isMutation: true, typeName: 'JCRMutation', typeKind: 'OBJECT'},
-    {name: 'communityMcp', path: 'mutation:communityMcp', isQuery: false, isMutation: true, typeName: 'McpMutation', typeKind: 'OBJECT'}
+    {name: 'communityMcp', path: 'mutation:communityMcp', isQuery: false, isMutation: true, typeName: 'CommunityMcpMutation', typeKind: 'OBJECT'}
 ];
 
 describe('isLockedPath', () => {

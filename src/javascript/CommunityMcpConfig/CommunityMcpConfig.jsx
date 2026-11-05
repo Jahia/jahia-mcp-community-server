@@ -31,7 +31,7 @@ const saveFailure = (err, t) => {
         return {kind: 'error', message: t('label.saveNetworkError')};
     }
 
-    const detail = err?.graphQLErrors?.[0]?.message || err?.message;
+    const detail = err?.graphQLErrors?.[0]?.message || err?.errors?.[0]?.message || err?.message;
     return detail ?
         {kind: 'error', message: t('label.saveErrorServer'), detail} :
         {kind: 'error', message: t('label.saveError')};
@@ -240,7 +240,10 @@ export const CommunityMcpConfigAdmin = () => {
         setStatus(null);
         try {
             const result = await saveSettings({variables: {whitelist: [...toSave]}});
-            if (result.data?.communityMcp?.saveSettings) {
+            if (result.errors?.length) {
+                // With errorPolicy 'all' or 'ignore' the server's rejection arrives in the result, not as a throw
+                setStatus(saveFailure(result, t));
+            } else if (result.data?.communityMcp?.saveSettings) {
                 setSaved(toSave);
                 setMigrated(false);
                 setStatus({kind: 'success', message: t('label.saveSuccess')});
