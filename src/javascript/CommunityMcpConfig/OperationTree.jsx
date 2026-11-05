@@ -8,7 +8,7 @@ import {
     hasLoadedMatch,
     hasSelectedDescendant,
     isExpandableKind,
-    isLockedPath,
+    lockOf,
     matchesFilter
 } from './operationTree';
 
@@ -98,7 +98,8 @@ const KEY_HANDLERS = {
 
 // Everything a treeitem shows, derived from the node, the allow list and the filter.
 const describeNode = (node, depth, isUnfiltered, {selected, typeFields, expanded, filter, t}) => {
-    const isLocked = isLockedPath(node.path);
+    const lock = lockOf(node.path);
+    const isLocked = lock !== null;
     const isExpandable = !isLocked && isExpandableKind(node.typeKind, depth);
     const raw = node.typeName ? typeFields[node.typeName] : undefined;
 
@@ -114,7 +115,7 @@ const describeNode = (node, depth, isUnfiltered, {selected, typeFields, expanded
     const notes = [
         node.description && {id: `${id}-desc`, className: styles.mcp_operationDesc, text: node.description, lang: 'en'},
         coveringAncestor && {id: `${id}-covered`, className: styles.mcp_note, text: t('label.coveredBy', {parent: displayPath(coveringAncestor)})},
-        isLocked && {id: `${id}-locked`, className: styles.mcp_note, text: t('label.lockedNode')}
+        isLocked && {id: `${id}-locked`, className: styles.mcp_note, text: t(lock === 'configuration' ? 'label.lockedConfigurationNode' : 'label.lockedNode')}
     ].filter(Boolean);
 
     return {

@@ -8,7 +8,10 @@ import {
     hasLoadedMatch,
     hasSelectedDescendant,
     isLockedPath,
+    isValidEntry,
+    lockOf,
     matchesFilter,
+    policyOf,
     removeEntry,
     setsEqual
 } from '../operationTree';
@@ -29,6 +32,27 @@ describe('isLockedPath', () => {
     test('does not lock the communityMcp query or look-alike names', () => {
         expect(isLockedPath('query:communityMcp')).toBe(false);
         expect(isLockedPath('mutation:communityMcpX')).toBe(false);
+    });
+
+    test('locks the Jahia OSGi configuration mutation and everything under it, like the server', () => {
+        expect(lockOf('mutation:admin.jahia.configuration')).toBe('configuration');
+        expect(lockOf('mutation:admin.jahia.configuration.value')).toBe('configuration');
+        expect(lockOf('mutation:communityMcp')).toBe('settings');
+        expect(lockOf('query:admin.jahia.configuration')).toBeNull();
+        expect(lockOf('mutation:admin.jahia')).toBeNull();
+        expect(lockOf('mutation:admin.jahia.configurationX')).toBeNull();
+    });
+});
+
+describe('isValidEntry', () => {
+    test('accepts query: and mutation: entries with GraphQL names, like the server', () => {
+        expect(isValidEntry('query:jcr')).toBe(true);
+        expect(isValidEntry('mutation:_a.b1.c_d')).toBe(true);
+    });
+
+    test('rejects other operation types and malformed paths', () => {
+        ['subscription:x', 'foo:bar', 'query:', 'query:bad path', 'query:a..b', 'query:1a', 'jcr', 'QUERY:x']
+            .forEach(e => expect(isValidEntry(e)).toBe(false));
     });
 });
 
@@ -64,6 +88,28 @@ describe('countEntriesOfType', () => {
         const set = new Set(['query:a', 'query:b.c', 'mutation:a']);
         expect(countEntriesOfType(set, true)).toBe(2);
         expect(countEntriesOfType(set, false)).toBe(1);
+    });
+
+    test('does not count entries the server ignores', () => {
+        expect(countEntriesOfType(new Set(['query:bad path', 'query:ok']), true)).toBe(1);
+    });
+});
+
+describe('policyOf (mirrors what the server enforces)', () => {
+    test('an empty list is the read-only default', () => {
+        expect(policyOf(new Set())).toEqual({kind: 'info', key: 'label.policyReadOnly'});
+    });
+
+    test('a non-empty list with no valid entry refuses every operation', () => {
+        expect(policyOf(new Set(['subscription:x', 'foo:bar']))).toEqual({kind: 'warning', key: 'label.policyDenyAll'});
+    });
+
+    test('valid mutations without a query refuse every query', () => {
+        expect(policyOf(new Set(['mutation:a', 'subscription:x']))).toEqual({kind: 'warning', key: 'label.policyNoQuery'});
+    });
+
+    test('with a valid query only listed operations pass', () => {
+        expect(policyOf(new Set(['query:a', 'foo:bar']))).toEqual({kind: 'info', key: 'label.policyRestricted'});
     });
 });
 
@@ -109,7 +155,22 @@ describe('findProblemEntries', () => {
             .toEqual([{entry: 'mutation:communityMcp.saveSettings', reason: 'locked'}]);
     });
 
-    test('reports nothing while the schema is unknown', () => {
+    test('flags the locked configuration mutation with its own reason', () => {
+        expect(findProblemEntries(new Set(['mutation:admin.jahia.configuration']), OPS))
+            .toEqual([{entry: 'mutation:admin.jahia.configuration', reason: 'lockedConfiguration'}]);
+    });
+
+    test('flags entries the server ignores, even while the schema is unknown', () => {
+        expect(findProblemEntries(new Set(['subscription:x', 'query:jcr', 'foo:bar']), OPS)).toEqual([
+            {entry: 'foo:bar', reason: 'invalid'},
+            {entry: 'subscription:x', reason: 'invalid'}
+        ]);
+        expect(findProblemEntries(new Set(['subscription:x', 'query:x']), [])).toEqual([
+            {entry: 'subscription:x', reason: 'invalid'}
+        ]);
+    });
+
+    test('reports no unknown root while the schema is unknown', () => {
         expect(findProblemEntries(new Set(['query:x']), [])).toEqual([]);
     });
 });

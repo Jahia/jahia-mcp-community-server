@@ -1,6 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {useApolloClient, useMutation, useQuery} from '@apollo/client';
-import {useTranslation} from 'react-i18next';
 import {Loader} from '@jahia/moonstone';
 import styles from './CommunityMcpConfig.scss';
 import {GET_MUTATION_FIELDS, GET_QUERY_FIELDS, GET_SETTINGS, GET_TYPE_FIELDS, SAVE_SETTINGS} from './CommunityMcpConfig.gql';
@@ -9,11 +8,13 @@ import {
     buildOperationMap,
     clearAllOfType,
     countEntriesOfType,
+    findBlockingEntries,
     findProblemEntries,
     hasLoadedMatch,
     mapTypeFields,
     matchesFilter,
     normalizeWhitelist,
+    policyOf,
     removeEntry,
     setsEqual,
     toggleWhitelistPath
@@ -22,6 +23,8 @@ import {OperationTree} from './OperationTree';
 import {ConfirmDialog} from './ConfirmDialog';
 import {AllEntries, ProblemEntries} from './AllowListEntries';
 import {SaveBar} from './SaveBar';
+import {LiveRegion, useAnnouncer, useFocusRecovery} from './a11y';
+import {useMcpTranslation} from './i18n';
 
 const EMPTY = new Set();
 
@@ -31,20 +34,21 @@ const saveFailure = (err, t) => {
         return {kind: 'error', message: t('label.saveNetworkError')};
     }
 
-    const detail = err?.graphQLErrors?.[0]?.message || err?.errors?.[0]?.message || err?.message;
+    const detail = err?.graphQLErrors?.[0]?.message || err?.message;
     return detail ?
         {kind: 'error', message: t('label.saveErrorServer'), detail} :
         {kind: 'error', message: t('label.saveError')};
 };
 
-const policyOf = whitelist => {
-    if (whitelist.size === 0) {
-        return {kind: 'info', key: 'label.policyReadOnly'};
-    }
-
-    return countEntriesOfType(whitelist, true) === 0 ?
-        {kind: 'warning', key: 'label.policyNoQuery'} :
-        {kind: 'info', key: 'label.policyRestricted'};
+// Focus targets used when the focused control disappears (WCAG 2.4.3).
+const focusPanelHeading = root => root.querySelector('#mcp-panel-title');
+const focusSave = root => root.querySelector('#mcp-save');
+const focusAfterRemove = ({list, neighbour}) => root => {
+    const next = [...root.querySelectorAll(`[data-list="${list}"] [data-entry]`)]
+        .find(el => el.dataset.entry === neighbour);
+    return next?.querySelector('button') ||
+        (list === 'all' && root.querySelector('#mcp-all-entries')) ||
+        focusPanelHeading(root);
 };
 
 const useUnsavedChangesGuard = isDirty => {
@@ -96,7 +100,11 @@ const OperationGroup = ({id, heading, count, note, roots, actions, treeProps}) =
 );
 
 export const CommunityMcpConfigAdmin = () => {
-    const {t} = useTranslation('jahia-mcp-community-server');
+    const t = useMcpTranslation();
+    const rootRef = useRef(null);
+    const requestFocus = useFocusRecovery(rootRef);
+    const [announcement, announce] = useAnnouncer();
+    const statusSeq = useRef(0);
     const apolloClient = useApolloClient();
 
     const queryFieldsResult = useQuery(GET_QUERY_FIELDS, {fetchPolicy: 'cache-first'});
@@ -109,12 +117,16 @@ export const CommunityMcpConfigAdmin = () => {
     const [saved, setSaved] = useState(EMPTY);
     const [isMigrated, setMigrated] = useState(false);
     const [isSaving, setSaving] = useState(false);
-    const [status, setStatus] = useState(null);
-    const [announcement, setAnnouncement] = useState('');
+    const [status, setStatusState] = useState(null);
     const [typeFields, setTypeFields] = useState({});
     const [expanded, setExpanded] = useState(EMPTY);
     const [filterInput, setFilterInput] = useState('');
     const [confirm, setConfirm] = useState(null);
+
+    const setStatus = next => {
+        statusSeq.current += 1;
+        setStatusState(next && {...next, id: statusSeq.current});
+    };
 
     const settingsData = settingsResult.data;
     // Sync server settings into local state via an effect rather than `onCompleted`, which
@@ -122,7 +134,8 @@ export const CommunityMcpConfigAdmin = () => {
     useEffect(() => {
         if (settingsData?.communityMcp?.settings) {
             // Legacy unprefixed entries are shown as the query-only entries the server enforces;
-            // if any were rewritten, the form starts dirty so the new form can be saved.
+            // if any were rewritten, the form starts dirty so the new form can be saved. Entries
+            // the server ignores are kept as written and listed as problems (never dropped).
             const {entries, migrated} = normalizeWhitelist(settingsData.communityMcp.settings.whitelist);
             setWhitelist(entries);
             setSaved(entries);
@@ -142,11 +155,11 @@ export const CommunityMcpConfigAdmin = () => {
     const wasLoading = useRef(isLoading);
     useEffect(() => {
         if (wasLoading.current && !isLoading && !loadErrorKey) {
-            setAnnouncement(t('label.loaded'));
+            announce(t('label.loaded'));
         }
 
         wasLoading.current = isLoading;
-    }, [isLoading, loadErrorKey, t]);
+    }, [isLoading, loadErrorKey, t, announce]);
 
     const filter = filterInput.trim();
     const isDirty = isMigrated || !setsEqual(whitelist, saved);
@@ -166,13 +179,24 @@ export const CommunityMcpConfigAdmin = () => {
 
     useEffect(() => {
         if (filter) {
-            setAnnouncement(t('label.filterResults', {count: visibleCount}));
+            announce(t('label.filterResults', {count: visibleCount}));
         }
-    }, [filter, visibleCount, t]);
+    }, [filter, visibleCount, t, announce]);
 
-    const edit = update => {
-        setWhitelist(update);
+    // Apply a new list. A change of policy is announced once, with the action's own message.
+    const applyEdit = (next, {message, focus} = {}) => {
+        const before = policyOf(whitelist).key;
+        const after = policyOf(next).key;
+        setWhitelist(next);
         setStatus(null);
+        if (focus) {
+            requestFocus(focus);
+        }
+
+        const parts = [message, before !== after && t(after)].filter(Boolean);
+        if (parts.length > 0) {
+            announce(parts.join(' '));
+        }
     };
 
     const loadTypeFields = async node => {
@@ -185,7 +209,7 @@ export const CommunityMcpConfigAdmin = () => {
             });
             const fields = mapTypeFields(result.data?.typeFields?.fields);
             setTypeFields(prev => ({...prev, [node.typeName]: fields}));
-            setAnnouncement(t('label.fieldsLoaded', {count: fields.length, name: node.name}));
+            announce(t('label.fieldsLoaded', {count: fields.length, name: node.name}));
         } catch (err) {
             console.error('Failed to load fields for type', node.typeName, err);
             // Collapse and remember the failure: expanding again retries (UX-9).
@@ -209,21 +233,35 @@ export const CommunityMcpConfigAdmin = () => {
         action
     });
 
-    const clearAll = () => askConfirm('confirmClear', () => edit(() => EMPTY));
-    const allowAllMutations = () => askConfirm('confirmAllowMutations', () => edit(s => allowAllOfType(s, operations, false)));
-    const clearQueries = () => {
-        const doClear = () => edit(s => clearAllOfType(s, true));
-        if (countEntriesOfType(whitelist, false) > 0) {
-            askConfirm('confirmClearQueries', doClear);
+    // One rule for every edit: a change that EMPTIES a non-empty list restores the read-only
+    // default, which allows every query (wider access), so it is always confirmed first, whatever
+    // the control (Clear, Clear queries/mutations, unchecking the last item, removing the last
+    // entry). Once confirmed, focus goes to the panel heading if the control is gone.
+    const edit = (update, options = {}) => {
+        const next = update(whitelist);
+        if (next.size === 0 && whitelist.size > 0) {
+            askConfirm('confirmClear', () => applyEdit(next, {...options, focus: options.focus || focusPanelHeading}));
         } else {
-            doClear();
+            applyEdit(next, options);
         }
     };
 
-    const removeOne = entry => {
-        edit(s => removeEntry(s, entry));
-        setAnnouncement(t('label.entryRemoved', {entry}));
+    const clearAll = () => edit(() => EMPTY);
+    const allowAllMutations = () => askConfirm('confirmAllowMutations', () => edit(s => allowAllOfType(s, operations, false)));
+    const clearQueries = () => {
+        const next = clearAllOfType(whitelist, true);
+        if (next.size > 0 && countEntriesOfType(whitelist, true) > 0 && countEntriesOfType(next, false) > 0) {
+            // Narrowing, but every query becomes refused: confirm as well.
+            askConfirm('confirmClearQueries', () => applyEdit(next));
+        } else {
+            edit(() => next);
+        }
     };
+
+    const removeOne = (entry, place) => edit(
+        s => removeEntry(s, entry),
+        {message: t('label.entryRemoved', {entry}), focus: focusAfterRemove(place)}
+    );
 
     const handleSave = async () => {
         if (isSaving) {
@@ -235,15 +273,21 @@ export const CommunityMcpConfigAdmin = () => {
             return;
         }
 
+        // The server refuses malformed and locked entries: say so before trying, and point to the
+        // list where they can be removed.
+        const blocking = findBlockingEntries(whitelist);
+        if (blocking.length > 0) {
+            setStatus({kind: 'error', message: t('label.saveBlocked', {entries: blocking.join(', ')})});
+            return;
+        }
+
         const toSave = whitelist;
         setSaving(true);
         setStatus(null);
         try {
+            // Default errorPolicy ('none'): a server rejection is thrown, handled in catch.
             const result = await saveSettings({variables: {whitelist: [...toSave]}});
-            if (result.errors?.length) {
-                // With errorPolicy 'all' or 'ignore' the server's rejection arrives in the result, not as a throw
-                setStatus(saveFailure(result, t));
-            } else if (result.data?.communityMcp?.saveSettings) {
+            if (result.data?.communityMcp?.saveSettings) {
                 setSaved(toSave);
                 setMigrated(false);
                 setStatus({kind: 'success', message: t('label.saveSuccess')});
@@ -258,9 +302,12 @@ export const CommunityMcpConfigAdmin = () => {
         }
     };
 
-    const discard = () => {
-        edit(() => saved);
-        setAnnouncement(t('label.discarded'));
+    // Restores what the server holds: never confirmed, it cannot widen access beyond it.
+    const discard = () => applyEdit(saved, {message: t('label.discarded'), focus: focusSave});
+
+    const dismiss = () => {
+        setStatus(null);
+        requestFocus(focusSave);
     };
 
     const renderBody = () => {
@@ -292,7 +339,7 @@ export const CommunityMcpConfigAdmin = () => {
             selected: whitelist, typeFields, expanded, filter, t,
             onToggle: path => edit(s => toggleWhitelistPath(s, path)),
             onSetExpanded: setNodeExpanded,
-            onAnnounce: setAnnouncement
+            onAnnounce: announce
         };
         const queryCount = countEntriesOfType(whitelist, true);
         const mutationCount = countEntriesOfType(whitelist, false);
@@ -302,16 +349,15 @@ export const CommunityMcpConfigAdmin = () => {
                 <Help t={t}/>
                 <section className={styles.mcp_panel} aria-labelledby="mcp-panel-title">
                     <div className={styles.mcp_panelHeader}>
-                        <h3 className={styles.mcp_panelTitle} id="mcp-panel-title">{t('label.allowList')}</h3>
+                        <h3 className={styles.mcp_panelTitle} id="mcp-panel-title" tabIndex={-1}>{t('label.allowList')}</h3>
                         {whitelist.size > 0 && (
                             <button type="button" className={`${styles.mcp_btn} ${styles['mcp_btn--small']}`} onClick={clearAll}>
                                 {t('label.clearAll')}
                             </button>
                         )}
                     </div>
-                    <div role="status" className={`${styles.mcp_alert} ${styles[`mcp_alert--${policy.kind}`]}`}>
-                        {t(policy.key)}
-                    </div>
+                    {/* Not a live region: a change of policy is announced once by applyEdit. */}
+                    <p className={`${styles.mcp_alert} ${styles[`mcp_alert--${policy.kind}`]}`}>{t(policy.key)}</p>
                     {isMigrated && <p className={`${styles.mcp_alert} ${styles['mcp_alert--info']}`}>{t('label.migrated')}</p>}
                     <ProblemEntries problems={findProblemEntries(whitelist, operations)} t={t} onRemove={removeOne}/>
                     <div className={styles.mcp_filter}>
@@ -359,15 +405,14 @@ export const CommunityMcpConfigAdmin = () => {
                          t={t}
                          onSave={handleSave}
                          onDiscard={discard}
-                         onDismiss={() => setStatus(null)}/>
+                         onDismiss={dismiss}/>
             </>
         );
     };
 
     return (
-        <section className={styles.mcp_container} aria-labelledby="mcp-title">
-            {/* Persistent polite live region: present before any message is written to it. */}
-            <div className={styles.mcp_visuallyHidden} role="status" aria-live="polite">{announcement}</div>
+        <section ref={rootRef} className={styles.mcp_container} aria-labelledby="mcp-title">
+            <LiveRegion message={announcement} className={styles.mcp_visuallyHidden}/>
             <h2 id="mcp-title" className={styles.mcp_title}>{t('label.title')}</h2>
             <p className={styles.mcp_description}>{t('label.description')}</p>
             {renderBody()}

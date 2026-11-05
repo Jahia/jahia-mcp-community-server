@@ -41,49 +41,37 @@ const buildOperationMap = (queryFields, mutationFields) => {
 };
 
 const OPERATION_PREFIX = /^(query|mutation):/i;
+// Same syntax as the server (config/WhitelistEntries.java): a lower-cased operation type and a
+// dot-separated path of GraphQL names.
+const VALID_ENTRY = /^(query|mutation):[_A-Za-z]\w*(\.[_A-Za-z]\w*)*$/;
+
+const isValidEntry = entry => VALID_ENTRY.test(entry);
 
 // Mirror the server's reading of stored entries (config/WhitelistEntries.java):
 // - prefixes are case-insensitive ('MUTATION:x' is a mutation entry) → lower-cased;
-// - an unprefixed (legacy) entry is query-only → 'query:' added;
-// - any other 'type:' entry grants nothing on the server → dropped.
-// Returns a NEW Set plus whether anything was rewritten (the caller then offers to save it).
+// - an unprefixed (legacy) entry is query-only → 'query:' added.
+// Anything else (another operation type such as 'subscription:', a malformed path) is kept AS
+// WRITTEN: the server ignores it, but its presence still makes the list non-empty, so dropping it
+// here would show — and, on Save, apply — a wider policy than the one in force. The caller lists
+// such entries so the administrator removes them explicitly.
+// Returns a NEW Set plus whether a valid entry was rewritten (the caller then offers to save it).
 const normalizeWhitelist = entries => {
     const normalized = new Set();
     let migrated = false;
-    (entries || []).forEach(e => {
+    (entries || []).map(e => e.trim()).filter(Boolean).forEach(e => {
         const match = e.match(OPERATION_PREFIX);
-        let next = null;
+        let candidate = e;
         if (match) {
-            next = match[1].toLowerCase() + ':' + e.slice(match[0].length);
+            candidate = match[1].toLowerCase() + ':' + e.slice(match[0].length);
         } else if (!e.includes(':')) {
-            next = QUERY_PREFIX + e;
+            candidate = QUERY_PREFIX + e;
         }
 
-        if (next !== e) {
-            migrated = true;
-        }
-
-        if (next !== null) {
-            normalized.add(next);
-        }
+        const next = isValidEntry(candidate) ? candidate : e;
+        migrated = migrated || next !== e;
+        normalized.add(next);
     });
     return {entries: normalized, migrated};
-};
-
-// True if path itself or any ancestor prefix is in the set
-const isCoveredBySet = (path, set) => {
-    if (set.has(path)) {
-        return true;
-    }
-
-    const parts = path.split('.');
-    for (let i = 1; i < parts.length; i++) {
-        if (set.has(parts.slice(0, i).join('.'))) {
-            return true;
-        }
-    }
-
-    return false;
 };
 
 // Add `path` to the whitelist set, removing any now-redundant descendants, or
@@ -104,10 +92,19 @@ const toggleWhitelistPath = (set, path) => {
     return next;
 };
 
-// The server always refuses 'mutation:communityMcp' and everything under it: the allow list
-// can never open write access to its own settings. The UI shows it, but it cannot be checked.
-const LOCKED_PATH = MUTATION_PREFIX + 'communityMcp';
-const isLockedPath = path => path === LOCKED_PATH || path.startsWith(LOCKED_PATH + '.');
+// The server always refuses these mutations and everything under them: the allow list can never
+// open write access to its own settings ('settings') nor to Jahia's OSGi configuration
+// ('configuration'). The UI shows them, but they cannot be checked.
+const LOCKED_PATHS = [
+    {path: MUTATION_PREFIX + 'communityMcp', lock: 'settings'},
+    {path: MUTATION_PREFIX + 'admin.jahia.configuration', lock: 'configuration'}
+];
+const lockOf = path => {
+    const found = LOCKED_PATHS.find(l => path === l.path || path.startsWith(l.path + '.'));
+    return found ? found.lock : null;
+};
+
+const isLockedPath = path => lockOf(path) !== null;
 
 // 'query:jcr.nodeByPath' -> 'jcr.nodeByPath' (the form shown to people).
 const displayPath = path => {
@@ -134,7 +131,26 @@ const findCoveringAncestor = (path, set) => {
 const typePrefix = isQuery => (isQuery ? QUERY_PREFIX : MUTATION_PREFIX);
 
 const countEntriesOfType = (set, isQuery) =>
-    [...set].filter(e => e.startsWith(typePrefix(isQuery))).length;
+    [...set].filter(e => isValidEntry(e) && e.startsWith(typePrefix(isQuery))).length;
+
+// The policy the server applies to this list (GraphQLWhitelistGate): an empty list is the
+// read-only default; a non-empty list whose entries are all ignored refuses everything.
+const policyOf = set => {
+    if (set.size === 0) {
+        return {kind: 'info', key: 'label.policyReadOnly'};
+    }
+
+    if (![...set].some(isValidEntry)) {
+        return {kind: 'warning', key: 'label.policyDenyAll'};
+    }
+
+    return countEntriesOfType(set, true) === 0 ?
+        {kind: 'warning', key: 'label.policyNoQuery'} :
+        {kind: 'info', key: 'label.policyRestricted'};
+};
+
+// Entries the server refuses on save: malformed or locked. They must be removed first.
+const findBlockingEntries = set => [...set].filter(e => !isValidEntry(e) || isLockedPath(e)).sort();
 
 // Allow every root operation of one type (never a locked one). Returns a NEW Set.
 const allowAllOfType = (set, operations, isQuery) => {
@@ -150,22 +166,29 @@ const clearAllOfType = (set, isQuery) =>
 
 const removeEntry = (set, entry) => new Set([...set].filter(e => e !== entry));
 
-// Entries that the tree cannot show or that the server refuses: their root operation is
-// missing from the current schema, or they are locked. Sorted for a stable display.
-const findProblemEntries = (set, operations) => {
-    if (!operations || operations.length === 0) {
-        return [];
+// Entries that the tree cannot show or that the server refuses or ignores: malformed or of
+// another operation type ('invalid', reported even before the schema is known), locked, or whose
+// root operation is missing from the current schema ('unknown'). Sorted for a stable display.
+const problemOf = (entry, roots) => {
+    if (!isValidEntry(entry)) {
+        return 'invalid';
     }
 
-    const roots = new Set(operations.map(op => op.path));
+    const lock = lockOf(entry);
+    if (lock) {
+        return lock === 'configuration' ? 'lockedConfiguration' : 'locked';
+    }
+
+    return roots && !roots.has(entry.split('.')[0]) ? 'unknown' : null;
+};
+
+const findProblemEntries = (set, operations) => {
+    const roots = operations && operations.length > 0 ? new Set(operations.map(op => op.path)) : null;
     return [...set]
         .sort()
         .map(entry => {
-            if (isLockedPath(entry)) {
-                return {entry, reason: 'locked'};
-            }
-
-            return roots.has(entry.split('.')[0]) ? null : {entry, reason: 'unknown'};
+            const reason = problemOf(entry, roots);
+            return reason && {entry, reason};
         })
         .filter(Boolean);
 };
@@ -221,12 +244,15 @@ export {
     getNamedType,
     buildOperationMap,
     normalizeWhitelist,
-    isCoveredBySet,
+    isValidEntry,
     toggleWhitelistPath,
     mapTypeFields,
     buildChildNodes,
     isExpandableKind,
     isLockedPath,
+    lockOf,
+    policyOf,
+    findBlockingEntries,
     displayPath,
     hasSelectedDescendant,
     findCoveringAncestor,

@@ -2,7 +2,6 @@ import {
     buildChildNodes,
     buildOperationMap,
     getNamedType,
-    isCoveredBySet,
     isExpandableKind,
     mapTypeFields,
     normalizeWhitelist,
@@ -86,42 +85,20 @@ describe('normalizeWhitelist', () => {
         expect(migrated).toBe(true);
     });
 
-    test('drops entries the server ignores (unknown operation type), so the form can be saved', () => {
-        const {entries, migrated} = normalizeWhitelist(['subscription:jcr', 'query:x']);
-        expect([...entries]).toEqual(['query:x']);
-        expect(migrated).toBe(true);
+    test('keeps entries the server ignores (unknown type, malformed) as they are, never drops them', () => {
+        const {entries, migrated} = normalizeWhitelist(['subscription:jcr', 'query:x', 'foo:bar', 'query:bad path']);
+        expect([...entries]).toEqual(['subscription:jcr', 'query:x', 'foo:bar', 'query:bad path']);
+        expect(migrated).toBe(false);
+    });
+
+    test('a malformed legacy entry is kept as written, not turned into a query entry', () => {
+        const {entries, migrated} = normalizeWhitelist(['bad path', ' query:x ', '']);
+        expect([...entries]).toEqual(['bad path', 'query:x']);
+        expect(migrated).toBe(false);
     });
 
     test('handles a missing list', () => {
         expect([...normalizeWhitelist(null).entries]).toEqual([]);
-    });
-});
-
-describe('isCoveredBySet', () => {
-    test('true when the exact path is in the set', () => {
-        expect(isCoveredBySet('admin', new Set(['admin']))).toBe(true);
-    });
-
-    test('true when an ancestor prefix is in the set', () => {
-        expect(isCoveredBySet('admin.jahia.modules', new Set(['admin']))).toBe(true);
-        expect(isCoveredBySet('admin.jahia.modules', new Set(['admin.jahia']))).toBe(true);
-    });
-
-    test('false when only a sibling is in the set', () => {
-        expect(isCoveredBySet('admin.jahia', new Set(['admin.cluster']))).toBe(false);
-    });
-
-    test('false when a descendant (not ancestor) is in the set', () => {
-        expect(isCoveredBySet('admin', new Set(['admin.jahia']))).toBe(false);
-    });
-
-    test('false for an empty set', () => {
-        expect(isCoveredBySet('admin', new Set())).toBe(false);
-    });
-
-    test('a query entry never covers the same-named mutation', () => {
-        expect(isCoveredBySet('query:jcr.nodeByPath', new Set(['query:jcr']))).toBe(true);
-        expect(isCoveredBySet('mutation:jcr.deleteNode', new Set(['query:jcr']))).toBe(false);
     });
 });
 
