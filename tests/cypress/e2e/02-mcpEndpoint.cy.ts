@@ -149,7 +149,7 @@ describe('MCP Server — Endpoint Access Control', () => {
             executeGraphQL(mutation).then(response => {
                 expect(response.body.result.isError, JSON.stringify(entries)).to.eq(true);
                 expect(toolText(response), JSON.stringify(entries)).to.include('can never be run through community.graphql.execute');
-                expect(toolText(response), JSON.stringify(entries)).to.include("'mutation:communityMcp");
+                expect(toolText(response), JSON.stringify(entries)).to.include('\'mutation:communityMcp');
             });
         });
     });

@@ -114,8 +114,7 @@ describe('MCP Community tools — catalog and administrator gate', () => {
     });
 
     it('refuses saveSkill to a non-administrator and stores nothing', () => {
-        graphqlAs(EDITOR, EDITOR_PASSWORD,
-            `mutation { communityMcp { saveSkill(name: "${PROBE_SKILL}", content: "x") } }`).then(response => {
+        graphqlAs(EDITOR, EDITOR_PASSWORD, `mutation { communityMcp { saveSkill(name: "${PROBE_SKILL}", content: "x") } }`).then(response => {
             refused(response.body);
         });
         getSkills().then(result => {
