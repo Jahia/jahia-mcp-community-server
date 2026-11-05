@@ -32,6 +32,13 @@ public class McpSkillService {
     private static final Logger LOGGER = LoggerFactory.getLogger(McpSkillService.class);
     static final String SKILLS_PATH = "/sites/systemsite/contents/mcp-skills";
     private static final String SKILL_NODE_TYPE = "mcp:skill";
+    /**
+     * Type of the skills container and of its sub-folders. Jahia's own list types
+     * ({@code jnt:contentList}, {@code jnt:contentFolder}) only accept {@code jmix:droppableContent}
+     * children, which {@code mcpmix:mcp} deliberately does not carry, so skills could not be
+     * created under them; {@code mcp:skillFolder} accepts skills and sub-folders only.
+     */
+    static final String FOLDER_NODE_TYPE = "mcp:skillFolder";
     private static final String PROP_NAME = "jcr:title";
     private static final String PROP_DESCRIPTION = "mcp:description";
     private static final String PROP_CONTENT = "mcp:content";
@@ -310,7 +317,7 @@ public class McpSkillService {
     private void ensureContainer(JCRSessionWrapper session) throws RepositoryException {
         if (!session.nodeExists(SKILLS_PATH)) {
             try {
-                session.getNode("/sites/systemsite/contents").addNode("mcp-skills", "jnt:contentList");
+                session.getNode("/sites/systemsite/contents").addNode("mcp-skills", FOLDER_NODE_TYPE);
                 session.save();
             } catch (ItemExistsException ex) {
                 // created concurrently by another cluster node
@@ -340,7 +347,7 @@ public class McpSkillService {
                     throw new IllegalArgumentException("'" + segments[i] + "' is a skill and cannot be used as a folder");
                 }
             } else {
-                parent = parent.addNode(segments[i], "jnt:contentList");
+                parent = parent.addNode(segments[i], FOLDER_NODE_TYPE);
                 session.save();
             }
         }

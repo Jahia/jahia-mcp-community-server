@@ -6,6 +6,12 @@
 
 [mcpmix:mcp] > jmix:accessControllableContent mixin
 
+// jmix:droppableContent is only here so that /sites/systemsite/contents (a jnt:contentFolder, which
+// accepts nothing else) accepts the skills container; the skills themselves stay non-droppable.
+[mcp:skillFolder] > jnt:content, mcpmix:mcp, mix:title, jmix:droppableContent
+ + * (mcp:skill) = mcp:skill
+ + * (mcp:skillFolder) = mcp:skillFolder
+
 [mcp:skill] > jnt:content, mcpmix:mcp, mix:title
  - mcp:description (string)
  - mcp:content (string, textarea)
