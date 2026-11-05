@@ -26,11 +26,19 @@ class InternalGraphQLClientTest {
         return new InternalGraphQLClient(servlet);
     }
 
+    /** Runs {@code query} through the caller-bound entry point as a bound administrator. */
+    private static InternalGraphQLClient.Response run(final HttpServlet servlet, final String query,
+                                                      final Object variables) throws Exception {
+        try (CallerFixture caller = CallerFixture.administrator()) {
+            return clientFor(servlet).execute(caller.ctx, query, variables);
+        }
+    }
+
     @Test
-    @DisplayName("forwards query, variables and Authorization header as a JSON POST")
+    @DisplayName("forwards query and variables as a JSON POST, never the caller's Authorization header")
     void forwards_request() throws Exception {
         AtomicReference<String> body = new AtomicReference<>();
-        AtomicReference<String> auth = new AtomicReference<>();
+        AtomicReference<String> auth = new AtomicReference<>("untouched");
         AtomicReference<String> method = new AtomicReference<>();
         HttpServlet servlet = new HttpServlet() {
             @Override
@@ -42,10 +50,16 @@ class InternalGraphQLClientTest {
             }
         };
 
-        clientFor(servlet).execute("{ currentUser { name } }", Map.of("a", 1), "APIToken abc");
+        try (CallerFixture caller = CallerFixture.administrator()) {
+            HttpServletRequest incoming = org.mockito.Mockito.mock(HttpServletRequest.class);
+            org.mockito.Mockito.when(incoming.getHeader("Authorization")).thenReturn("APIToken abc");
+            org.mockito.Mockito.when(caller.ctx.request()).thenReturn(java.util.Optional.of(incoming));
+
+            clientFor(servlet).execute(caller.ctx, "{ currentUser { name } }", Map.of("a", 1));
+        }
 
         assertThat(method.get()).isEqualTo("POST");
-        assertThat(auth.get()).isEqualTo("APIToken abc");
+        assertThat(auth.get()).as("the identity comes from the bound user, not a credential header").isNull();
         assertThat(MAPPER.readTree(body.get()).path("query").asText()).isEqualTo("{ currentUser { name } }");
         assertThat(MAPPER.readTree(body.get()).path("variables").path("a").asInt()).isEqualTo(1);
     }
@@ -60,7 +74,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        InternalGraphQLClient.Response response = clientFor(servlet).execute("{ x }", null, null);
+        InternalGraphQLClient.Response response = run(servlet, "{ x }", null);
 
         assertThat(response.body()).contains("Éléphant 日本");
     }
@@ -75,7 +89,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        assertThat(clientFor(servlet).execute("{ x }", null, null).body()).contains("Été — 日本");
+        assertThat(run(servlet, "{ x }", null).body()).contains("Été — 日本");
     }
 
     @Test
@@ -89,7 +103,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        InternalGraphQLClient.Response response = clientFor(servlet).execute("{ x }", null, null);
+        InternalGraphQLClient.Response response = run(servlet, "{ x }", null);
 
         assertThat(response.status()).isEqualTo(400);
         assertThat(response.isHttpError()).isTrue();
@@ -105,7 +119,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        assertThat(clientFor(servlet).execute("{ x }", null, null).status()).isEqualTo(403);
+        assertThat(run(servlet, "{ x }", null).status()).isEqualTo(403);
     }
 
     @Test
@@ -118,7 +132,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        InternalGraphQLClient.Response response = clientFor(servlet).execute("{ x }", null, null);
+        InternalGraphQLClient.Response response = run(servlet, "{ x }", null);
 
         assertThat(response.status()).isEqualTo(200);
         assertThat(response.isHttpError()).isFalse();
@@ -207,7 +221,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        assertThatThrownBy(() -> clientFor(servlet).execute("{ x }", null, null))
+        assertThatThrownBy(() -> run(servlet, "{ x }", null))
                 .isInstanceOf(IOException.class).hasMessageContaining("exceeds");
     }
 
@@ -225,7 +239,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        assertThatThrownBy(() -> clientFor(servlet).execute("{ x }", null, null)).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> run(servlet, "{ x }", null)).isInstanceOf(IOException.class);
     }
 
     @Test
@@ -239,7 +253,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        assertThat(clientFor(servlet).execute("{ x }", null, null).body()).hasSize(InternalGraphQLClient.MAX_RESPONSE_BYTES);
+        assertThat(run(servlet, "{ x }", null).body()).hasSize(InternalGraphQLClient.MAX_RESPONSE_BYTES);
     }
 
     @Test
@@ -275,23 +289,7 @@ class InternalGraphQLClientTest {
             }
         };
 
-        assertThat(clientFor(servlet).execute("{ x }", null, null).body()).isEqualTo("{}");
-    }
-
-    @Test
-    @DisplayName("the legacy overload still forwards the Authorization header in the header listing")
-    void legacy_overload_lists_authorization_header() throws Exception {
-        AtomicReference<java.util.List<String>> names = new AtomicReference<>();
-        HttpServlet servlet = new HttpServlet() {
-            @Override
-            protected void service(HttpServletRequest req, HttpServletResponse resp) {
-                names.set(java.util.Collections.list(req.getHeaderNames()));
-            }
-        };
-
-        clientFor(servlet).execute("{ x }", null, "Basic abc");
-
-        assertThat(names.get()).containsExactly("Content-Type", "Authorization");
+        assertThat(run(servlet, "{ x }", null).body()).isEqualTo("{}");
     }
 
     @Test
@@ -308,6 +306,6 @@ class InternalGraphQLClientTest {
             }
         };
 
-        assertThat(clientFor(servlet).execute("{ x }", null, null).status()).isEqualTo(200);
+        assertThat(run(servlet, "{ x }", null).status()).isEqualTo(200);
     }
 }

@@ -48,7 +48,7 @@ class GraphQLIntrospectToolTest {
     }
 
     private void stubType(final String name, final InternalGraphQLClient.Response response) throws Exception {
-        when(client.execute(contains("__type(name: $name)"), eq(Map.of("name", name)), any())).thenReturn(response);
+        when(client.execute(any(), contains("__type(name: $name)"), eq(Map.of("name", name)))).thenReturn(response);
     }
 
     private static ObjectNode withTypeNames(final String... names) {
@@ -73,7 +73,7 @@ class GraphQLIntrospectToolTest {
     @DisplayName("no arguments → type list (name + kind) and details of the root types only")
     void default_returns_summary_and_root_types() throws Exception {
         ToolContextFixture f = ToolContextFixture.administrator();
-        when(client.execute(contains("__schema"), isNull(), any())).thenReturn(new InternalGraphQLClient.Response(200, STEP1));
+        when(client.execute(any(), contains("__schema"), isNull())).thenReturn(new InternalGraphQLClient.Response(200, STEP1));
         stubType("Query", typeResponse("Query", 10));
         stubType("Mutation", typeResponse("Mutation", 10));
 
@@ -84,7 +84,7 @@ class GraphQLIntrospectToolTest {
                 .contains("JCRNode").doesNotContain("long text").doesNotContain("__Type");
         assertThat(result.payload().path("types").has("Query")).isTrue();
         assertThat(result.payload().path("types").has("Mutation")).isTrue();
-        verify(client, never()).execute(any(), eq(Map.of("name", "JCRNode")), any());
+        verify(client, never()).execute(any(), anyString(), eq(Map.of("name", "JCRNode")));
         assertThat(f.auditEvents).containsExactly("tool.execute.ok");
     }
 
@@ -97,8 +97,8 @@ class GraphQLIntrospectToolTest {
 
         assertThat(result.payload().path("types").has("JCRNode")).isTrue();
         assertThat(result.payload().has("schema")).isFalse();
-        verify(client, never()).execute(contains("__schema"), any(), any());
-        verify(client, times(1)).execute(anyString(), any(), any());
+        verify(client, never()).execute(any(), contains("__schema"), any());
+        verify(client, times(1)).execute(any(), anyString(), any());
     }
 
     @Test
@@ -112,7 +112,7 @@ class GraphQLIntrospectToolTest {
         ToolResult result = tool.execute(withTypeNames(names), ToolContextFixture.administrator().ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_VALIDATION);
-        verify(client, never()).execute(anyString(), any(), any());
+        verify(client, never()).execute(any(), anyString(), any());
     }
 
     @Test
@@ -121,7 +121,7 @@ class GraphQLIntrospectToolTest {
         ToolResult result = tool.execute(withTypeNames("Query\") { x } #"), ToolContextFixture.administrator().ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_VALIDATION);
-        verify(client, never()).execute(anyString(), any(), any());
+        verify(client, never()).execute(any(), anyString(), any());
     }
 
     @Test
@@ -137,7 +137,7 @@ class GraphQLIntrospectToolTest {
         assertThat(result.payload().path("types").has("A")).isTrue();
         assertThat(result.payload().path("types").has("B")).isFalse();
         assertThat(result.payload().path("truncatedTypes").toString()).contains("B").contains("C");
-        verify(client, never()).execute(any(), eq(Map.of("name", "C")), any());
+        verify(client, never()).execute(any(), anyString(), eq(Map.of("name", "C")));
     }
 
     @Test
@@ -149,7 +149,7 @@ class GraphQLIntrospectToolTest {
         }
         String step1 = "{\"data\":{\"__schema\":{\"queryType\":{\"name\":\"Query\"},"
                 + "\"mutationType\":{\"name\":\"Mutation\"},\"types\":[" + types + "]}}}";
-        when(client.execute(contains("__schema"), isNull(), any())).thenReturn(new InternalGraphQLClient.Response(200, step1));
+        when(client.execute(any(), contains("__schema"), isNull())).thenReturn(new InternalGraphQLClient.Response(200, step1));
         stubType("Query", typeResponse("Query", 10));
         stubType("Mutation", typeResponse("Mutation", 10));
 
@@ -167,7 +167,7 @@ class GraphQLIntrospectToolTest {
 
         tool.execute(withTypeNames("JCRNode", "JCRNode", "JCRNode"), ToolContextFixture.administrator().ctx);
 
-        verify(client, times(1)).execute(any(), eq(Map.of("name", "JCRNode")), any());
+        verify(client, times(1)).execute(any(), anyString(), eq(Map.of("name", "JCRNode")));
     }
 
     @Test
@@ -184,7 +184,7 @@ class GraphQLIntrospectToolTest {
     @Test
     @DisplayName("HTTP error on the schema step → internal error")
     void http_error_on_step1() throws Exception {
-        when(client.execute(contains("__schema"), isNull(), any())).thenReturn(new InternalGraphQLClient.Response(503, STEP1));
+        when(client.execute(any(), contains("__schema"), isNull())).thenReturn(new InternalGraphQLClient.Response(503, STEP1));
         stubType("Query", typeResponse("Query", 10));
         stubType("Mutation", typeResponse("Mutation", 10));
 
@@ -196,7 +196,7 @@ class GraphQLIntrospectToolTest {
     @Test
     @DisplayName("schema step without data → internal error")
     void empty_step1() throws Exception {
-        when(client.execute(contains("__schema"), isNull(), any())).thenReturn(new InternalGraphQLClient.Response(200, ""));
+        when(client.execute(any(), contains("__schema"), isNull())).thenReturn(new InternalGraphQLClient.Response(200, ""));
 
         ToolResult result = tool.execute(MAPPER.createObjectNode(), ToolContextFixture.administrator().ctx);
 

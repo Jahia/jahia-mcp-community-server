@@ -45,14 +45,6 @@ class ToolSupportTest {
     }
 
     @Test
-    void should_return_null_authorization_without_request() {
-        final ToolContext ctx = mock(ToolContext.class);
-        when(ctx.request()).thenReturn(Optional.empty());
-        assertThat(ToolSupport.authorization(ctx)).isNull();
-        assertThat(ToolSupport.authorization(ToolContextFixture.administrator().ctx)).isEqualTo("APIToken abc");
-    }
-
-    @Test
     void should_sanitize_control_characters_and_bound_length() {
         assertThat(ToolSupport.sanitize(null, 10)).isEmpty();
         assertThat(ToolSupport.sanitize("a\r\nb\tc", 10)).isEqualTo("a b c");

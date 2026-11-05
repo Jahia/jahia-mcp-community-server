@@ -76,7 +76,7 @@ class GraphQLExecuteToolMessagesTest {
         "500, Server error", "503, Server error"})
     void should_choose_the_http_hint_from_the_status(final int status, final String hintPart) throws Exception {
         when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
-        when(client.execute(anyString(), any(), any()))
+        when(client.execute(any(), anyString(), any()))
                 .thenReturn(new InternalGraphQLClient.Response(status, "{\"errors\":[{\"message\":\"boom\"}]}"));
 
         assertThat(run("{ x }").error().hint()).contains(hintPart);
@@ -86,7 +86,7 @@ class GraphQLExecuteToolMessagesTest {
     void should_bound_and_sanitize_server_error_text() throws Exception {
         when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
         final String body = "{\"errors\":[{\"message\":\"" + "a\\nb".repeat(500) + "\"},{}]}";
-        when(client.execute(anyString(), any(), any())).thenReturn(new InternalGraphQLClient.Response(400, body));
+        when(client.execute(any(), anyString(), any())).thenReturn(new InternalGraphQLClient.Response(400, body));
 
         final String message = run("{ x }").error().message();
 
@@ -96,7 +96,7 @@ class GraphQLExecuteToolMessagesTest {
     @Test
     void should_report_no_details_for_non_json_or_empty_errors() throws Exception {
         when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
-        when(client.execute(anyString(), any(), any()))
+        when(client.execute(any(), anyString(), any()))
                 .thenReturn(new InternalGraphQLClient.Response(500, "<html>"))
                 .thenReturn(new InternalGraphQLClient.Response(500, "{\"errors\":[]}"));
 
@@ -107,7 +107,7 @@ class GraphQLExecuteToolMessagesTest {
     @Test
     void should_return_raw_text_when_a_successful_body_is_not_json() throws Exception {
         when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
-        when(client.execute(anyString(), any(), any())).thenReturn(new InternalGraphQLClient.Response(200, "plain"));
+        when(client.execute(any(), anyString(), any())).thenReturn(new InternalGraphQLClient.Response(200, "plain"));
 
         assertThat(run("{ x }").payload().asText()).isEqualTo("plain");
     }

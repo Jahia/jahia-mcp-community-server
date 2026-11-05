@@ -89,11 +89,6 @@ final class ToolSupport {
         }
     }
 
-    /** The caller's Authorization header, forwarded to the in-process GraphQL servlet. */
-    static String authorization(final ToolContext ctx) {
-        return ctx.request().map(r -> r.getHeader("Authorization")).orElse(null);
-    }
-
     /** Parses {@code body} as JSON, or {@code null} when it is empty or not JSON. */
     static JsonNode parseJsonOrNull(final String body) {
         if (body == null || body.isBlank()) {

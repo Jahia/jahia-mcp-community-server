@@ -92,7 +92,6 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
         if (invalid.isPresent()) {
             return invalid.get();
         }
-        final String auth = ToolSupport.authorization(ctx);
         try {
             final ObjectNode result = ToolSupport.MAPPER.createObjectNode();
             final List<String> wanted = new ArrayList<>();
@@ -101,7 +100,7 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
                 typeNamesNode.forEach(n -> distinct.add(n.asText()));
                 wanted.addAll(distinct);
             } else {
-                final JsonNode schema = fetchSchemaSummary(auth);
+                final JsonNode schema = fetchSchemaSummary(ctx);
                 if (schema == null) {
                     return internalError();
                 }
@@ -109,7 +108,7 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
                 addRootTypeName(schema, "queryType", wanted);
                 addRootTypeName(schema, "mutationType", wanted);
             }
-            fetchTypeDetails(wanted, auth, result);
+            fetchTypeDetails(wanted, ctx, result);
             return ToolResult.ok(result);
         } catch (IOException | ServletException | RuntimeException ex) {
             LOGGER.error("{} failed for user='{}'", NAME, ctx.username(), ex);
@@ -134,8 +133,8 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
     }
 
     /** The {@code __schema} summary, type list reduced to non-introspection {name, kind}; null on failure. */
-    private JsonNode fetchSchemaSummary(final String auth) throws IOException, ServletException {
-        final InternalGraphQLClient.Response response = graphQLClient.execute(SCHEMA_QUERY, null, auth);
+    private JsonNode fetchSchemaSummary(final ToolContext ctx) throws IOException, ServletException {
+        final InternalGraphQLClient.Response response = graphQLClient.execute(ctx, SCHEMA_QUERY, null);
         final JsonNode json = response.isHttpError() ? null : ToolSupport.parseJsonOrNull(response.body());
         final JsonNode schema = json == null ? null : json.path("data").path("__schema");
         if (schema == null || !schema.isObject()) {
@@ -166,7 +165,7 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
      * compact {name, kind} list must never push the root types out. The first type is always
      * included so a caller asking for one large type still makes progress.
      */
-    private void fetchTypeDetails(final List<String> names, final String auth, final ObjectNode result)
+    private void fetchTypeDetails(final List<String> names, final ToolContext ctx, final ObjectNode result)
             throws IOException, ServletException {
         final ObjectNode details = result.putObject(TYPES);
         final ArrayNode skipped = result.putArray("skippedTypes");
@@ -174,7 +173,7 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
         int used = 0;
         for (int i = 0; i < names.size(); i++) {
             final boolean budgetSpent = used >= MAX_RESULT_CHARS && !details.isEmpty();
-            final JsonNode type = budgetSpent ? null : fetchType(names.get(i), auth);
+            final JsonNode type = budgetSpent ? null : fetchType(names.get(i), ctx);
             final int size = type == null ? 0 : type.toString().length();
             if (budgetSpent || exceedsBudget(used, size, details)) {
                 names.subList(i, names.size()).forEach(truncated::add);
@@ -197,8 +196,8 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
     }
 
     /** One type's details, or null when the server does not know it or fails. */
-    private JsonNode fetchType(final String name, final String auth) throws IOException, ServletException {
-        final InternalGraphQLClient.Response response = graphQLClient.execute(TYPE_QUERY, Map.of("name", name), auth);
+    private JsonNode fetchType(final String name, final ToolContext ctx) throws IOException, ServletException {
+        final InternalGraphQLClient.Response response = graphQLClient.execute(ctx, TYPE_QUERY, Map.of("name", name));
         final JsonNode json = response.isHttpError() ? null : ToolSupport.parseJsonOrNull(response.body());
         final JsonNode type = json == null ? null : json.path("data").path("__type");
         return type != null && type.isObject() ? type : null;

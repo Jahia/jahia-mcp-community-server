@@ -12,6 +12,7 @@ import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -69,7 +70,7 @@ class GraphQLIntrospectToolBranchesTest {
 
     @Test
     void should_treat_a_null_typeNames_as_absent() throws Exception {
-        when(client.execute(contains("__schema"), any(), any()))
+        when(client.execute(any(), contains("__schema"), any()))
                 .thenReturn(new InternalGraphQLClient.Response(200, "{\"data\":{\"__schema\":{}}}"));
 
         final ToolResult result = run(ToolSupport.MAPPER.nullNode());
@@ -80,7 +81,7 @@ class GraphQLIntrospectToolBranchesTest {
 
     @Test
     void should_return_internal_error_when_the_client_throws() throws Exception {
-        when(client.execute(any(), any(), any())).thenThrow(new IOException("down"));
+        when(client.execute(any(), anyString(), any())).thenThrow(new IOException("down"));
 
         assertThat(run(null).error().code()).isEqualTo("internal");
         assertThat(run(names("Query")).error().code()).isEqualTo("internal");
@@ -88,7 +89,7 @@ class GraphQLIntrospectToolBranchesTest {
 
     @Test
     void should_skip_unknown_types_and_dedupe_names() throws Exception {
-        when(client.execute(contains("__type"), any(), any()))
+        when(client.execute(any(), contains("__type"), any()))
                 .thenReturn(new InternalGraphQLClient.Response(200, "{\"data\":{\"__type\":null}}"));
 
         final ToolResult result = run(names("Nope", "Nope"));
@@ -100,7 +101,7 @@ class GraphQLIntrospectToolBranchesTest {
     @Test
     void should_truncate_when_a_later_type_would_exceed_the_budget_and_keep_the_first() throws Exception {
         final String big = "x".repeat(GraphQLIntrospectTool.MAX_RESULT_CHARS - 100);
-        when(client.execute(contains("__type"), any(), any())).thenReturn(
+        when(client.execute(any(), contains("__type"), any())).thenReturn(
                 new InternalGraphQLClient.Response(200,
                         "{\"data\":{\"__type\":{\"name\":\"A\",\"d\":\"" + big + "\"}}}"));
 

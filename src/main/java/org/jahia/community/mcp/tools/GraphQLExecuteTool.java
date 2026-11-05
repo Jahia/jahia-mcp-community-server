@@ -118,7 +118,7 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
                 ? ToolSupport.MAPPER.convertValue(variablesNode, Map.class)
                 : null;
         try {
-            return toResult(graphQLClient.execute(query, variables, ToolSupport.authorization(ctx)));
+            return toResult(graphQLClient.execute(ctx, query, variables));
         } catch (IOException | ServletException | RuntimeException ex) {
             LOGGER.error("{} failed for user='{}'", NAME, ctx.username(), ex);
             return ToolResult.error(ToolError.CODE_INTERNAL, "The GraphQL operation could not be executed.",

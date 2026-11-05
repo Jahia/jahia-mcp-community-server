@@ -43,7 +43,9 @@ import java.util.Map;
  * mcp-server to be the context user, sets it as the current user around the servlet call and
  * restores the previous one afterwards, so JCR ACLs apply as for the caller whatever mcp-server does
  * internally. Do NOT call {@code JcrSessionFilter.endRequest()} here — mcp-server cleans the worker
- * thread after the tool returns, and ending the request mid-tool would drop the caller identity.</p>
+ * thread after the tool returns, and ending the request mid-tool would drop the caller identity.
+ * No credential header is forwarded: the synthetic request carries only the JSON body, and the
+ * identity comes from the bound user alone.</p>
  */
 @Component(service = InternalGraphQLClient.class)
 public class InternalGraphQLClient {
@@ -51,7 +53,6 @@ public class InternalGraphQLClient {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String CONTENT_TYPE_JSON = "application/json";
     private static final String HEADER_CONTENT_TYPE = "Content-Type";
-    private static final String HEADER_AUTHORIZATION = "Authorization";
     private static final int HTTP_OK = 200;
     private static final int HTTP_ERROR_THRESHOLD = 400;
 
@@ -105,25 +106,13 @@ public class InternalGraphQLClient {
         final JahiaUser previous = sessionFactory.getCurrentUser();
         sessionFactory.setCurrentUser(caller);
         try {
-            return dispatch(query, variables, null);
+            return dispatch(query, variables);
         } finally {
             sessionFactory.setCurrentUser(previous);
         }
     }
 
-    /**
-     * @param variables     optional variables map (may be {@code null})
-     * @param authorization the caller's Authorization header, forwarded as-is (may be {@code null})
-     * @deprecated runs as whichever user is bound on the thread and forwards a credential header;
-     *             use {@link #execute(ToolContext, String, Object)}
-     */
-    @Deprecated
-    public Response execute(final String query, final Object variables, final String authorization)
-            throws IOException, ServletException {
-        return dispatch(query, variables, authorization);
-    }
-
-    private Response dispatch(final String query, final Object variables, final String authorization)
+    private Response dispatch(final String query, final Object variables)
             throws IOException, ServletException {
         final Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("query", query);
@@ -132,7 +121,7 @@ public class InternalGraphQLClient {
         }
         final byte[] requestBody = MAPPER.writeValueAsBytes(payload);
         final CapturingResponse response = new CapturingResponse();
-        graphQLServlet.service(new SyntheticPostRequest(requestBody, authorization), response);
+        graphQLServlet.service(new SyntheticPostRequest(requestBody), response);
         if (response.overflow) {
             throw new IOException("The GraphQL response exceeds " + MAX_RESPONSE_BYTES + " bytes");
         }
@@ -160,12 +149,10 @@ public class InternalGraphQLClient {
 
     private static final class SyntheticPostRequest extends HttpServletRequestWrapper {
         private final byte[] body;
-        private final String authorization;
 
-        SyntheticPostRequest(final byte[] body, final String authorization) {
+        SyntheticPostRequest(final byte[] body) {
             super(noOp(HttpServletRequest.class));
             this.body = body;
-            this.authorization = authorization;
         }
 
         @Override
@@ -198,9 +185,6 @@ public class InternalGraphQLClient {
             if (HEADER_CONTENT_TYPE.equalsIgnoreCase(name)) {
                 return CONTENT_TYPE_JSON;
             }
-            if (HEADER_AUTHORIZATION.equalsIgnoreCase(name)) {
-                return authorization;
-            }
             return null;
         }
 
@@ -212,9 +196,7 @@ public class InternalGraphQLClient {
 
         @Override
         public Enumeration<String> getHeaderNames() {
-            return Collections.enumeration(authorization != null
-                    ? List.of(HEADER_CONTENT_TYPE, HEADER_AUTHORIZATION)
-                    : List.of(HEADER_CONTENT_TYPE));
+            return Collections.enumeration(List.of(HEADER_CONTENT_TYPE));
         }
 
         @Override

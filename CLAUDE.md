@@ -27,7 +27,7 @@ src/main/java/org/jahia/community/mcp/
         SkillListTool.java                 # community.skill.list        (READ_ONLY)
         SkillGetTool.java                  # community.skill.get         (READ_ONLY)
         InternalGraphQLClient.java         # In-process POST to OsgiGraphQLHttpServlet
-        ToolSupport.java                   # Schema loading, audit, header helpers
+        ToolSupport.java                   # Schema loading, audit, sanitizing helpers
     graphql/
         McpGraphQLExtensionsProvider.java  # Registers GraphQL extensions
         McpQueryExtension.java             # Adds `communityMcp` to Query → McpQuery
@@ -77,8 +77,10 @@ JCR thread state (`JCRSessionFactory.setCurrentUser`, locale) and cleans up afte
 ### GraphQL dispatch (InternalGraphQLClient)
 
 Builds a synthetic JSON POST (`HttpServletRequestWrapper` over a no-op proxy) and calls
-`OsgiGraphQLHttpServlet.service()` in-process, forwarding the caller's `Authorization` header from
-`ctx.request()`. The capturing response stores `setStatus`/`sendError` and writes both the output
+`OsgiGraphQLHttpServlet.service()` in-process through `execute(ctx, query, variables)`: it requires
+the `JahiaUser` bound by mcp-server to be `ctx.username()` (`CommunityMcpAccess.boundCaller`), sets it
+as current user for the call and restores the previous one. No `Authorization` header is forwarded
+(SEC-10): the identity comes from the bound user only. The capturing response stores `setStatus`/`sendError` and writes both the output
 stream and the writer into one UTF-8 byte buffer (1.x cast bytes to chars — garbling non-ASCII —
 and never saw the status).
 
