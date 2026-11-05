@@ -47,7 +47,9 @@ class GraphQLExecuteToolMessagesTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource(delimiter = '|', value = {
+    // The hint fragments contain single quotes ('mutation:<field>'), so use '"' as the quote
+    // character: JUnit 6's CSV parser rejects a quote character inside an unquoted field.
+    @CsvSource(delimiter = '|', quoteCharacter = '"', value = {
         "NAMED_SPREAD|inline fragments|forbidden",
         "UNANALYSABLE|too deeply nested|forbidden",
         "MUTATION_NOT_ALLOWED|'mutation:<field>' entry|forbidden",
