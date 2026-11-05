@@ -1,4 +1,4 @@
-package org.jahia.community.mcp;
+package org.jahia.community.mcp.access;
 
 import graphql.parser.InvalidSyntaxException;
 import org.junit.jupiter.api.DisplayName;
@@ -11,11 +11,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Unit tests for McpServlet's security-critical static helpers:
+ * Unit tests for GraphQLWhitelistGate's security-critical static helpers:
  * extractFieldPaths and containsNamedFragmentSpread.
  * checkAccess logic is tested indirectly through these primitives.
  */
-class McpServletAccessTest {
+class GraphQLWhitelistGateHelpersTest {
 
     // ─────────────────────────────────────────────────────────────────────────
     // extractFieldPaths
@@ -28,20 +28,20 @@ class McpServletAccessTest {
         @Test
         @DisplayName("null query returns empty set")
         void null_query_returns_empty() {
-            assertThat(McpServlet.extractFieldPaths((String) null, 3)).isEmpty();
+            assertThat(GraphQLWhitelistGate.extractFieldPaths((String) null, 3)).isEmpty();
         }
 
         @Test
         @DisplayName("blank query returns empty set")
         void blank_query_returns_empty() {
-            assertThat(McpServlet.extractFieldPaths("   ", 3)).isEmpty();
+            assertThat(GraphQLWhitelistGate.extractFieldPaths("   ", 3)).isEmpty();
         }
 
         @Test
         @DisplayName("simple query extracts top-level fields")
         void simple_query_extracts_top_level_fields() {
             String q = "{ jcr currentUser admin }";
-            assertThat(McpServlet.extractFieldPaths(q, 1))
+            assertThat(GraphQLWhitelistGate.extractFieldPaths(q, 1))
                     .containsExactlyInAnyOrder("jcr", "currentUser", "admin");
         }
 
@@ -49,7 +49,7 @@ class McpServletAccessTest {
         @DisplayName("alias resolves to real field name not alias label")
         void alias_resolves_to_field_name() {
             String q = "{ myAlias: jcr { nodeByPath(path: \"/\") { name } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 3);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 3);
             assertThat(paths).contains("jcr").doesNotContain("myAlias");
         }
 
@@ -57,7 +57,7 @@ class McpServletAccessTest {
         @DisplayName("inline fragment fields are collected under parent prefix")
         void inline_fragment_fields_collected() {
             String q = "{ admin { ... on AdminQueries { jahia { isAlive } } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 3);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 3);
             assertThat(paths).contains("admin", "admin.jahia", "admin.jahia.isAlive");
         }
 
@@ -66,7 +66,7 @@ class McpServletAccessTest {
         void named_fragment_spread_not_expanded() {
             // Fields inside fragment definition must not be resolved
             String q = "{ admin { ...AdminFields } } fragment AdminFields on AdminQueries { jahia { isAlive } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 3);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 3);
             assertThat(paths).contains("admin").doesNotContain("admin.jahia", "admin.jahia.isAlive");
         }
 
@@ -74,7 +74,7 @@ class McpServletAccessTest {
         @DisplayName("field directives are skipped, field name extracted correctly")
         void directives_skipped() {
             String q = "{ jcr @skip(if: false) { nodeByPath(path: \"/\") @include(if: true) { name } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 3);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 3);
             assertThat(paths).contains("jcr", "jcr.nodeByPath", "jcr.nodeByPath.name");
         }
 
@@ -82,7 +82,7 @@ class McpServletAccessTest {
         @DisplayName("depth cap stops collection at maxDepth segments")
         void depth_cap_limits_collection() {
             String q = "{ a { b { c { d } } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 2);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 2);
             assertThat(paths).contains("a", "a.b").doesNotContain("a.b.c", "a.b.c.d");
         }
 
@@ -90,7 +90,7 @@ class McpServletAccessTest {
         @DisplayName("line comments are stripped before parsing")
         void line_comments_stripped() {
             String q = "{\n  # this is a comment\n  jcr\n  currentUser\n}";
-            assertThat(McpServlet.extractFieldPaths(q, 1))
+            assertThat(GraphQLWhitelistGate.extractFieldPaths(q, 1))
                     .containsExactlyInAnyOrder("jcr", "currentUser");
         }
 
@@ -99,7 +99,7 @@ class McpServletAccessTest {
         void hash_in_string_arg_not_treated_as_comment() {
             // The '#' inside the string literal must not eat the rest of the line
             String q = "{ jcr { nodeByPath(path: \"/sites#main\") { name } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 3);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 3);
             assertThat(paths).contains("jcr", "jcr.nodeByPath", "jcr.nodeByPath.name");
         }
 
@@ -107,7 +107,7 @@ class McpServletAccessTest {
         @DisplayName("mutation keyword is handled as operation header")
         void mutation_keyword_handled() {
             String q = "mutation { mcpSaveSettings(whitelist: []) }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 1);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 1);
             assertThat(paths).contains("mcpSaveSettings");
         }
 
@@ -117,7 +117,7 @@ class McpServletAccessTest {
         @DisplayName("irregular whitespace, newlines and tabs do not hide field segments")
         void whitespace_does_not_fracture_paths() {
             String q = "{  \n admin \t { jahia { isAlive } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 3);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 3);
             assertThat(paths).containsExactlyInAnyOrder("admin", "admin.jahia", "admin.jahia.isAlive");
         }
 
@@ -129,7 +129,7 @@ class McpServletAccessTest {
         @DisplayName("multi-operation document: every operation's paths are extracted")
         void multi_operation_all_ops_parsed() {
             String q = "query A { currentUser { name } } query B { admin { jahia { isAlive } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 3);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 3);
             assertThat(paths)
                     .contains("currentUser", "admin", "admin.jahia", "admin.jahia.isAlive");
         }
@@ -140,9 +140,9 @@ class McpServletAccessTest {
         @Test
         @DisplayName("ignored tokens before the selection set do not empty the extracted paths")
         void ignored_tokens_do_not_empty_paths() {
-            assertThat(McpServlet.extractFieldPaths("query,{ jcr { nodeByPath(path:\"/\") { name } } }", 2))
+            assertThat(GraphQLWhitelistGate.extractFieldPaths("query,{ jcr { nodeByPath(path:\"/\") { name } } }", 2))
                     .contains("jcr", "jcr.nodeByPath");
-            assertThat(McpServlet.extractFieldPaths(",query { jcr { nodeByPath(path:\"/\") { name } } }", 2))
+            assertThat(GraphQLWhitelistGate.extractFieldPaths(",query { jcr { nodeByPath(path:\"/\") { name } } }", 2))
                     .contains("jcr", "jcr.nodeByPath");
         }
 
@@ -154,7 +154,7 @@ class McpServletAccessTest {
         @DisplayName("unbalanced paren inside a string argument does not hide sibling fields")
         void unbalanced_paren_in_string_arg_does_not_hide_siblings() {
             String q = "{ jcr { nodeByPath(path: \"/x(\") { name } } admin { jahia { isAlive } } }";
-            Set<String> paths = McpServlet.extractFieldPaths(q, 2);
+            Set<String> paths = GraphQLWhitelistGate.extractFieldPaths(q, 2);
             assertThat(paths).contains("jcr", "jcr.nodeByPath", "admin", "admin.jahia");
         }
 
@@ -163,7 +163,7 @@ class McpServletAccessTest {
         @Test
         @DisplayName("unparseable document raises rather than returning an empty set")
         void unparseable_document_raises() {
-            assertThatThrownBy(() -> McpServlet.extractFieldPaths("{ jcr { ", 2))
+            assertThatThrownBy(() -> GraphQLWhitelistGate.extractFieldPaths("{ jcr { ", 2))
                     .isInstanceOf(InvalidSyntaxException.class);
         }
     }
@@ -179,40 +179,40 @@ class McpServletAccessTest {
         @Test
         @DisplayName("null returns false")
         void null_returns_false() {
-            assertThat(McpServlet.containsNamedFragmentSpread((String) null)).isFalse();
+            assertThat(GraphQLWhitelistGate.containsNamedFragmentSpread((String) null)).isFalse();
         }
 
         @Test
         @DisplayName("blank returns false")
         void blank_returns_false() {
-            assertThat(McpServlet.containsNamedFragmentSpread("  ")).isFalse();
+            assertThat(GraphQLWhitelistGate.containsNamedFragmentSpread("  ")).isFalse();
         }
 
         @Test
         @DisplayName("plain query with no spreads returns false")
         void plain_query_no_spreads() {
-            assertThat(McpServlet.containsNamedFragmentSpread("{ jcr { nodeByPath(path:\"/\") { name } } }")).isFalse();
+            assertThat(GraphQLWhitelistGate.containsNamedFragmentSpread("{ jcr { nodeByPath(path:\"/\") { name } } }")).isFalse();
         }
 
         @Test
         @DisplayName("inline fragment does not trigger detection")
         void inline_fragment_not_detected() {
             String q = "{ admin { ... on AdminQueries { jahia { isAlive } } } }";
-            assertThat(McpServlet.containsNamedFragmentSpread(q)).isFalse();
+            assertThat(GraphQLWhitelistGate.containsNamedFragmentSpread(q)).isFalse();
         }
 
         @Test
         @DisplayName("named fragment spread is detected")
         void named_fragment_spread_detected() {
             String q = "{ admin { ...AdminFields } } fragment AdminFields on AdminQueries { isAlive }";
-            assertThat(McpServlet.containsNamedFragmentSpread(q)).isTrue();
+            assertThat(GraphQLWhitelistGate.containsNamedFragmentSpread(q)).isTrue();
         }
 
         @Test
         @DisplayName("spread in a line comment is not detected")
         void commented_spread_not_detected() {
             String q = "{ admin { isAlive } }\n# ...SomeFragment";
-            assertThat(McpServlet.containsNamedFragmentSpread(q)).isFalse();
+            assertThat(GraphQLWhitelistGate.containsNamedFragmentSpread(q)).isFalse();
         }
     }
 
@@ -235,17 +235,17 @@ class McpServletAccessTest {
         void covered_path_allowed() {
             // whitelist: jcr — query accesses jcr.nodeByPath.name → all covered
             Set<String> whitelist = Set.of("jcr");
-            Set<String> paths = McpServlet.collectNonIntrospectionPaths("{ jcr { nodeByPath(path:\"/\") { name } } }", 3);
+            Set<String> paths = GraphQLWhitelistGate.collectNonIntrospectionPaths("{ jcr { nodeByPath(path:\"/\") { name } } }", 3);
             assertThat(paths).isNotEmpty();
-            assertThat(paths.stream().allMatch(p -> McpServlet.isPathAllowed(p, whitelist))).isTrue();
+            assertThat(paths.stream().allMatch(p -> GraphQLWhitelistGate.isPathAllowed(p, whitelist))).isTrue();
         }
 
         @Test
         @DisplayName("uncovered path is blocked")
         void uncovered_path_blocked() {
             Set<String> whitelist = Set.of("currentUser");
-            Set<String> paths = McpServlet.collectNonIntrospectionPaths("{ admin { jahia { isAlive } } }", 3);
-            assertThat(paths.stream().anyMatch(p -> !McpServlet.isPathAllowed(p, whitelist))).isTrue();
+            Set<String> paths = GraphQLWhitelistGate.collectNonIntrospectionPaths("{ admin { jahia { isAlive } } }", 3);
+            assertThat(paths.stream().anyMatch(p -> !GraphQLWhitelistGate.isPathAllowed(p, whitelist))).isTrue();
         }
 
         // F7(d) — __-introspection filter regression guard, against the REAL production
@@ -253,7 +253,7 @@ class McpServletAccessTest {
         @Test
         @DisplayName("introspection-only doc: all __-segment paths stripped, result is empty")
         void introspection_fields_filtered() {
-            Set<String> paths = McpServlet.collectNonIntrospectionPaths("{ __schema { types { name } } }", 2);
+            Set<String> paths = GraphQLWhitelistGate.collectNonIntrospectionPaths("{ __schema { types { name } } }", 2);
             assertThat(paths).isEmpty();
         }
 
@@ -263,7 +263,7 @@ class McpServletAccessTest {
         @Test
         @DisplayName("mixed introspection + real field: __ paths stripped but real field survives")
         void mixed_doc_real_field_survives_filter() {
-            Set<String> paths = McpServlet.collectNonIntrospectionPaths(
+            Set<String> paths = GraphQLWhitelistGate.collectNonIntrospectionPaths(
                     "{ __schema { types { name } } admin { jahia { isAlive } } }", 3);
             assertThat(paths)
                     .contains("admin", "admin.jahia", "admin.jahia.isAlive")
@@ -276,21 +276,21 @@ class McpServletAccessTest {
         @DisplayName("path matching is case-sensitive: case-mismatch is NOT allowed")
         void path_matching_is_case_sensitive() {
             Set<String> whitelist = Set.of("currentUser");
-            assertThat(McpServlet.isPathAllowed("currentuser", whitelist)).isFalse();
-            assertThat(McpServlet.isPathAllowed("CURRENTUSER", whitelist)).isFalse();
+            assertThat(GraphQLWhitelistGate.isPathAllowed("currentuser", whitelist)).isFalse();
+            assertThat(GraphQLWhitelistGate.isPathAllowed("CURRENTUSER", whitelist)).isFalse();
             // exact case still matches (positive control)
-            assertThat(McpServlet.isPathAllowed("currentUser", whitelist)).isTrue();
+            assertThat(GraphQLWhitelistGate.isPathAllowed("currentUser", whitelist)).isTrue();
         }
 
         @Test
         @DisplayName("dot-path container coverage: ancestor entry covers descendant, and vice-versa")
         void dot_path_container_coverage() {
             // entry is an ancestor of the path → covered
-            assertThat(McpServlet.isPathAllowed("admin.jahia.isAlive", Set.of("admin"))).isTrue();
+            assertThat(GraphQLWhitelistGate.isPathAllowed("admin.jahia.isAlive", Set.of("admin"))).isTrue();
             // path is an intermediate container leading toward a deeper entry → traversal allowed
-            assertThat(McpServlet.isPathAllowed("admin", Set.of("admin.jahia.isAlive"))).isTrue();
+            assertThat(GraphQLWhitelistGate.isPathAllowed("admin", Set.of("admin.jahia.isAlive"))).isTrue();
             // sibling is not covered
-            assertThat(McpServlet.isPathAllowed("currentUser", Set.of("admin.jahia"))).isFalse();
+            assertThat(GraphQLWhitelistGate.isPathAllowed("currentUser", Set.of("admin.jahia"))).isFalse();
         }
 
         @Test
@@ -298,7 +298,7 @@ class McpServletAccessTest {
         void named_fragment_with_whitelist_denied() {
             String q = "{ admin { ...AdminFields } } fragment AdminFields on AdminQueries { jahia { isAlive } }";
             // When whitelist is non-empty, containsNamedFragmentSpread must return true → deny
-            assertThat(McpServlet.containsNamedFragmentSpread(q)).isTrue();
+            assertThat(GraphQLWhitelistGate.containsNamedFragmentSpread(q)).isTrue();
         }
     }
 }

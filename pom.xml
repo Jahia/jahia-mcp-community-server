@@ -9,9 +9,9 @@
     <groupId>org.jahia.community</groupId>
     <artifactId>jahia-mcp-community-server</artifactId>
     <name>Jahia MCP Community Server</name>
-    <version>1.0.5-SNAPSHOT</version>
+    <version>2.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
-    <description>An OSGi bundle that exposes Jahia's GraphQL API as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI assistants such as Claude to query and mutate/query Jahia content directly.</description>
+    <description>An extension of the Jahia mcp-server module that contributes generic GraphQL tools (whitelist-gated) and JCR-stored skills to its MCP endpoint, enabling AI assistants such as Claude to query and mutate Jahia content directly.</description>
 
     <scm>
         <connection>scm:git:git@github.com:Jahia/jahia-mcp-community-server.git</connection>
@@ -24,27 +24,27 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <yarn.arguments>build:production</yarn.arguments>
-        <jahia-depends>default,graphql-dxm-provider</jahia-depends>
+        <jahia-depends>default,graphql-dxm-provider,mcp-server</jahia-depends>
+        <mcp-server.version>0.5.0-SNAPSHOT</mcp-server.version>
         <require-capability>
             osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)",osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
         </require-capability>
     </properties>
 
     <dependencies>
+        <!-- Public tool SPI (org.jahia.modules.mcp.spi.tool) of the Jahia mcp-server module.
+             Provided at runtime by the mcp-server bundle; this module only contributes tools. -->
         <dependency>
-            <groupId>io.modelcontextprotocol.sdk</groupId>
-            <artifactId>mcp-core</artifactId>
-            <version>1.1.1</version>
-        </dependency>
-        <dependency>
-            <groupId>io.modelcontextprotocol.sdk</groupId>
-            <artifactId>mcp-json</artifactId>
-            <version>0.17.0</version>
-        </dependency>
-        <dependency>
-            <groupId>io.modelcontextprotocol.sdk</groupId>
-            <artifactId>mcp-json-jackson2</artifactId>
-            <version>0.17.0</version>
+            <groupId>org.jahia.modules</groupId>
+            <artifactId>mcp-server</artifactId>
+            <version>${mcp-server.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>com.graphql-java</groupId>
@@ -95,8 +95,6 @@
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
-            <!-- 1.5.x provides the SLF4J 2.x ServiceLoader binding to match slf4j-api 2.0.x
-                 pulled transitively by the MCP SDK (1.2.x uses the incompatible 1.7 binder). -->
             <version>1.5.13</version>
             <scope>test</scope>
         </dependency>
@@ -161,16 +159,12 @@
                 <configuration>
                     <instructions>
                         <_dsannotations>org.jahia.community.mcp.*</_dsannotations>
-                        <Embed-Transitive>true</Embed-Transitive>
-                        <!-- Exclude slf4j from embedding so Pax Logging's SLF4J bridge is used -->
-                        <Embed-Dependency>*;scope=compile|runtime;type=!pom;groupId=!org.slf4j</Embed-Dependency>
+                        <!-- Tight range: the mcp-server SPI is pre-1.0 and may change between minor versions. -->
                         <Import-Package>
+                            org.jahia.modules.mcp.spi.tool;version="[0.5,0.6)",
                             org.slf4j;version="[1.7,3)",
-                            org.slf4j.spi;version="[1.7,3)",
-                            org.slf4j.helpers;version="[1.7,3)",
-                            !org.apache.naming.java,!org.apache.catalina.*,!org.apache.tomcat.util.net.openssl.panama,*
+                            *
                         </Import-Package>
-                        <_contract>!JakartaServlet,!ReactiveStreams</_contract>
                     </instructions>
                 </configuration>
             </plugin>

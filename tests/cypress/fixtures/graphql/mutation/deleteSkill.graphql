@@ -1,5 +1,5 @@
 mutation DeleteMcpSkill($name: String!) {
-    mcp {
+    communityMcp {
         deleteSkill(name: $name)
     }
 }

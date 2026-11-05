@@ -14,9 +14,9 @@ public class McpQueryExtension {
     }
 
     @GraphQLField
-    @GraphQLName("mcp")
-    @GraphQLDescription("MCP query namespace")
-    public static McpQuery mcp() {
+    @GraphQLName("communityMcp")
+    @GraphQLDescription("Community MCP query namespace (whitelist settings, skills)")
+    public static McpQuery communityMcp() {
         return new McpQuery();
     }
 }

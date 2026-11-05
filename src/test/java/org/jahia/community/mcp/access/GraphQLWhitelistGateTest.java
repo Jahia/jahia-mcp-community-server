@@ -1,12 +1,10 @@
-package org.jahia.community.mcp;
+package org.jahia.community.mcp.access;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import io.modelcontextprotocol.spec.McpSchema;
 import org.jahia.community.mcp.config.McpConfigService;
-import org.jahia.services.usermanager.JahiaUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -15,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -23,38 +22,35 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * F10 — audit-logging + decision tests for the REAL {@link McpServlet#checkAccess} method
+ * F10 — audit-logging + decision tests for the REAL {@link GraphQLWhitelistGate#check} method
  * (package-private after the visibility refactor). A mocked {@link McpConfigService} drives the
  * two branches; a logback {@link ListAppender} captures the WARN audit trail, which is the
  * module's only real-time visibility into ALLOW-ALL mode and blocked operations.
  */
-class McpServletCheckAccessTest {
+class GraphQLWhitelistGateTest {
 
-    private McpServlet servlet;
+    private GraphQLWhitelistGate gate;
     private McpConfigService config;
-    private JahiaUser user;
-    private Logger servletLogger;
+    private Logger gateLogger;
     private ListAppender<ILoggingEvent> appender;
 
     @BeforeEach
     void setUp() {
         config = mock(McpConfigService.class);
-        user = mock(JahiaUser.class);
-        when(user.getName()).thenReturn("alice");
 
-        servlet = new McpServlet();
-        servlet.setMcpConfigService(config);
+        gate = new GraphQLWhitelistGate();
+        gate.setMcpConfigService(config);
 
-        servletLogger = (Logger) LoggerFactory.getLogger(McpServlet.class);
-        servletLogger.setLevel(Level.TRACE);
+        gateLogger = (Logger) LoggerFactory.getLogger(GraphQLWhitelistGate.class);
+        gateLogger.setLevel(Level.TRACE);
         appender = new ListAppender<>();
         appender.start();
-        servletLogger.addAppender(appender);
+        gateLogger.addAppender(appender);
     }
 
     @AfterEach
     void tearDown() {
-        servletLogger.detachAppender(appender);
+        gateLogger.detachAppender(appender);
     }
 
     private List<String> warnMessages() {
@@ -69,22 +65,21 @@ class McpServletCheckAccessTest {
     void empty_whitelist_allows_all_and_warns() {
         when(config.getWhitelist()).thenReturn(Collections.emptySet());
 
-        McpSchema.CallToolResult result = servlet.checkAccess("{ admin { jahia } }", user, "1.2.3.4");
+        Optional<String> result = gate.check("{ admin { jahia } }", "alice", "1.2.3.4");
 
-        assertThat(result).as("allow-all returns null (permit)").isNull();
+        assertThat(result).as("allow-all returns empty (permit)").isEmpty();
         assertThat(warnMessages())
                 .anySatisfy(msg -> assertThat(msg).contains("ALLOW-ALL"));
     }
 
     @Test
-    @DisplayName("blocked op → non-null error result and a WARN carries path + user + client IP")
+    @DisplayName("blocked op → a denial reason and a WARN carries path + user + client IP")
     void blocked_operation_warns_with_context() {
         when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
 
-        McpSchema.CallToolResult result = servlet.checkAccess("{ admin { jahia { isAlive } } }", user, "1.2.3.4");
+        Optional<String> result = gate.check("{ admin { jahia { isAlive } } }", "alice", "1.2.3.4");
 
-        assertThat(result).as("a non-whitelisted op is blocked").isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).as("a non-whitelisted op is blocked").isPresent();
         assertThat(warnMessages())
                 .anySatisfy(msg -> assertThat(msg)
                         .contains("admin")
@@ -98,9 +93,9 @@ class McpServletCheckAccessTest {
     void allowed_operation_is_permitted() {
         when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
 
-        McpSchema.CallToolResult result = servlet.checkAccess("{ currentUser { name } }", user, "1.2.3.4");
+        Optional<String> result = gate.check("{ currentUser { name } }", "alice", "1.2.3.4");
 
-        assertThat(result).as("a whitelisted op is permitted").isNull();
+        assertThat(result).as("a whitelisted op is permitted").isEmpty();
         assertThat(warnMessages())
                 .noneSatisfy(msg -> assertThat(msg).contains("blocked"));
     }
@@ -111,10 +106,9 @@ class McpServletCheckAccessTest {
         when(config.getWhitelist()).thenReturn(Set.of("admin"));
 
         String q = "{ admin { ...AdminFields } } fragment AdminFields on AdminQueries { jahia { isAlive } }";
-        McpSchema.CallToolResult result = servlet.checkAccess(q, user, "1.2.3.4");
+        Optional<String> result = gate.check(q, "alice", "1.2.3.4");
 
-        assertThat(result).as("fail-closed on named fragment spreads").isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).as("fail-closed on named fragment spreads").isPresent();
         assertThat(warnMessages())
                 .anySatisfy(msg -> assertThat(msg).contains("named fragment"));
     }
@@ -136,11 +130,10 @@ class McpServletCheckAccessTest {
     void sec364_leading_comma_blocked() {
         when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
 
-        McpSchema.CallToolResult result =
-                servlet.checkAccess("query,{ jcr { nodeByPath(path:\"/\") { name } } }", user, "1.2.3.4");
+        Optional<String> result =
+                gate.check("query,{ jcr { nodeByPath(path:\"/\") { name } } }", "alice", "1.2.3.4");
 
-        assertThat(result).as("a comma is an ignored token, not an escape hatch").isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).as("a comma is an ignored token, not an escape hatch").isPresent();
         assertThat(warnMessages()).anySatisfy(msg -> assertThat(msg).contains("jcr"));
     }
 
@@ -149,11 +142,10 @@ class McpServletCheckAccessTest {
     void sec364_comma_before_keyword_blocked() {
         when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
 
-        McpSchema.CallToolResult result =
-                servlet.checkAccess(",query { jcr { nodeByPath(path:\"/\") { name } } }", user, "1.2.3.4");
+        Optional<String> result =
+                gate.check(",query { jcr { nodeByPath(path:\"/\") { name } } }", "alice", "1.2.3.4");
 
-        assertThat(result).isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).isPresent();
     }
 
     @Test
@@ -164,11 +156,10 @@ class McpServletCheckAccessTest {
         // U+FEFF is an ignored token in the GraphQL grammar but is NOT Character.isWhitespace, so
         // the old skipWS() stopped dead on it. Either branch may deny now (parsed-and-blocked, or
         // refused as unparseable) — what matters is that neither permits.
-        McpSchema.CallToolResult result =
-                servlet.checkAccess("﻿{ jcr { nodeByPath(path:\"/\") { name } } }", user, "1.2.3.4");
+        Optional<String> result =
+                gate.check("﻿{ jcr { nodeByPath(path:\"/\") { name } } }", "alice", "1.2.3.4");
 
-        assertThat(result).isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).isPresent();
     }
 
     @Test
@@ -181,10 +172,9 @@ class McpServletCheckAccessTest {
         // '(' inside the path argument unbalanced skipBalanced()'s counter, which then ran to
         // end-of-document and never saw the `admin` sibling.
         String q = "{ jcr { nodeByPath(path: \"/x(\") { name } } admin { jahia { isAlive } } }";
-        McpSchema.CallToolResult result = servlet.checkAccess(q, user, "1.2.3.4");
+        Optional<String> result = gate.check(q, "alice", "1.2.3.4");
 
-        assertThat(result).as("the hidden sibling must be seen and refused").isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).as("the hidden sibling must be seen and refused").isPresent();
         assertThat(warnMessages()).anySatisfy(msg -> assertThat(msg).contains("admin"));
     }
 
@@ -197,10 +187,9 @@ class McpServletCheckAccessTest {
         // no operationName, so graphql-java rejected the whole document. The gate now refuses op B
         // on its own merits instead of relying on that.
         String q = "query A { currentUser { name } } query B { admin { jahia { isAlive } } }";
-        McpSchema.CallToolResult result = servlet.checkAccess(q, user, "1.2.3.4");
+        Optional<String> result = gate.check(q, "alice", "1.2.3.4");
 
-        assertThat(result).isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).isPresent();
         assertThat(warnMessages()).anySatisfy(msg -> assertThat(msg).contains("admin"));
     }
 
@@ -209,10 +198,9 @@ class McpServletCheckAccessTest {
     void unparseable_document_blocked_and_warns() {
         when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
 
-        McpSchema.CallToolResult result = servlet.checkAccess("{ jcr { ", user, "1.2.3.4");
+        Optional<String> result = gate.check("{ jcr { ", "alice", "1.2.3.4");
 
-        assertThat(result).as("fail closed when the document cannot be accounted for").isNotNull();
-        assertThat(result.isError()).isTrue();
+        assertThat(result).as("fail closed when the document cannot be accounted for").isPresent();
         assertThat(warnMessages())
                 .anySatisfy(msg -> assertThat(msg)
                         .contains("could not be parsed")
@@ -227,9 +215,9 @@ class McpServletCheckAccessTest {
 
         // The parser's own message quotes the offending source; that belongs in the audit log,
         // not in a response the caller can read back.
-        McpSchema.CallToolResult result = servlet.checkAccess("{ topSecretFieldName { ", user, "1.2.3.4");
+        Optional<String> result = gate.check("{ topSecretFieldName { ", "alice", "1.2.3.4");
 
-        assertThat(String.valueOf(result.content())).doesNotContain("topSecretFieldName");
+        assertThat(result.orElseThrow()).doesNotContain("topSecretFieldName");
     }
 
     // ── false-positive guards: the fix must not start refusing legitimate documents ──
@@ -239,8 +227,8 @@ class McpServletCheckAccessTest {
     void commas_inside_selection_set_allowed() {
         when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
 
-        assertThat(servlet.checkAccess("{ currentUser { name, displayName } }", user, "1.2.3.4"))
-                .as("commas are ordinary GraphQL punctuation").isNull();
+        assertThat(gate.check("{ currentUser { name, displayName } }", "alice", "1.2.3.4"))
+                .as("commas are ordinary GraphQL punctuation").isEmpty();
     }
 
     @Test
@@ -248,8 +236,8 @@ class McpServletCheckAccessTest {
     void introspection_only_document_allowed() {
         when(config.getWhitelist()).thenReturn(Set.of("currentUser"));
 
-        assertThat(servlet.checkAccess("{ __schema { types { name } } }", user, "1.2.3.4"))
-                .as("empty path set after a SUCCESSFUL parse still means 'nothing to police'").isNull();
+        assertThat(gate.check("{ __schema { types { name } } }", "alice", "1.2.3.4"))
+                .as("empty path set after a SUCCESSFUL parse still means 'nothing to police'").isEmpty();
     }
 
     @Test
@@ -257,7 +245,7 @@ class McpServletCheckAccessTest {
     void hash_in_string_argument_still_allowed() {
         when(config.getWhitelist()).thenReturn(Set.of("jcr"));
 
-        assertThat(servlet.checkAccess("{ jcr { nodeByPath(path: \"/sites#main\") { name } } }", user, "1.2.3.4"))
-                .isNull();
+        assertThat(gate.check("{ jcr { nodeByPath(path: \"/sites#main\") { name } } }", "alice", "1.2.3.4"))
+                .isEmpty();
     }
 }

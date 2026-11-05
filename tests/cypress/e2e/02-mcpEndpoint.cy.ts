@@ -23,7 +23,7 @@ describe('MCP Server — Endpoint Access Control', () => {
                 cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
             });
         });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME, scopes: ['graphql', 'community-mcp']}}).then(result => {
+        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
             apiToken = result.data.admin.personalApiTokens.createToken;
         });
         cy.apollo({query: listTokens}).then(result => {
@@ -43,10 +43,10 @@ describe('MCP Server — Endpoint Access Control', () => {
     const callTool = (name: string, args: Record<string, unknown>) => {
         return cy.request({
             method: 'POST',
-            url: '/modules/community-mcp',
+            url: '/modules/mcp',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `APIToken ${apiToken}`
+                Authorization: `APIToken ${apiToken}`
             },
             body: {
                 jsonrpc: '2.0',
@@ -57,7 +57,7 @@ describe('MCP Server — Endpoint Access Control', () => {
         });
     };
 
-    const executeGraphQL = (query: string) => callTool('executeGraphQL', {query});
+    const executeGraphQL = (query: string) => callTool('community.graphql.execute', {query});
 
     afterEach(() => {
         cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
@@ -136,13 +136,13 @@ describe('MCP Server — Endpoint Access Control', () => {
     it('returns 401 for unauthenticated requests', () => {
         cy.request({
             method: 'POST',
-            url: '/modules/community-mcp',
+            url: '/modules/mcp',
             headers: {'Content-Type': 'application/json'},
             body: {
                 jsonrpc: '2.0',
                 id: 1,
                 method: 'tools/call',
-                params: {name: 'executeGraphQL', arguments: {query: '{ currentUser { name } }'}}
+                params: {name: 'community.graphql.execute', arguments: {query: '{ currentUser { name } }'}}
             },
             failOnStatusCode: false
         }).its('status').should('eq', 401);

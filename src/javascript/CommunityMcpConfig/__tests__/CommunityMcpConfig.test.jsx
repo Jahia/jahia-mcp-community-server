@@ -20,7 +20,7 @@ function installApolloMock({whitelist = [], saveSpy, querySpy} = {}) {
     // and the component's useEffect([settingsData]) would loop forever on fresh objects.
     const queryResult = {loading: false, data: {queryFields: {fields: QUERY_FIELDS}}};
     const mutationResult = {loading: false, data: {mutationFields: {fields: MUTATION_FIELDS}}};
-    const settingsResult = {loading: false, data: {mcp: {settings: {whitelist}}}};
+    const settingsResult = {loading: false, data: {communityMcp: {settings: {whitelist}}}};
 
     const useQuery = query => {
         const q = String(query);
@@ -37,7 +37,7 @@ function installApolloMock({whitelist = [], saveSpy, querySpy} = {}) {
     };
 
     const useMutation = () => [
-        saveSpy || jest.fn().mockResolvedValue({data: {mcp: {saveSettings: true}}}),
+        saveSpy || jest.fn().mockResolvedValue({data: {communityMcp: {saveSettings: true}}}),
         {loading: false, error: undefined}
     ];
 
@@ -62,7 +62,7 @@ describe('CommunityMcpConfig admin component', () => {
     });
 
     test('Save calls mcpSaveSettings with the merged whitelist array', async () => {
-        const saveSpy = jest.fn().mockResolvedValue({data: {mcp: {saveSettings: true}}});
+        const saveSpy = jest.fn().mockResolvedValue({data: {communityMcp: {saveSettings: true}}});
         installApolloMock({whitelist: [], saveSpy});
         render(<CommunityMcpConfigAdmin/>);
 
