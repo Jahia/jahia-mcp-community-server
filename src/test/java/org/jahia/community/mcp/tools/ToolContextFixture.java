@@ -1,5 +1,6 @@
 package org.jahia.community.mcp.tools;
 
+import org.jahia.community.mcp.access.CallerFixture;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
 import org.jahia.services.content.JCRNodeWrapper;
 
@@ -25,6 +26,8 @@ public final class ToolContextFixture {
     public final List<Map<String, Object>> auditDetails = new ArrayList<>();
 
     private ToolContextFixture(final boolean administrator) {
+        // The caller bound on the thread by mcp-server; released after each test.
+        CallerFixture.bindForCurrentTest(administrator ? "root" : "editor", administrator);
         when(ctx.username()).thenReturn(administrator ? "root" : "editor");
         when(ctx.locale()).thenReturn(Locale.ENGLISH);
         when(ctx.request()).thenReturn(Optional.of(request));

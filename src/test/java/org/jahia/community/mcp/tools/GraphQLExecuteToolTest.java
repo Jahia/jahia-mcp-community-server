@@ -64,7 +64,7 @@ class GraphQLExecuteToolTest {
         ToolResult result = tool.execute(input("{ currentUser { name } }"), f.ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_FORBIDDEN);
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(anyString(), any(), any());
         assertThat(f.auditEvents).containsExactly("tool.execute.error");
     }
 
@@ -88,7 +88,7 @@ class GraphQLExecuteToolTest {
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_FORBIDDEN);
         assertThat(result.error().message()).contains("not in the whitelist");
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(anyString(), any(), any());
     }
 
     @Test
@@ -142,7 +142,7 @@ class GraphQLExecuteToolTest {
         ToolResult result = tool.execute(in, ToolContextFixture.administrator().ctx);
 
         assertThat(result.error().code()).isEqualTo(ToolError.CODE_VALIDATION);
-        verify(client, never()).execute(any(), any(), any());
+        verify(client, never()).execute(anyString(), any(), any());
     }
 
     @Test
