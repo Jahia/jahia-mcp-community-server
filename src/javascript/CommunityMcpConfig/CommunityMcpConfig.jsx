@@ -25,12 +25,21 @@ import {ConfirmDialog} from './ConfirmDialog';
 import {AllEntries, ProblemEntries} from './AllowListEntries';
 import {SaveBar} from './SaveBar';
 import {isFocusLost, LiveRegion, useAnnouncer, useFocusRecovery} from './a11y';
-import {useMcpTranslation} from './i18n';
+import {useMcpLanguage, useMcpTranslation} from './i18n';
+import {takeDraft, useDraftPersistence} from './draft';
 
 const EMPTY = new Set();
 
-// Turn a failed save into a message: the server's own reason when it gave one (UX-6).
+// An expired Jahia session answers 401 (or 403 once the session is gone).
+const isSessionExpired = err => [401, 403].includes(err?.networkError?.statusCode);
+
+// Turn a failed save into a message: the server's own reason when it gave one (UX-6), or the
+// remedy for an expired session (log in again; the edits are kept, A11Y-5).
 const saveFailure = (err, t) => {
+    if (isSessionExpired(err)) {
+        return {kind: 'error', message: t('label.saveSessionExpired')};
+    }
+
     if (err?.networkError) {
         return {kind: 'error', message: t('label.saveNetworkError')};
     }
@@ -118,6 +127,7 @@ const OperationGroup = ({id, heading, count, note, roots, actions, treeProps}) =
 
 export const CommunityMcpConfigAdmin = () => {
     const t = useMcpTranslation();
+    const lang = useMcpLanguage();
     const rootRef = useRef(null);
     const requestFocus = useFocusRecovery(rootRef);
     const [announcement, announce] = useAnnouncer();
@@ -139,6 +149,7 @@ export const CommunityMcpConfigAdmin = () => {
     const [expanded, setExpanded] = useState(EMPTY);
     const [filterInput, setFilterInput] = useState('');
     const [confirm, setConfirm] = useState(null);
+    const [isSettingsReady, setSettingsReady] = useState(false);
 
     const setStatus = next => {
         statusSeq.current += 1;
@@ -173,16 +184,27 @@ export const CommunityMcpConfigAdmin = () => {
             return;
         }
 
-        setWhitelist(entries);
+        // Edits kept in this tab before a session expiry come back, if the server still holds the
+        // list they were made against (A11Y-5).
+        const draft = takeDraft(entries);
+        const isDraftRestored = draft !== null && !setsEqual(draft, entries);
+        setWhitelist(isDraftRestored ? draft : entries);
         setSaved(entries);
         setMigrated(migrated);
+        setSettingsReady(true);
+        if (isDraftRestored) {
+            setStatus({kind: 'info', message: t('label.draftRestored')});
+        }
+
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [settingsData]);
 
     const isLoading = queryFieldsResult.loading || mutationFieldsResult.loading || settingsResult.loading;
     const failedResults = [settingsResult, queryFieldsResult, mutationFieldsResult].filter(r => r.error);
     let loadErrorKey = null;
-    if (settingsResult.error) {
+    if (isSessionExpired(settingsResult.error)) {
+        loadErrorKey = 'label.loadSessionExpired';
+    } else if (settingsResult.error) {
         loadErrorKey = 'label.loadError';
     } else if (failedResults.length > 0) {
         loadErrorKey = 'label.schemaLoadError';
@@ -227,6 +249,7 @@ export const CommunityMcpConfigAdmin = () => {
     const isDirty = isMigrated || !setsEqual(whitelist, saved);
     editState.current = {isDirty, saved};
     useUnsavedChangesGuard(isDirty);
+    useDraftPersistence(isSettingsReady, saved, whitelist);
 
     const operations = buildOperationMap(
         queryFieldsResult.data?.queryFields?.fields,
@@ -496,7 +519,7 @@ export const CommunityMcpConfigAdmin = () => {
     };
 
     return (
-        <section ref={rootRef} className={styles.mcp_container} aria-labelledby="mcp-title">
+        <section ref={rootRef} lang={lang} className={styles.mcp_container} aria-labelledby="mcp-title">
             <LiveRegion message={announcement} className={styles.mcp_visuallyHidden}/>
             <h2 id="mcp-title" className={styles.mcp_title}>{t('label.title')}</h2>
             <p className={styles.mcp_description}>{t('label.description')}</p>

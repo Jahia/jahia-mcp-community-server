@@ -21,6 +21,8 @@ import {
 
 afterEach(() => {
     delete window.__apolloMock;
+    // Unsaved edits are kept in sessionStorage (draft recovery): never carry them to the next test.
+    window.sessionStorage.clear();
     jest.useRealTimers();
     // Spies such as console.error silencing must not leak into later tests.
     jest.restoreAllMocks();

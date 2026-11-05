@@ -128,6 +128,8 @@ $target: 44px;           // WCAG 2.5.5 Target Size (Enhanced)
 .mcp_summary {
     display: flex;
     align-items: center;
+    // display:flex removes the browser's disclosure marker: draw one (A11Y-4, WCAG 3.3.5).
+    list-style: none;
     min-height: $target;
     color: $accent;             // 7.70:1 on #fff
     font-weight: 600;
@@ -137,14 +139,35 @@ $target: 44px;           // WCAG 2.5.5 Target Size (Enhanced)
         outline: 3px solid $focus;
         outline-offset: 2px;
     }
+
+    &::-webkit-details-marker {
+        display: none;
+    }
 }
+
+.mcp_summary::before {
+    content: '';
+    flex-shrink: 0;
+    margin-inline-end: 8px;
+    border-style: solid;
+    border-width: 6px 0 6px 9px;
+    border-color: transparent transparent transparent currentColor; // 7.70:1, follows forced colours
+    transition: transform 0.15s;
+
+    @media (prefers-reduced-motion: reduce) {
+        transition: none;
+    }
+}
+
+.mcp_details[open] > .mcp_summary::before { transform: rotate(90deg); }
 
 .mcp_detailsText {
     font-size: 14px;
     color: $text;
 
+    // Paragraph spacing >= 1.5 x line spacing (WCAG 1.4.8): 21px + 14px = 35px >= 31.5px.
     p {
-        margin: 0 0 8px;
+        margin: 0 0 1em;
     }
 }
 
@@ -175,6 +198,12 @@ $target: 44px;           // WCAG 2.5.5 Target Size (Enhanced)
     font-weight: 600;
     margin: 0;
     color: $text;
+}
+
+// Focus recovery target (tabIndex=-1): an author ring instead of the UA default (WCAG 2.4.13).
+.mcp_panelTitle:focus-visible {
+    outline: 3px solid $focus;   // 7.29:1 on #fff
+    outline-offset: 2px;
 }
 
 // ---------- Alerts / banners ----------
@@ -218,7 +247,7 @@ $target: 44px;           // WCAG 2.5.5 Target Size (Enhanced)
 }
 
 .mcp_alertText {
-    margin: 0 0 8px;
+    margin: 0 0 1em;   // WCAG 1.4.8 paragraph spacing
 }
 
 .mcp_errorDetail {
@@ -445,6 +474,12 @@ $target: 44px;           // WCAG 2.5.5 Target Size (Enhanced)
     font-family: monospace;
     color: $text;
     overflow-wrap: anywhere;
+}
+
+.mcp_operationDesc,
+.mcp_note,
+.mcp_noteError {
+    max-width: 80ch;   // WCAG 1.4.8: lines of at most 80 characters
 }
 
 .mcp_operationDesc,
