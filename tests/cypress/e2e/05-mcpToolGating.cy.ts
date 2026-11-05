@@ -69,20 +69,42 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
             .its('body.result.isError').should('eq', false);
     });
 
-    // F2 — community.graphql.introspect runs the two-step __schema / per-type __type workaround without
-    // tripping Jahia's bad-faith introspection guard, ignores the whitelist, and returns a
-    // parsed schema picture containing query + mutation type names and per-type field details.
-    it('community.graphql.introspect returns a schema with query/mutation types and per-type details', () => {
+    // F2 — community.graphql.introspect is bounded: with no arguments it returns the type list plus
+    // the root Query/Mutation details only (one __Type.fields per request, so Jahia's bad-faith
+    // introspection guard never trips); specific types are requested through typeNames.
+    it('community.graphql.introspect without arguments returns the type list and the root types', () => {
         callTool('community.graphql.introspect', {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
             const payload = JSON.parse(response.body.result.content[0].text);
-            expect(payload.schema).to.exist;
-            expect(payload.schema.queryType.name).to.be.a('string');
-            expect(payload.schema.mutationType.name).to.be.a('string');
-            expect(payload.schema.types).to.be.an('array').and.have.length.greaterThan(0);
-            // Step-2 per-type detail map (keyed by type name) is populated.
-            expect(payload.types).to.be.an('object');
-            expect(Object.keys(payload.types).length).to.be.greaterThan(0);
+            expect(payload.schema.queryType.name).to.eq('Query');
+            expect(payload.schema.mutationType.name).to.eq('Mutation');
+            expect(payload.schema.types).to.be.an('array').and.have.length.greaterThan(10);
+            expect(Object.keys(payload.types)).to.have.members(['Query', 'Mutation']);
+            expect(payload.types.Query.fields.map((f: {name: string}) => f.name)).to.include('jcr');
+            expect(payload.skippedTypes).to.deep.eq([]);
+            expect(payload.truncatedTypes).to.deep.eq([]);
+            // Bounded: the whole default answer stays far below the 100k-character budget.
+            expect(response.body.result.content[0].text.length).to.be.lessThan(100000);
+        });
+    });
+
+    it('community.graphql.introspect describes the types named in typeNames', () => {
+        callTool('community.graphql.introspect', {typeNames: ['JCRNode', 'NoSuchType']}).then(response => {
+            expect(response.body.result.isError).to.eq(false);
+            const payload = JSON.parse(response.body.result.content[0].text);
+            expect(payload.schema).to.be.undefined;
+            expect(payload.types.JCRNode.fields.map((f: {name: string}) => f.name)).to.include('path');
+            expect(payload.skippedTypes).to.deep.eq(['NoSuchType']);
+        });
+    });
+
+    it('community.graphql.introspect refuses more than 25 typeNames', () => {
+        const names = Array.from({length: 26}, (_, i) => `Type${i}`);
+        callTool('community.graphql.introspect', {typeNames: names}).then(response => {
+            // Rejected either by mcp-server's schema validation (JSON-RPC error or isError result)
+            // or by the tool's own check — in every case nothing is introspected.
+            const rejected = Boolean(response.body.error) || response.body.result.isError === true;
+            expect(rejected).to.eq(true);
         });
     });
 
