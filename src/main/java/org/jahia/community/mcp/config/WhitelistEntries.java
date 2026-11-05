@@ -25,7 +25,7 @@ public final class WhitelistEntries {
     /** Internal path of the namespace that must never be reachable through the data plane. */
     public static final String NEVER_ALLOWED = "mutation.communityMcp";
     // Possessive quantifiers: no backtracking, linear on any input (S5998).
-    private static final String GRAPHQL_NAME = "[_A-Za-z][_0-9A-Za-z]*+";
+    private static final String GRAPHQL_NAME = "[_A-Za-z]\\w*+";
     private static final Pattern FIELD_PATH = Pattern.compile(GRAPHQL_NAME + "(?:\\." + GRAPHQL_NAME + ")*+");
 
     private WhitelistEntries() {

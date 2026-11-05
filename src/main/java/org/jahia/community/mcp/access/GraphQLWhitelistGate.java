@@ -89,8 +89,10 @@ public class GraphQLWhitelistGate {
         for (final String path : withoutIntrospectionPaths(extractOperationPaths(document, snapshot.maxDepth()))) {
             final Optional<String> denial = denialFor(path, snapshot);
             if (denial.isPresent()) {
-                LOGGER.warn("MCP operation blocked: path='{}', reason='{}', user='{}', ip='{}'",
-                        WhitelistEntries.display(path), denial.get(), who, clientIp);
+                if (LOGGER.isWarnEnabled()) {
+                    LOGGER.warn("MCP operation blocked: path='{}', reason='{}', user='{}', ip='{}'",
+                            WhitelistEntries.display(path), denial.get(), who, clientIp);
+                }
                 return denial.map(reason -> DENIED + reason);
             }
         }

@@ -42,7 +42,7 @@ public class McpMutation {
             config.saveWhitelist(whitelist);
             return Boolean.TRUE;
         } catch (IllegalArgumentException e) {
-            LOGGER.warn("Rejected MCP whitelist: {}", e.getMessage());
+            // McpConfigService already logged the rejection; its message is client-safe.
             throw new DataFetchingException(e.getMessage());
         } catch (IOException e) {
             LOGGER.error("Error saving MCP settings to OSGi configuration", e);

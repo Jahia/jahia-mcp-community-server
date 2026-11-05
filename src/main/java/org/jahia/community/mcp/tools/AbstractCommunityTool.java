@@ -52,6 +52,9 @@ abstract class AbstractCommunityTool implements JahiaMcpTool {
     protected abstract ToolResult doExecute(JsonNode input, ToolContext ctx);
 
     /** Extra audit details derived from the input (never content or secrets). */
+    // java:S1172 false positive: template-method hook; the default ignores the input, overrides
+    // (GraphQLExecuteTool) read it.
+    @SuppressWarnings("java:S1172")
     protected Map<String, Object> auditDetails(final JsonNode input) {
         return Map.of();
     }

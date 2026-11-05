@@ -45,7 +45,7 @@ public class GraphQLIntrospectTool extends AbstractCommunityTool {
     static final int MAX_RESULT_CHARS = 100_000;
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphQLIntrospectTool.class);
     private static final String TYPES = "types";
-    private static final Pattern GRAPHQL_NAME = Pattern.compile("[_A-Za-z][_0-9A-Za-z]*");
+    private static final Pattern GRAPHQL_NAME = Pattern.compile("[_A-Za-z]\\w*+");
 
     // Type list + root type names — zero __Type.fields selections.
     private static final String SCHEMA_QUERY = "{ __schema { queryType { name } mutationType { name } "

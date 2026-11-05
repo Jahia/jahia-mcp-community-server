@@ -139,17 +139,23 @@ public class McpConfigService {
      *         message names the offending entry and nothing is persisted
      * @throws IOException if ConfigurationAdmin cannot store the configuration
      */
+    /** Logs a refused whitelist at WARN and returns the exception to throw (message is client-safe). */
+    private static IllegalArgumentException rejected(final String message) {
+        LOGGER.warn("Rejected MCP whitelist: {}", message);
+        return new IllegalArgumentException(message);
+    }
+
     public void saveWhitelist(final List<String> entries) throws IOException {
         if (entries == null) {
-            throw new IllegalArgumentException("The whitelist must not be null");
+            throw rejected("The whitelist must not be null");
         }
         for (final String entry : entries) {
             if (!WhitelistEntries.isValid(entry)) {
-                throw new IllegalArgumentException("Malformed whitelist entry '" + shown(entry)
+                throw rejected("Malformed whitelist entry '" + shown(entry)
                         + "': expected query:<path> or mutation:<path>, where <path> is dot-separated GraphQL names");
             }
             if (WhitelistEntries.isNeverAllowedEntry(entry)) {
-                throw new IllegalArgumentException("Whitelist entry '" + shown(entry)
+                throw rejected("Whitelist entry '" + shown(entry)
                         + "' is refused: the communityMcp mutations can never be run through community.graphql.execute");
             }
         }
