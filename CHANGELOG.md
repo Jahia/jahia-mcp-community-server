@@ -79,7 +79,7 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   - The allow list is an accessible tree with arrow keys, Home and End, and Space or Enter to check an item.
   - Queries and mutations are separate groups, each with bulk actions.
   - Confirmation before clearing the list, clearing queries while mutations remain, and allowing all mutations.
-  - `mutation:communityMcp` is shown but locked.
+  - The never-allowed paths, `mutation:communityMcp` and `mutation:admin.jahia.configuration`, are shown but locked.
   - Entries that are unknown to the schema, or locked, are listed with a Remove action.
   - The filter matches all root operations and the fields already loaded.
   - An unsaved-changes indicator and a Discard action.

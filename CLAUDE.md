@@ -198,7 +198,7 @@ Denial strings are client-safe and are returned as `forbidden` with `ToolError`.
   mutations remain, and allowing all mutations go through a confirmation dialog.
 - Operation paths are `query:<name>…` / `mutation:<name>…` (`operationTree.js`). Legacy entries are shown
   as `query:` entries and the form starts dirty, so it can be saved in the new form.
-- Locked: `mutation:communityMcp` cannot be checked. Entries that are locked or whose root is not in the
+- Locked: the never-allowed paths `mutation:communityMcp` and `mutation:admin.jahia.configuration` cannot be checked. Entries that are locked or whose root is not in the
   schema are listed as problem entries with Remove.
 - Save calls `communityMcp { saveSettings(whitelist) }`. Server GraphQL errors are displayed with the
   server's message. Save is never disabled, so focus stays put.
