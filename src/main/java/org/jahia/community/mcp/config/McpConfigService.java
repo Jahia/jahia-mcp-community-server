@@ -98,8 +98,8 @@ public class McpConfigService {
             if (!WhitelistEntries.isValid(entry)) {
                 LOGGER.warn("Ignoring malformed MCP whitelist entry '{}' (expected query:<path> or mutation:<path>)", entry);
             } else if (WhitelistEntries.isNeverAllowedEntry(entry)) {
-                LOGGER.warn("Ignoring MCP whitelist entry '{}': the communityMcp mutations can never be run "
-                        + "through community.graphql.execute", entry);
+                LOGGER.warn("Ignoring MCP whitelist entry '{}': the communityMcp and admin.jahia.configuration "
+                        + "mutations can never be run through community.graphql.execute", entry);
             }
         }
     }
@@ -131,6 +131,12 @@ public class McpConfigService {
         return snapshot.raw();
     }
 
+    /** Logs a refused whitelist at WARN and returns the exception to throw (message is client-safe). */
+    private static IllegalArgumentException rejected(final String message) {
+        LOGGER.warn("Rejected MCP whitelist: {}", message);
+        return new IllegalArgumentException(message);
+    }
+
     /**
      * Validates and persists {@code entries} as the new whitelist (an empty list selects the
      * read-only default).
@@ -139,12 +145,6 @@ public class McpConfigService {
      *         message names the offending entry and nothing is persisted
      * @throws IOException if ConfigurationAdmin cannot store the configuration
      */
-    /** Logs a refused whitelist at WARN and returns the exception to throw (message is client-safe). */
-    private static IllegalArgumentException rejected(final String message) {
-        LOGGER.warn("Rejected MCP whitelist: {}", message);
-        return new IllegalArgumentException(message);
-    }
-
     public void saveWhitelist(final List<String> entries) throws IOException {
         if (entries == null) {
             throw rejected("The whitelist must not be null");
@@ -156,7 +156,8 @@ public class McpConfigService {
             }
             if (WhitelistEntries.isNeverAllowedEntry(entry)) {
                 throw rejected("Whitelist entry '" + shown(entry)
-                        + "' is refused: the communityMcp mutations can never be run through community.graphql.execute");
+                        + "' is refused: the communityMcp and admin.jahia.configuration mutations can never be run "
+                        + "through community.graphql.execute");
             }
         }
         final Configuration config = configurationAdmin.getConfiguration(PID, null);

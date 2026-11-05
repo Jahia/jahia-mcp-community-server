@@ -227,6 +227,18 @@ class McpConfigServiceTest {
     }
 
     @Test
+    @DisplayName("mutation:admin.jahia.configuration entries are refused: they could rewrite this whitelist")
+    void configuration_entry_refused() throws IOException {
+        final McpConfigService service = service();
+        final List<String> entries = List.of("query:jcr", "mutation:admin.jahia.configuration.value");
+        assertThatThrownBy(() -> service.saveWhitelist(entries))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("admin.jahia.configuration").hasMessageContaining("can never be run");
+
+        verify(configuration, never()).update(any());
+    }
+
+    @Test
     @DisplayName("mutation:communityMcp entries are refused: the gate would always deny them")
     void never_allowed_entry_refused() throws IOException {
         final McpConfigService service = service();

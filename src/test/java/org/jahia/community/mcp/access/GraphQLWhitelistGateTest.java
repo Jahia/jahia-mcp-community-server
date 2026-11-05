@@ -108,13 +108,14 @@ class GraphQLWhitelistGateTest {
     }
 
     @Test
-    @DisplayName("empty whitelist: introspection and named fragment spreads in a query are fine")
-    void empty_whitelist_allows_introspection_and_fragments() {
+    @DisplayName("empty whitelist: introspection is fine, a named fragment spread is refused even in a query")
+    void empty_whitelist_allows_introspection_but_refuses_fragments() {
         whitelist(Collections.emptySet());
 
         assertThat(gate.check("{ __schema { types { name } } }", "alice", "1.2.3.4")).isEmpty();
         assertThat(gate.check("{ admin { ...F } } fragment F on AdminQueries { jahia { isAlive } }", "alice", "1.2.3.4"))
-                .isEmpty();
+                .hasValueSatisfying(msg -> assertThat(msg).contains("named fragment spreads are not permitted"));
+        assertThat(gate.check("{ admin { ... on AdminQueries { jahia { isAlive } } } }", "alice", "1.2.3.4")).isEmpty();
     }
 
     @Test

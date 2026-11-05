@@ -64,6 +64,15 @@ class WhitelistEntriesTest {
         assertThat(WhitelistEntries.isNeverAllowed("mutation.communityMcpX")).isFalse();
         assertThat(WhitelistEntries.isNeverAllowed("query.communityMcp")).isFalse();
         assertThat(WhitelistEntries.isNeverAllowed(null)).isFalse();
+        assertThat(WhitelistEntries.NEVER_ALLOWED_DEPTH)
+                .as("deep enough to reach every never-allowed root")
+                .isGreaterThanOrEqualTo("mutation.admin.jahia.configuration".split("\\.").length);
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.jahia.configuration")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.jahia.configuration.value")).isTrue();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.jahia.configurationX")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed("mutation.admin.jahia")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowed("query.admin.jahia.configuration")).isFalse();
+        assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:admin.jahia.configuration")).isTrue();
         assertThat(WhitelistEntries.isNeverAllowedEntry("mutation:communityMcp.saveSettings")).isTrue();
         assertThat(WhitelistEntries.isNeverAllowedEntry("query:communityMcp")).isFalse();
         assertThat(WhitelistEntries.isNeverAllowedEntry("garbage entry")).isFalse();
