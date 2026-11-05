@@ -96,6 +96,9 @@ public class McpConfigService {
             LOGGER.warn("MCP whitelist entries without an operation prefix are treated as query-only: {}. "
                     + "Rewrite them as 'query:<path>', and add 'mutation:<path>' entries for mutations.", legacy);
         }
+        if (!LOGGER.isWarnEnabled()) {
+            return;
+        }
         for (final String entry : next.raw()) {
             if (!WhitelistEntries.isValid(entry)) {
                 LOGGER.warn("Ignoring malformed MCP whitelist entry '{}' (expected query:<path> or mutation:<path>)",
@@ -137,7 +140,9 @@ public class McpConfigService {
 
     /** Logs a refused whitelist at WARN and returns the exception to throw (message is client-safe). */
     private static IllegalArgumentException rejected(final String message) {
-        LOGGER.warn("Rejected MCP whitelist: {}", LogSupport.clean(message));
+        if (LOGGER.isWarnEnabled()) {
+            LOGGER.warn("Rejected MCP whitelist: {}", LogSupport.clean(message));
+        }
         return new IllegalArgumentException(message);
     }
 

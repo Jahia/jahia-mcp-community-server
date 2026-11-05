@@ -259,8 +259,10 @@ public class McpSkillService {
             return false;
         }
         if (content != null && content.length() > MAX_CONTENT_CHARS) {
-            LOGGER.warn("saveSkill rejected: content of '{}' exceeds {} characters", LogSupport.clean(name),
-                    MAX_CONTENT_CHARS);
+            if (LOGGER.isWarnEnabled()) {
+                LOGGER.warn("saveSkill rejected: content of '{}' exceeds {} characters", LogSupport.clean(name),
+                        MAX_CONTENT_CHARS);
+            }
             return false;
         }
         try {

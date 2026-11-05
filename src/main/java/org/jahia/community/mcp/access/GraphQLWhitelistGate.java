@@ -60,6 +60,8 @@ public class GraphQLWhitelistGate {
     private static final String MUTATION_PREFIX = "mutation.";
     private static final String SUBSCRIPTION_PREFIX = "subscription.";
     private static final String DENIED = "Operation not allowed: ";
+    /** End of every per-path denial reason. */
+    private static final String NOT_ALLOWED_SUFFIX = "' is not allowed";
     /** Start of the denial for the admin query namespace in the read-only default. */
     public static final String PROTECTED_QUERY_REASON_PREFIX = "queries under 'admin' require an explicit "
             + "query:admin<.path> whitelist entry (the read-only default excludes them: they expose OSGi "
@@ -147,17 +149,17 @@ public class GraphQLWhitelistGate {
         if (snapshot.isReadOnlyDefault()) {
             if (path.startsWith(QUERY_PREFIX)) {
                 return WhitelistEntries.isReadOnlyProtected(path)
-                        ? Optional.of(PROTECTED_QUERY_REASON_PREFIX + "; '" + shown + "' is not allowed")
+                        ? Optional.of(PROTECTED_QUERY_REASON_PREFIX + "; '" + shown + NOT_ALLOWED_SUFFIX)
                         : Optional.empty();
             }
             if (path.startsWith(MUTATION_PREFIX)) {
                 return Optional.of("mutations require an explicit mutation:<path> whitelist entry "
-                        + "(the whitelist is empty, which allows queries only); '" + shown + "' is not allowed");
+                        + "(the whitelist is empty, which allows queries only); '" + shown + NOT_ALLOWED_SUFFIX);
             }
             if (path.startsWith(SUBSCRIPTION_PREFIX)) {
                 return Optional.of("subscriptions are not supported");
             }
-            return Optional.of("'" + shown + "' is not allowed");
+            return Optional.of("'" + shown + NOT_ALLOWED_SUFFIX);
         }
         return isPathAllowed(path, snapshot.normalized())
                 ? Optional.empty()

@@ -71,14 +71,14 @@ class McpSkillServiceAclPurgeTest {
         CallerFixture.releaseLeaked();
     }
 
-    private static JCRNodeWrapper node(final String path) throws RepositoryException {
+    private static JCRNodeWrapper node(final String path) {
         final JCRNodeWrapper n = mock(JCRNodeWrapper.class);
         when(n.getPath()).thenReturn(path);
         when(n.getName()).thenReturn(path.substring(path.lastIndexOf('/') + 1));
         return n;
     }
 
-    private static JCRNodeIteratorWrapper iterator(final List<? extends Node> nodes) throws RepositoryException {
+    private static JCRNodeIteratorWrapper iterator(final List<? extends Node> nodes) {
         final Iterator<? extends Node> it = nodes.iterator();
         final JCRNodeIteratorWrapper result = mock(JCRNodeIteratorWrapper.class);
         when(result.hasNext()).thenAnswer(inv -> it.hasNext());
