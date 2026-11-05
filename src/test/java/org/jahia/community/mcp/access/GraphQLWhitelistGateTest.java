@@ -248,4 +248,124 @@ class GraphQLWhitelistGateTest {
         assertThat(gate.check("{ jcr { nodeByPath(path: \"/sites#main\") { name } } }", "alice", "1.2.3.4"))
                 .isEmpty();
     }
+
+    // ── Operation type (queries vs mutations) ───────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a legacy entry allows the query but NOT the same-named mutation")
+    void legacy_entry_does_not_allow_mutation() {
+        when(config.getWhitelist()).thenReturn(Set.of("jcr"));
+
+        assertThat(gate.check("{ jcr { nodeByPath(path: \"/\") { name } } }", "alice", "1.2.3.4")).isEmpty();
+        Optional<String> mutation = gate.check("mutation { jcr { deleteNode(pathOrId: \"/x\") } }", "alice", "1.2.3.4");
+        assertThat(mutation).isPresent();
+        assertThat(mutation.get()).contains("mutation:jcr");
+    }
+
+    @Test
+    @DisplayName("query:<path> allows the query only")
+    void query_entry_allows_query_only() {
+        when(config.getWhitelist()).thenReturn(Set.of("query:jcr"));
+
+        assertThat(gate.check("query { jcr { nodeByPath(path: \"/\") { name } } }", "alice", "1.2.3.4")).isEmpty();
+        assertThat(gate.check("mutation { jcr { deleteNode(pathOrId: \"/x\") } }", "alice", "1.2.3.4")).isPresent();
+    }
+
+    @Test
+    @DisplayName("mutation:<path> allows the mutation only, down to the exact nested field")
+    void mutation_entry_allows_mutation_only() {
+        when(config.getWhitelist()).thenReturn(Set.of("mutation:jcr.deleteNode"));
+
+        assertThat(gate.check("mutation { jcr { deleteNode(pathOrId: \"/x\") } }", "alice", "1.2.3.4")).isEmpty();
+        assertThat(gate.check("mutation { jcr { addNode(parentPathOrId: \"/\", name: \"x\", primaryNodeType: \"jnt:text\") { uuid } } }",
+                "alice", "1.2.3.4")).as("sibling mutation").isPresent();
+        assertThat(gate.check("{ jcr { nodeByPath(path: \"/\") { name } } }", "alice", "1.2.3.4"))
+                .as("same root field as a query").isPresent();
+    }
+
+    @Test
+    @DisplayName("a document mixing an allowed query and a non-allowed mutation is refused")
+    void mixed_document_refused_on_mutation() {
+        when(config.getWhitelist()).thenReturn(Set.of("query:jcr"));
+
+        Optional<String> result = gate.check(
+                "query A { jcr { nodeByPath(path: \"/\") { name } } } mutation B { jcr { deleteNode(pathOrId: \"/x\") } }",
+                "alice", "1.2.3.4");
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).contains("mutation:jcr");
+    }
+
+    @Test
+    @DisplayName("subscriptions are never allowed by query/mutation entries")
+    void subscription_refused() {
+        when(config.getWhitelist()).thenReturn(Set.of("query:jcr", "mutation:jcr"));
+
+        assertThat(gate.check("subscription { jcr { x } }", "alice", "1.2.3.4")).isPresent();
+    }
+
+    @Test
+    @DisplayName("a whitelist containing only malformed entries denies everything (fail closed, not allow-all)")
+    void only_malformed_entries_deny_all() {
+        when(config.getWhitelist()).thenReturn(Set.of("subscription:jcr", "foo:bar"));
+
+        assertThat(gate.check("{ jcr { nodeByPath(path: \"/\") { name } } }", "alice", "1.2.3.4")).isPresent();
+    }
+
+    @Test
+    @DisplayName("the { } shorthand is a query: allowed by a query: entry, never by a mutation: entry")
+    void shorthand_is_a_query() {
+        when(config.getWhitelist()).thenReturn(Set.of("mutation:currentUser"));
+        assertThat(gate.check("{ currentUser { name } }", "alice", "1.2.3.4")).isPresent();
+
+        when(config.getWhitelist()).thenReturn(Set.of("query:currentUser"));
+        assertThat(gate.check("{ currentUser { name } }", "alice", "1.2.3.4")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("an alias does not disguise a mutation field")
+    void alias_on_mutation() {
+        when(config.getWhitelist()).thenReturn(Set.of("mutation:jcr.addNode"));
+
+        assertThat(gate.check("mutation { jcr { addNode: deleteNode(pathOrId: \"/x\") } }", "alice", "1.2.3.4"))
+                .isPresent();
+    }
+
+    @Test
+    @DisplayName("an inline fragment inside a mutation is attributed to the mutation")
+    void inline_fragment_in_mutation() {
+        when(config.getWhitelist()).thenReturn(Set.of("query:jcr"));
+
+        assertThat(gate.check("mutation { ... on Mutation { jcr { deleteNode(pathOrId: \"/x\") } } }", "alice", "1.2.3.4"))
+                .isPresent();
+    }
+
+    @Test
+    @DisplayName("prefix case does not matter: MUTATION:jcr is a mutation entry")
+    void prefix_case_insensitive() {
+        when(config.getWhitelist()).thenReturn(Set.of("MUTATION:jcr"));
+
+        assertThat(gate.check("mutation { jcr { deleteNode(pathOrId: \"/x\") } }", "alice", "1.2.3.4")).isEmpty();
+        assertThat(gate.check("{ jcr { nodeByPath(path: \"/\") { name } } }", "alice", "1.2.3.4")).isPresent();
+    }
+
+    @Test
+    @DisplayName("entries of different depths: a shallow query: entry and a deep mutation: entry coexist")
+    void mixed_depth_entries() {
+        when(config.getWhitelist()).thenReturn(Set.of("query:jcr", "mutation:jcr.deleteNode"));
+
+        assertThat(gate.check("{ jcr { nodeByPath(path: \"/\") { children { nodes { name } } } } }", "alice", "1.2.3.4"))
+                .isEmpty();
+        assertThat(gate.check("mutation { jcr { deleteNode(pathOrId: \"/x\") } }", "alice", "1.2.3.4")).isEmpty();
+        assertThat(gate.check("mutation { jcr { addNode(parentPathOrId: \"/\", name: \"x\", primaryNodeType: \"jnt:text\") { uuid } } }",
+                "alice", "1.2.3.4")).isPresent();
+    }
+
+    @Test
+    @DisplayName("mutation { __typename } selects no real field and passes, like introspection")
+    void mutation_typename_only() {
+        when(config.getWhitelist()).thenReturn(Set.of("query:jcr"));
+
+        assertThat(gate.check("mutation { __typename }", "alice", "1.2.3.4")).isEmpty();
+    }
 }

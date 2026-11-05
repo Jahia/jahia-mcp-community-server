@@ -119,4 +119,23 @@ class McpConfigServiceTest {
 
         assertThat(service.getWhitelist()).containsExactly("currentUser");
     }
+
+    @Test
+    @DisplayName("a value made only of separators is NOT an empty whitelist (fail closed, not allow-all)")
+    void separators_only_is_not_allow_all() throws Exception {
+        Dictionary<String, Object> dict = new Hashtable<>();
+        dict.put("whitelist", " , ,");
+        service.updated(dict);
+        assertThat(service.getWhitelist()).isNotEmpty();
+        assertThat(WhitelistEntries.normalize(service.getWhitelist())).as("grants nothing").isEmpty();
+    }
+
+    @Test
+    @DisplayName("empty tokens between real entries are ignored")
+    void empty_tokens_between_entries_ignored() throws Exception {
+        Dictionary<String, Object> dict = new Hashtable<>();
+        dict.put("whitelist", "query:jcr,,mutation:x,");
+        service.updated(dict);
+        assertThat(service.getWhitelist()).containsExactly("query:jcr", "mutation:x");
+    }
 }

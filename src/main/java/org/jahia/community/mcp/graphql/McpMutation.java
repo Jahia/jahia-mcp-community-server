@@ -5,6 +5,7 @@ import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
 import org.jahia.community.mcp.McpSkillService;
+import org.jahia.community.mcp.config.WhitelistEntries;
 import org.jahia.modules.graphql.provider.dxm.security.GraphQLRequiresPermission;
 import org.jahia.osgi.BundleUtils;
 import org.osgi.service.cm.Configuration;
@@ -28,7 +29,14 @@ public class McpMutation {
     @GraphQLDescription("Saves the MCP operation whitelist configuration")
     @GraphQLRequiresPermission("admin")
     public Boolean saveSettings(
-            @GraphQLName("whitelist") @GraphQLNonNull @GraphQLDescription("Operations to allow; empty list means allow all") List<String> whitelist) {
+            @GraphQLName("whitelist") @GraphQLNonNull @GraphQLDescription("Operations to allow, as 'query:<path>' or "
+                    + "'mutation:<path>' (an unprefixed path is query-only); empty list means allow all") List<String> whitelist) {
+        for (final String entry : whitelist) {
+            if (!WhitelistEntries.isValid(entry)) {
+                LOGGER.warn("Rejected MCP whitelist: malformed entry '{}'", entry);
+                return Boolean.FALSE;
+            }
+        }
         try {
             final ConfigurationAdmin configAdmin = BundleUtils.getOsgiService(ConfigurationAdmin.class, null);
             if (configAdmin == null) {

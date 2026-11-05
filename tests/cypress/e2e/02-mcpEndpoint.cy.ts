@@ -131,6 +131,41 @@ describe('MCP Server — Endpoint Access Control', () => {
             .its('body.result.isError').should('eq', false);
     });
 
+    // --- Operation type: queries and mutations are allowed separately ---
+
+    // A harmless mutation to probe the gate with: it rewrites the whitelist to the same value it
+    // already holds, and afterEach resets the whitelist anyway.
+    const rewriteWhitelist = (entries: string[]) =>
+        `mutation { communityMcp { saveSettings(whitelist: ${JSON.stringify(entries)}) } }`;
+
+    it('a legacy unprefixed entry allows the query but not the same-named mutation', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['communityMcp']}});
+        executeGraphQL('{ communityMcp { settings { whitelist } } }')
+            .its('body.result.isError').should('eq', false);
+        executeGraphQL(rewriteWhitelist(['communityMcp'])).then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(response.body.result.content[0].text).to.include('mutation:communityMcp');
+        });
+    });
+
+    it('query:<path> does not allow the same-named mutation', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['query:communityMcp']}});
+        executeGraphQL(rewriteWhitelist(['query:communityMcp']))
+            .its('body.result.isError').should('eq', true);
+    });
+
+    it('mutation:<path> allows exactly that mutation', () => {
+        const entries = ['mutation:communityMcp.saveSettings'];
+        cy.apollo({mutation: saveSettings, variables: {whitelist: entries}});
+        executeGraphQL(rewriteWhitelist(entries)).then(response => {
+            expect(response.body.result.isError).to.eq(false);
+            expect(JSON.parse(response.body.result.content[0].text).data.communityMcp.saveSettings).to.eq(true);
+        });
+        // ...and nothing else: the query side of the same namespace stays closed.
+        executeGraphQL('{ communityMcp { settings { whitelist } } }')
+            .its('body.result.isError').should('eq', true);
+    });
+
     // --- Authentication ---
 
     it('returns 401 for unauthenticated requests', () => {

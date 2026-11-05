@@ -5,6 +5,7 @@ import {
     isCoveredBySet,
     isExpandableKind,
     mapTypeFields,
+    normalizeWhitelist,
     toggleWhitelistPath
 } from '../operationTree';
 
@@ -32,29 +33,28 @@ describe('buildOperationMap', () => {
         expect(buildOperationMap(null, null)).toEqual([]);
     });
 
-    test('marks query-only fields as isQuery', () => {
+    test('qualifies query fields with the query: prefix', () => {
         const result = buildOperationMap([{name: 'currentUser', description: 'd', type: {name: 'User', kind: 'OBJECT'}}], null);
         expect(result).toHaveLength(1);
-        expect(result[0]).toMatchObject({name: 'currentUser', path: 'currentUser', isQuery: true, isMutation: false, typeName: 'User', typeKind: 'OBJECT'});
+        expect(result[0]).toMatchObject({name: 'currentUser', path: 'query:currentUser', isQuery: true, isMutation: false, typeName: 'User', typeKind: 'OBJECT'});
     });
 
-    test('merges a field present in both Query and Mutation into one entry', () => {
+    test('keeps a field present in both Query and Mutation as two distinct entries', () => {
         const result = buildOperationMap(
             [{name: 'admin', type: {name: 'AdminQuery', kind: 'OBJECT'}}],
             [{name: 'admin', type: {name: 'AdminMutation', kind: 'OBJECT'}}]
         );
-        expect(result).toHaveLength(1);
-        expect(result[0]).toMatchObject({name: 'admin', isQuery: true, isMutation: true});
-        // TypeName comes from the query pass (first writer wins)
-        expect(result[0].typeName).toBe('AdminQuery');
+        expect(result).toHaveLength(2);
+        expect(result[0]).toMatchObject({path: 'query:admin', isQuery: true, isMutation: false, typeName: 'AdminQuery'});
+        expect(result[1]).toMatchObject({path: 'mutation:admin', isQuery: false, isMutation: true, typeName: 'AdminMutation'});
     });
 
-    test('sorts entries alphabetically by name', () => {
+    test('lists queries first, then mutations, each sorted alphabetically', () => {
         const result = buildOperationMap(
             [{name: 'zeta', type: {}}, {name: 'alpha', type: {}}],
-            [{name: 'mid', type: {}}]
+            [{name: 'mid', type: {}}, {name: 'beta', type: {}}]
         );
-        expect(result.map(o => o.name)).toEqual(['alpha', 'mid', 'zeta']);
+        expect(result.map(o => o.path)).toEqual(['query:alpha', 'query:zeta', 'mutation:beta', 'mutation:mid']);
     });
 
     test('resolves the named type through wrappers', () => {
@@ -64,6 +64,36 @@ describe('buildOperationMap', () => {
         );
         expect(result[0].typeName).toBe('JCRNode');
         expect(result[0].typeKind).toBe('OBJECT');
+    });
+});
+
+describe('normalizeWhitelist', () => {
+    test('keeps prefixed entries as they are', () => {
+        const {entries, migrated} = normalizeWhitelist(['query:jcr', 'mutation:jcr.deleteNode']);
+        expect([...entries]).toEqual(['query:jcr', 'mutation:jcr.deleteNode']);
+        expect(migrated).toBe(false);
+    });
+
+    test('rewrites a legacy unprefixed entry as query-only, like the server does', () => {
+        const {entries, migrated} = normalizeWhitelist(['jcr', 'mutation:x']);
+        expect([...entries]).toEqual(['query:jcr', 'mutation:x']);
+        expect(migrated).toBe(true);
+    });
+
+    test('reads the prefix case-insensitively, like the server, and lower-cases it', () => {
+        const {entries, migrated} = normalizeWhitelist(['MUTATION:jcr.deleteNode', 'Query:jcr']);
+        expect([...entries]).toEqual(['mutation:jcr.deleteNode', 'query:jcr']);
+        expect(migrated).toBe(true);
+    });
+
+    test('drops entries the server ignores (unknown operation type), so the form can be saved', () => {
+        const {entries, migrated} = normalizeWhitelist(['subscription:jcr', 'query:x']);
+        expect([...entries]).toEqual(['query:x']);
+        expect(migrated).toBe(true);
+    });
+
+    test('handles a missing list', () => {
+        expect([...normalizeWhitelist(null).entries]).toEqual([]);
     });
 });
 
@@ -87,6 +117,11 @@ describe('isCoveredBySet', () => {
 
     test('false for an empty set', () => {
         expect(isCoveredBySet('admin', new Set())).toBe(false);
+    });
+
+    test('a query entry never covers the same-named mutation', () => {
+        expect(isCoveredBySet('query:jcr.nodeByPath', new Set(['query:jcr']))).toBe(true);
+        expect(isCoveredBySet('mutation:jcr.deleteNode', new Set(['query:jcr']))).toBe(false);
     });
 });
 
@@ -137,10 +172,10 @@ describe('buildChildNodes', () => {
     });
 
     test('composes dot-paths and inherits parent query/mutation flags', () => {
-        const node = {path: 'admin', isQuery: true, isMutation: false};
+        const node = {path: 'query:admin', isQuery: true, isMutation: false};
         const raw = [{name: 'jahia', typeName: 'X', typeKind: 'OBJECT'}];
         expect(buildChildNodes(node, raw)).toEqual([
-            {name: 'jahia', typeName: 'X', typeKind: 'OBJECT', path: 'admin.jahia', isQuery: true, isMutation: false}
+            {name: 'jahia', typeName: 'X', typeKind: 'OBJECT', path: 'query:admin.jahia', isQuery: true, isMutation: false}
         ]);
     });
 });

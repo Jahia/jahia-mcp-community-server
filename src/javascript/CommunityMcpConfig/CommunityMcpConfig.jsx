@@ -11,6 +11,7 @@ import {
     isCoveredBySet,
     isExpandableKind,
     mapTypeFields,
+    normalizeWhitelist,
     toggleWhitelistPath
 } from './operationTree';
 
@@ -36,8 +37,11 @@ export const CommunityMcpConfigAdmin = () => {
     // would clobber unsaved edits already made by the user.
     useEffect(() => {
         if (settingsData?.communityMcp?.settings) {
-            setWhitelist(new Set(settingsData.communityMcp.settings.whitelist || []));
-            setDirty(false);
+            // Legacy unprefixed entries are shown as the query-only entries the server enforces;
+            // if any were rewritten, the form starts dirty so the new form can be saved.
+            const {entries, migrated} = normalizeWhitelist(settingsData.communityMcp.settings.whitelist);
+            setWhitelist(entries);
+            setDirty(migrated);
         }
     }, [settingsData]);
 
@@ -84,7 +88,7 @@ export const CommunityMcpConfigAdmin = () => {
     };
 
     const selectAll = () => {
-        setWhitelist(new Set(operations.map(op => op.name)));
+        setWhitelist(new Set(operations.map(op => op.path)));
         setDirty(true);
     };
 
@@ -147,6 +151,8 @@ export const CommunityMcpConfigAdmin = () => {
             <div className={styles.mcp_panels}>
                 <OperationPanel
                     title={t('label.allowList')}
+                    queriesHeading={t('label.queriesHeading')}
+                    mutationsHeading={t('label.mutationsHeading')}
                     hint={t('label.allowListHint')}
                     emptyHint={t('label.allowListEmpty')}
                     selectAllLabel={t('label.selectAll')}
@@ -302,7 +308,7 @@ TreeNode.propTypes = {
     loadingFieldsLabel: PropTypes.string.isRequired
 };
 
-const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabel, queryBadgeLabel, mutationBadgeLabel, legendQueryLabel, legendMutationLabel, coveredLabel, loadingFieldsLabel, expandLabel, collapseLabel, operations, selected, typeFields, expandedPaths, onToggle, onSelectAll, onUnselectAll, onExpand, styles}) => {
+const OperationPanel = ({title, queriesHeading, mutationsHeading, hint, emptyHint, selectAllLabel, unselectAllLabel, queryBadgeLabel, mutationBadgeLabel, legendQueryLabel, legendMutationLabel, coveredLabel, loadingFieldsLabel, expandLabel, collapseLabel, operations, selected, typeFields, expandedPaths, onToggle, onSelectAll, onUnselectAll, onExpand, styles}) => {
     const titleId = 'mcp-panel-title';
     return (
         <div className={styles.mcp_panel}>
@@ -329,24 +335,32 @@ const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabe
             <fieldset className={styles.mcp_operationGroup} aria-labelledby={titleId}>
                 <legend className={styles.mcp_visuallyHidden}>{title}</legend>
                 <div className={styles.mcp_operationList}>
-                    {operations.map(op => (
-                        <TreeNode
-                            key={op.name}
-                            node={op}
-                            depth={0}
-                            selected={selected}
-                            typeFields={typeFields}
-                            expandedPaths={expandedPaths}
-                            styles={styles}
-                            expandLabel={expandLabel}
-                            collapseLabel={collapseLabel}
-                            queryBadgeLabel={queryBadgeLabel}
-                            mutationBadgeLabel={mutationBadgeLabel}
-                            coveredLabel={coveredLabel}
-                            loadingFieldsLabel={loadingFieldsLabel}
-                            onToggle={onToggle}
-                            onExpand={onExpand}
-                        />
+                    {[
+                        {id: 'queries', heading: queriesHeading, ops: operations.filter(op => op.isQuery)},
+                        {id: 'mutations', heading: mutationsHeading, ops: operations.filter(op => op.isMutation)}
+                    ].filter(group => group.ops.length > 0).map(group => (
+                        <div key={group.id} role="group" aria-labelledby={`mcp-group-${group.id}`}>
+                            <h4 className={styles.mcp_groupHeading} id={`mcp-group-${group.id}`}>{group.heading}</h4>
+                            {group.ops.map(op => (
+                                <TreeNode
+                                    key={op.path}
+                                    node={op}
+                                    depth={0}
+                                    selected={selected}
+                                    typeFields={typeFields}
+                                    expandedPaths={expandedPaths}
+                                    styles={styles}
+                                    expandLabel={expandLabel}
+                                    collapseLabel={collapseLabel}
+                                    queryBadgeLabel={queryBadgeLabel}
+                                    mutationBadgeLabel={mutationBadgeLabel}
+                                    coveredLabel={coveredLabel}
+                                    loadingFieldsLabel={loadingFieldsLabel}
+                                    onToggle={onToggle}
+                                    onExpand={onExpand}
+                                />
+                            ))}
+                        </div>
                     ))}
                 </div>
             </fieldset>
@@ -356,6 +370,8 @@ const OperationPanel = ({title, hint, emptyHint, selectAllLabel, unselectAllLabe
 
 OperationPanel.propTypes = {
     title: PropTypes.string.isRequired,
+    queriesHeading: PropTypes.string.isRequired,
+    mutationsHeading: PropTypes.string.isRequired,
     hint: PropTypes.string.isRequired,
     emptyHint: PropTypes.string.isRequired,
     selectAllLabel: PropTypes.string.isRequired,

@@ -2,7 +2,7 @@
   "label": {
     "menu_entry": "MCP Server",
     "title": "MCP Server — Operation Access Control",
-    "description": "Control which Jahia GraphQL operations the MCP server is allowed to execute. Restrictions apply to all operation types (queries and mutations) sharing the same field name. Introspection fields (__schema, __type) always pass regardless of configuration.",
+    "description": "Control which Jahia GraphQL operations the community.graphql.execute MCP tool may run. Queries and mutations are allowed separately: allowing a query never allows the mutation of the same name. Introspection fields (__schema, __type) always pass regardless of configuration.",
     "allowList": "Allow List",
     "allowListHint": "Only checked operations are allowed through the MCP server.",
     "allowListEmpty": "No restrictions — all operations are allowed.",
@@ -21,6 +21,8 @@
     "mutationBadge": "Mutation operation",
     "legendQuery": "Q = Query operation",
     "legendMutation": "M = Mutation operation",
-    "coveredByAncestor": "allowed through a parent entry"
+    "coveredByAncestor": "allowed through a parent entry",
+    "queriesHeading": "Queries",
+    "mutationsHeading": "Mutations"
   }
 }

@@ -2,7 +2,7 @@
   "label": {
     "menu_entry": "Serveur MCP",
     "title": "Serveur MCP — Contrôle d'accès aux opérations",
-    "description": "Contrôlez quelles opérations GraphQL de Jahia le serveur MCP est autorisé à exécuter. Les restrictions s'appliquent à tous les types d'opérations (requêtes et mutations) partageant le même nom de champ. Les champs d'introspection (__schema, __type) passent toujours, quelle que soit la configuration.",
+    "description": "Contrôlez quelles opérations GraphQL de Jahia l'outil MCP community.graphql.execute peut exécuter. Les requêtes et les mutations sont autorisées séparément : autoriser une requête n'autorise jamais la mutation du même nom. Les champs d'introspection (__schema, __type) passent toujours, quelle que soit la configuration.",
     "allowList": "Liste d'autorisation",
     "allowListHint": "Seules les opérations cochées sont autorisées à transiter par le serveur MCP.",
     "allowListEmpty": "Aucune restriction — toutes les opérations sont autorisées.",
@@ -21,6 +21,8 @@
     "mutationBadge": "Opération de mutation",
     "legendQuery": "Q = Opération de requête",
     "legendMutation": "M = Opération de mutation",
-    "coveredByAncestor": "autorisé via une entrée parente"
+    "coveredByAncestor": "autorisé via une entrée parente",
+    "queriesHeading": "Requêtes",
+    "mutationsHeading": "Mutations"
   }
 }

@@ -42,6 +42,24 @@ describe('MCP Server — Settings API', () => {
             .should('deep.equal', []);
     });
 
+    it('mcpSaveSettings accepts query:/mutation: entries and reads them back verbatim', () => {
+        const entries = ['query:jcr.nodeByPath', 'mutation:jcr.deleteNode'];
+        cy.apollo({mutation: saveSettings, variables: {whitelist: entries}})
+            .its('data.communityMcp.saveSettings').should('eq', true);
+        cy.apollo({query: getSettings})
+            .its('data.communityMcp.settings.whitelist')
+            .should('deep.equal', entries);
+    });
+
+    it('mcpSaveSettings rejects a malformed entry and keeps the previous whitelist', () => {
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['query:currentUser']}});
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['subscription:jcr']}})
+            .its('data.communityMcp.saveSettings').should('eq', false);
+        cy.apollo({query: getSettings})
+            .its('data.communityMcp.settings.whitelist')
+            .should('deep.equal', ['query:currentUser']);
+    });
+
     it('mcpSettings preserves dot-path entries verbatim', () => {
         const entries = ['admin.jahia', 'jcr'];
         cy.apollo({mutation: saveSettings, variables: {whitelist: entries}});

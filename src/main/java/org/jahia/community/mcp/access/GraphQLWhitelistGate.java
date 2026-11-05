@@ -10,6 +10,7 @@ import graphql.language.Selection;
 import graphql.language.SelectionSet;
 import graphql.parser.Parser;
 import org.jahia.community.mcp.config.McpConfigService;
+import org.jahia.community.mcp.config.WhitelistEntries;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
@@ -24,9 +25,10 @@ import java.util.Set;
  * Dot-path whitelist gate applied to every GraphQL document before it is executed by the
  * {@code community.graphql.execute} tool.
  *
- * <p>Entries are dot-separated path prefixes: {@code admin} covers every sub-operation of
- * {@code admin}, {@code admin.jahia.shutdown} covers only that nested path. Introspection
- * fields ({@code __schema}, {@code __type}, {@code __typename}) always pass.</p>
+ * <p>Entries name an operation type and a dot-separated path prefix: {@code query:admin} covers
+ * every query under {@code admin}, {@code mutation:jcr.deleteNode} covers only that mutation. A
+ * legacy entry without a prefix is query-only (see {@link WhitelistEntries}). Introspection fields
+ * ({@code __schema}, {@code __type}, {@code __typename}) always pass.</p>
  */
 @Component(service = GraphQLWhitelistGate.class)
 public class GraphQLWhitelistGate {
@@ -85,30 +87,46 @@ public class GraphQLWhitelistGate {
                     + "named fragment spreads are not permitted when a whitelist is active");
         }
 
-        int maxDepth = 1;
-        for (final String e : whitelist) {
+        // Operation-qualified entries ("query.jcr", "mutation.jcr.deleteNode"). Malformed entries
+        // normalize to nothing; the whitelist is still non-empty, so they deny rather than allow-all.
+        final Set<String> entries = WhitelistEntries.normalize(whitelist);
+        int maxDepth = 2;
+        for (final String e : entries) {
             maxDepth = Math.max(maxDepth, segmentCount(e));
         }
 
         // An empty set after a SUCCESSFUL parse means the document selects only introspection.
-        for (final String path : collectNonIntrospectionPaths(document, maxDepth)) {
-            if (!isPathAllowed(path, whitelist)) {
+        for (final String path : withoutIntrospectionPaths(extractOperationPaths(document, maxDepth))) {
+            if (!isPathAllowed(path, entries)) {
+                final String shown = WhitelistEntries.display(path);
                 LOGGER.warn("MCP operation blocked: path='{}', reason=not in whitelist, user='{}', ip='{}'",
-                        path, who, clientIp);
-                return Optional.of("Operation not allowed: '" + path + "' is not in the whitelist");
+                        shown, who, clientIp);
+                return Optional.of("Operation not allowed: '" + shown + "' is not in the whitelist");
             }
         }
         return Optional.empty();
     }
 
+    /**
+     * Field paths qualified by their operation type as the first segment ({@code query.jcr.nodeByPath},
+     * {@code mutation.jcr.deleteNode}), up to {@code maxDepth} segments including that prefix. Every
+     * operation of the document is walked, so a mutation cannot hide behind an allowed query.
+     */
+    static Set<String> extractOperationPaths(final Document doc, final int maxDepth) {
+        final Set<String> paths = new LinkedHashSet<>();
+        for (final Definition<?> def : doc.getDefinitions()) {
+            if (def instanceof OperationDefinition) {
+                final OperationDefinition op = (OperationDefinition) def;
+                final String type = op.getOperation().name().toLowerCase(java.util.Locale.ROOT);
+                collectPaths(op.getSelectionSet(), type, 1, maxDepth, paths);
+            }
+        }
+        return paths;
+    }
+
     /** Extracts field paths from the query and removes introspection segments. */
     static Set<String> collectNonIntrospectionPaths(final String query, final int maxDepth) {
         return withoutIntrospectionPaths(extractFieldPaths(query, maxDepth));
-    }
-
-    /** AST form of {@link #collectNonIntrospectionPaths(String, int)}. */
-    static Set<String> collectNonIntrospectionPaths(final Document doc, final int maxDepth) {
-        return withoutIntrospectionPaths(extractFieldPaths(doc, maxDepth));
     }
 
     private static Set<String> withoutIntrospectionPaths(final Set<String> extracted) {

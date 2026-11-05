@@ -16,32 +16,58 @@ const getNamedType = typeObj => {
     return getNamedType(typeObj.ofType);
 };
 
-// Build a sorted, de-duplicated map of root operations from the Query and
-// Mutation field lists. An operation that exists as both a query and a mutation
-// field is merged into a single entry with both flags set.
+const QUERY_PREFIX = 'query:';
+const MUTATION_PREFIX = 'mutation:';
+
+// Build the root operation entries. A field present in both Query and Mutation becomes TWO
+// entries: whitelist paths carry the operation type ('query:admin' vs 'mutation:admin'), so
+// allowing a query never allows the same-named mutation. Queries first, then mutations, each
+// sorted by name.
 const buildOperationMap = (queryFields, mutationFields) => {
-    const map = {};
-    (queryFields || []).forEach(f => {
-        const named = getNamedType(f.type);
-        map[f.name] = {
-            name: f.name, path: f.name, description: f.description,
-            isQuery: true, isMutation: false,
-            typeName: named?.name || null, typeKind: named?.kind || null
-        };
-    });
-    (mutationFields || []).forEach(f => {
-        const named = getNamedType(f.type);
-        if (map[f.name]) {
-            map[f.name].isMutation = true;
-        } else {
-            map[f.name] = {
-                name: f.name, path: f.name, description: f.description,
-                isQuery: false, isMutation: true,
+    const toEntries = (fields, prefix, isQuery) => (fields || [])
+        .map(f => {
+            const named = getNamedType(f.type);
+            return {
+                name: f.name, path: prefix + f.name, description: f.description,
+                isQuery, isMutation: !isQuery,
                 typeName: named?.name || null, typeKind: named?.kind || null
             };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+    return [
+        ...toEntries(queryFields, QUERY_PREFIX, true),
+        ...toEntries(mutationFields, MUTATION_PREFIX, false)
+    ];
+};
+
+const OPERATION_PREFIX = /^(query|mutation):/i;
+
+// Mirror the server's reading of stored entries (config/WhitelistEntries.java):
+// - prefixes are case-insensitive ('MUTATION:x' is a mutation entry) → lower-cased;
+// - an unprefixed (legacy) entry is query-only → 'query:' added;
+// - any other 'type:' entry grants nothing on the server → dropped.
+// Returns a NEW Set plus whether anything was rewritten (the caller then offers to save it).
+const normalizeWhitelist = entries => {
+    const normalized = new Set();
+    let migrated = false;
+    (entries || []).forEach(e => {
+        const match = e.match(OPERATION_PREFIX);
+        let next = null;
+        if (match) {
+            next = match[1].toLowerCase() + ':' + e.slice(match[0].length);
+        } else if (!e.includes(':')) {
+            next = QUERY_PREFIX + e;
+        }
+
+        if (next !== e) {
+            migrated = true;
+        }
+
+        if (next !== null) {
+            normalized.add(next);
         }
     });
-    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
+    return {entries: normalized, migrated};
 };
 
 // True if path itself or any ancestor prefix is in the set
@@ -111,6 +137,7 @@ export {
     MAX_TREE_DEPTH,
     getNamedType,
     buildOperationMap,
+    normalizeWhitelist,
     isCoveredBySet,
     toggleWhitelistPath,
     mapTypeFields,
