@@ -73,6 +73,8 @@ const confirmEmptying = () => fireEvent.click(
 afterEach(() => {
     delete window.__apolloMock;
     jest.useRealTimers();
+    // Spies such as console.error silencing must not leak into later tests.
+    jest.restoreAllMocks();
 });
 
 describe('tree rendering and selection', () => {
@@ -219,6 +221,88 @@ describe('loading and load errors', () => {
         expect(refetch).toHaveBeenCalled();
     });
 
+    test('a successful retry moves focus to the panel heading, never to the page body', async () => {
+        const refetch = jest.fn().mockResolvedValue({});
+        installApolloMock({errors: {settings: new Error('denied')}, refetch});
+        const {rerender} = render(<CommunityMcpConfigAdmin/>);
+
+        const retry = screen.getByRole('button', {name: 'label.retry'});
+        act(() => retry.focus());
+        fireEvent.click(retry);
+        // Apollo shows the loading state, which removes "Try again"...
+        installApolloMock({loading: true});
+        rerender(<CommunityMcpConfigAdmin/>);
+        expect(screen.queryByRole('button', {name: 'label.retry'})).not.toBeInTheDocument();
+        // ...then the data.
+        installApolloMock({whitelist: ['query:admin']});
+        rerender(<CommunityMcpConfigAdmin/>);
+
+        await waitFor(() => expect(panelHeading()).toHaveFocus());
+    });
+
+    test('a retry that fails again after a loading state puts focus back on Try again', async () => {
+        installApolloMock({errors: {settings: new Error('denied')}, refetch: jest.fn().mockResolvedValue({})});
+        const {rerender} = render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.click(screen.getByRole('button', {name: 'label.retry'}));
+        installApolloMock({loading: true});
+        rerender(<CommunityMcpConfigAdmin/>);
+        installApolloMock({errors: {settings: new Error('still denied')}});
+        rerender(<CommunityMcpConfigAdmin/>);
+
+        await waitFor(() => expect(screen.getByRole('button', {name: 'label.retry'})).toHaveFocus());
+    });
+
+    test('a retry that fails again keeps focus on Try again and raises no unhandled rejection', async () => {
+        const refetch = jest.fn().mockRejectedValue(new Error('still down'));
+        const logged = jest.spyOn(console, 'error').mockImplementation(() => {});
+        installApolloMock({errors: {settings: new Error('denied')}, refetch});
+        render(<CommunityMcpConfigAdmin/>);
+
+        const retry = screen.getByRole('button', {name: 'label.retry'});
+        act(() => retry.focus());
+        fireEvent.click(retry);
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(refetch).toHaveBeenCalled();
+        expect(logged).toHaveBeenCalledWith('Failed to reload MCP settings:', expect.any(Error));
+        expect(screen.getByRole('button', {name: 'label.retry'})).toHaveFocus();
+    });
+
+    test('settings delivered again while edits are pending keep the edits and say the server list changed', async () => {
+        installApolloMock({whitelist: ['query:admin']});
+        const {rerender} = render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
+        installApolloMock({whitelist: ['mutation:admin']});
+        rerender(<CommunityMcpConfigAdmin/>);
+
+        expect(item(queriesTree(), 'currentUser')).toHaveAttribute('aria-checked', 'true');
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'true');
+        expect(screen.getByText('label.unsavedChanges')).toBeInTheDocument();
+        expect(await screen.findByText('label.serverChanged')).toBeInTheDocument();
+
+        // Discard now restores the list the server holds today.
+        fireEvent.click(screen.getByRole('button', {name: 'label.discard'}));
+        expect(item(mutationsTree(), 'admin')).toHaveAttribute('aria-checked', 'true');
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'false');
+    });
+
+    test('settings delivered again with no pending edit replace the list', () => {
+        installApolloMock({whitelist: ['query:admin']});
+        const {rerender} = render(<CommunityMcpConfigAdmin/>);
+
+        installApolloMock({whitelist: ['query:currentUser']});
+        rerender(<CommunityMcpConfigAdmin/>);
+
+        expect(item(queriesTree(), 'currentUser')).toHaveAttribute('aria-checked', 'true');
+        expect(item(queriesTree(), 'admin')).toHaveAttribute('aria-checked', 'false');
+        expect(screen.queryByText('label.unsavedChanges')).not.toBeInTheDocument();
+        expect(screen.queryByText('label.serverChanged')).not.toBeInTheDocument();
+    });
+
     test('a schema load error is shown as an alert', () => {
         installApolloMock({errors: {mutationFields: new Error('boom')}});
         render(<CommunityMcpConfigAdmin/>);
@@ -308,7 +392,7 @@ describe('save feedback', () => {
         const {save} = installApolloMock();
         render(<CommunityMcpConfigAdmin/>);
 
-        saveButton().focus();
+        act(() => saveButton().focus());
         expect(saveButton()).toBeEnabled();
         fireEvent.click(saveButton());
         expect(save).not.toHaveBeenCalled();
@@ -367,7 +451,7 @@ describe('bulk actions and confirmation', () => {
         render(<CommunityMcpConfigAdmin/>);
 
         const clear = screen.getByRole('button', {name: 'label.clearAll'});
-        clear.focus();
+        act(() => clear.focus());
         fireEvent.click(clear);
         const dialog = screen.getByRole('alertdialog', {name: 'label.confirmClearTitle'});
         expect(within(dialog).getByRole('button', {name: 'label.cancel'})).toHaveFocus();
@@ -403,11 +487,40 @@ describe('bulk actions and confirmation', () => {
         fireEvent.click(screen.getByRole('button', {name: 'label.clearAll'}));
         const dialog = screen.getByRole('alertdialog');
         const [cancel, confirm] = within(dialog).getAllByRole('button');
-        confirm.focus();
+        act(() => confirm.focus());
         fireEvent.keyDown(dialog, {key: 'Tab'});
         expect(cancel).toHaveFocus();
         fireEvent.keyDown(dialog, {key: 'Tab', shiftKey: true});
         expect(confirm).toHaveFocus();
+    });
+
+    test('a click on the backdrop cannot move focus out of the dialog', () => {
+        installApolloMock({whitelist: ['query:admin']});
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.click(screen.getByRole('button', {name: 'label.clearAll'}));
+        const dialog = screen.getByRole('alertdialog');
+        const cancel = within(dialog).getByRole('button', {name: 'label.cancel'});
+        // The backdrop swallows the mouse-down that would blur the dialog.
+        expect(fireEvent.mouseDown(dialog.parentElement)).toBe(false);
+        // Focus that still reaches the page behind is sent back to Cancel.
+        act(() => {
+            screen.getByRole('searchbox', {name: 'label.filterLabel'}).focus();
+        });
+        expect(cancel).toHaveFocus();
+        // A mouse-down inside the dialog keeps its default behaviour.
+        expect(fireEvent.mouseDown(cancel)).toBe(true);
+    });
+
+    test('focus moves freely again once the dialog is closed', () => {
+        installApolloMock({whitelist: ['query:admin']});
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.click(screen.getByRole('button', {name: 'label.clearAll'}));
+        fireEvent.keyDown(screen.getByRole('alertdialog'), {key: 'Escape'});
+        const filterBox = screen.getByRole('searchbox', {name: 'label.filterLabel'});
+        act(() => filterBox.focus());
+        expect(filterBox).toHaveFocus();
     });
 
     test('allowing all mutations is confirmed and never includes communityMcp', async () => {
@@ -521,7 +634,7 @@ describe('keyboard navigation (APG tree)', () => {
         expect(admin).toHaveAttribute('tabindex', '0');
         expect(user).toHaveAttribute('tabindex', '-1');
 
-        admin.focus();
+        act(() => admin.focus());
         fireEvent.keyDown(admin, {key: 'ArrowDown'});
         expect(user).toHaveFocus();
         expect(user).toHaveAttribute('tabindex', '0');
@@ -542,7 +655,7 @@ describe('keyboard navigation (APG tree)', () => {
         render(<CommunityMcpConfigAdmin/>);
 
         const admin = item(queriesTree(), 'admin');
-        admin.focus();
+        act(() => admin.focus());
         fireEvent.keyDown(admin, {key: 'ArrowRight'});
         expect(admin).toHaveAttribute('aria-expanded', 'true');
         const jahia = await within(queriesTree()).findByRole('treeitem', {name: 'jahia'});
@@ -576,7 +689,7 @@ describe('every edit that empties the list is confirmed (it widens access to eve
         installApolloMock({whitelist: ['query:currentUser']});
         render(<CommunityMcpConfigAdmin/>);
 
-        screen.getByRole('button', {name: 'label.clearQueries'}).focus();
+        act(() => screen.getByRole('button', {name: 'label.clearQueries'}).focus());
         fireEvent.click(screen.getByRole('button', {name: 'label.clearQueries'}));
         const dialog = screen.getByRole('alertdialog', {name: 'label.confirmClearTitle'});
         fireEvent.click(within(dialog).getByRole('button', {name: 'label.cancel'}));
@@ -604,7 +717,7 @@ describe('every edit that empties the list is confirmed (it widens access to eve
         render(<CommunityMcpConfigAdmin/>);
 
         const admin = item(queriesTree(), 'admin');
-        admin.focus();
+        act(() => admin.focus());
         fireEvent.keyDown(admin, {key: ' '});
         fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', {name: 'label.cancel'}));
         expect(admin).toHaveAttribute('aria-checked', 'true');
@@ -617,7 +730,7 @@ describe('every edit that empties the list is confirmed (it widens access to eve
         render(<CommunityMcpConfigAdmin/>);
 
         const remove = screen.getByRole('button', {name: 'label.remove query:admin'});
-        remove.focus();
+        act(() => remove.focus());
         fireEvent.click(remove);
         confirmEmptying();
         await waitFor(() => expect(screen.getByText('label.allEntriesSummary')).toHaveFocus());
@@ -633,7 +746,7 @@ describe('focus never falls to the page body', () => {
 
         fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
         const discard = screen.getByRole('button', {name: 'label.discard'});
-        discard.focus();
+        act(() => discard.focus());
         fireEvent.click(discard);
         expect(screen.queryByRole('button', {name: 'label.discard'})).not.toBeInTheDocument();
         await waitFor(() => expect(saveButton()).toHaveFocus());
@@ -646,7 +759,7 @@ describe('focus never falls to the page body', () => {
 
         fireEvent.click(saveButton());
         const dismiss = screen.getByRole('button', {name: 'label.dismiss'});
-        dismiss.focus();
+        act(() => dismiss.focus());
         fireEvent.click(dismiss);
         expect(screen.queryByRole('button', {name: 'label.dismiss'})).not.toBeInTheDocument();
         await waitFor(() => expect(saveButton()).toHaveFocus());
@@ -658,7 +771,7 @@ describe('focus never falls to the page body', () => {
 
         // Sorted: mutation:admin, query:admin, query:currentUser
         const first = screen.getByRole('button', {name: 'label.remove query:admin'});
-        first.focus();
+        act(() => first.focus());
         fireEvent.click(first);
         await waitFor(() => expect(screen.getByRole('button', {name: 'label.remove query:currentUser'})).toHaveFocus());
 
@@ -673,7 +786,7 @@ describe('focus never falls to the page body', () => {
 
         const problems = screen.getByRole('region', {name: 'label.problemEntriesTitle'});
         const remove = within(problems).getByRole('button', {name: 'label.remove query:gone'});
-        remove.focus();
+        act(() => remove.focus());
         fireEvent.click(remove);
         expect(screen.queryByRole('region', {name: 'label.problemEntriesTitle'})).not.toBeInTheDocument();
         await waitFor(() => expect(panelHeading()).toHaveFocus());
@@ -681,6 +794,14 @@ describe('focus never falls to the page body', () => {
 });
 
 describe('entries the server ignores are kept, shown and never dropped silently', () => {
+    test('a list holding only a locked entry says every operation is refused', () => {
+        installApolloMock({whitelist: ['mutation:communityMcp']});
+        render(<CommunityMcpConfigAdmin/>);
+
+        expect(policyText('label.policyDenyAll')).toBeInTheDocument();
+        expect(screen.queryByText('label.policyNoQuery')).not.toBeInTheDocument();
+    });
+
     test('a list holding only an unknown operation type says every operation is refused', () => {
         installApolloMock({whitelist: ['subscription:x']});
         render(<CommunityMcpConfigAdmin/>);
