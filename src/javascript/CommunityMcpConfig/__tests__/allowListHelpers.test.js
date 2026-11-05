@@ -108,6 +108,15 @@ describe('policyOf (mirrors what the server enforces)', () => {
         expect(policyOf(new Set(['mutation:a', 'subscription:x']))).toEqual({kind: 'warning', key: 'label.policyNoQuery'});
     });
 
+    test('a list of locked entries only refuses every operation (they are never allowed)', () => {
+        expect(policyOf(new Set(['mutation:communityMcp']))).toEqual({kind: 'warning', key: 'label.policyDenyAll'});
+        expect(policyOf(new Set(['mutation:admin.jahia.configuration.x', 'foo:bar']))).toEqual({kind: 'warning', key: 'label.policyDenyAll'});
+    });
+
+    test('locked entries do not count as allowed mutations', () => {
+        expect(policyOf(new Set(['mutation:communityMcp', 'mutation:a']))).toEqual({kind: 'warning', key: 'label.policyNoQuery'});
+    });
+
     test('with a valid query only listed operations pass', () => {
         expect(policyOf(new Set(['query:a', 'foo:bar']))).toEqual({kind: 'info', key: 'label.policyRestricted'});
     });
