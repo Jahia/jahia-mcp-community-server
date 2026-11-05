@@ -1,5 +1,5 @@
 import {DocumentNode} from 'graphql';
-import {expectWhitelistUnchanged, getStoredWhitelist, getWhitelist, setWhitelist, waitForWhitelist} from '../support/mcp';
+import {expectWhitelistUnchanged, getClustered, getStoredWhitelist, getWhitelist, setWhitelist, waitForWhitelist} from '../support/mcp';
 
 // Every write is followed by a wait until the server reports the new whitelist back (the
 // configuration is applied asynchronously), and every "unchanged" check reads the stored
@@ -31,6 +31,12 @@ describe('MCP Server — Settings API', () => {
     it('mcpSettings returns the empty (read-only default) whitelist after a reset', () => {
         getWhitelist().should('deep.equal', []);
         getStoredWhitelist().should('eq', '');
+    });
+
+    // The test stack runs one Jahia node: the settings report no cluster, so the UI shows no
+    // "this node only" warning.
+    it('settings report that the test server is not clustered', () => {
+        getClustered().should('eq', false);
     });
 
     it('mcpSaveSettings saves the whitelist and returns true', () => {

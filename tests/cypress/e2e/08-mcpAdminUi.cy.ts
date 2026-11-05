@@ -50,6 +50,17 @@ describe('MCP Server — Admin panel smoke test', () => {
         treeItem(ENTRY).should('have.attr', 'aria-checked', 'true');
     });
 
+    // "Allow all queries" checks every query root except admin, which exposes configuration values,
+    // secrets included: the read-only default refuses it, and the bulk action must not open it.
+    it('allows all queries except the admin namespace', () => {
+        treeItem('query:jcr').should('have.attr', 'aria-checked', 'false');
+        // The group's bulk actions sit in its header; "Allow all queries" is the first one.
+        cy.get('#mcp-group-queries').parent().find('button').first().click();
+        treeItem('query:jcr').should('have.attr', 'aria-checked', 'true');
+        treeItem('query:currentUser').should('have.attr', 'aria-checked', 'true');
+        treeItem('query:admin').should('have.attr', 'aria-checked', 'false');
+    });
+
     // The admin.jahia.configuration mutation could rewrite this module's own configuration: the tree shows it,
     // locked, under Mutations > admin > jahia, and checking it changes nothing.
     it('shows mutation:admin.jahia.configuration as locked and does not let it be checked', () => {

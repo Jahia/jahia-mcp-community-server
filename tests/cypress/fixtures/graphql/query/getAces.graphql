@@ -1,0 +1,9 @@
+query McpGetAces($query: String!) {
+    jcr {
+        nodesByQuery(query: $query) {
+            nodes {
+                path
+            }
+        }
+    }
+}

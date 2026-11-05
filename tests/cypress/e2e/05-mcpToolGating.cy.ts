@@ -50,7 +50,7 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
             .its('body.result.isError').should('eq', false);
     });
 
-    // F2 — community.graphql.introspect is bounded: with no arguments it returns the type list plus
+    // The introspect tool is bounded: with no arguments it returns the type list plus
     // the root Query/Mutation details only (one __Type.fields per request, so Jahia's bad-faith
     // introspection guard never trips); specific types are requested through typeNames.
     it('community.graphql.introspect without arguments returns the type list and the root types', () => {

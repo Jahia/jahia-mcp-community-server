@@ -43,9 +43,8 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
 
     const executeGraphQL = (query: string) => callTool(apiToken, TOOL.execute, {query});
 
-    // F8 (e2e) — named fragment spreads fail closed when a whitelist is active, proving the
-    // containsNamedFragmentSpread block is wired into the live checkAccess path (unit tests
-    // only cover the detector). Inline fragments remain allowed.
+    // Named fragment spreads fail closed when a whitelist is active: the refusal is wired into the
+    // live gate, not only into the unit-tested detector. Inline fragments remain allowed.
     it('blocks a named fragment spread when a whitelist is active', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('{ currentUser { name } ...Extra } fragment Extra on Query { admin { jahia { isAlive } } }')
@@ -62,8 +61,8 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
             .its('body.result.isError').should('eq', false);
     });
 
-    // F7(i) — a dangerous mutation that would rewrite the whitelist itself is blocked by the
-    // whitelist gate, and the persisted whitelist is unchanged (the mutation never executed).
+    // A mutation that would rewrite the whitelist itself is blocked by the gate, and the stored
+    // whitelist is unchanged (the mutation never ran).
     it('blocks saveSettings whitelist-rewrite mutation and leaves the whitelist unchanged', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('mutation { communityMcp { saveSettings(whitelist: ["admin"]) } }').then(response => {
@@ -121,7 +120,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         expectWhitelistUnchanged(['mutation:admin']);
     });
 
-    // SEC-364 — a multi-operation document is refused by the GATE, on op B's own merits: the gate
+    // A multi-operation document is refused by the GATE, on op B's own merits: the gate
     // extracts the paths of every operation in the document. The assertion is "the gate said no",
     // not "no operation executed": community.graphql.execute forwards no operationName, so
     // graphql-java would reject the document anyway, and the test must not depend on that.
@@ -135,23 +134,23 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
             });
     });
 
-    // ── SEC-364 / GHSA-9vrc-45qw-x759 ───────────────────────────────────────────────────────
+    // ── Parser-based gate ────────────────────────────────────────────────────────────────────
     // The gate parses the document with graphql-java's parser and walks the AST of every operation;
     // a document that does not parse is denied. Each arm below is valid GraphQL with tokens a naive
     // scanner could mis-read (commas, parentheses inside string arguments), and must be policed.
     //
-    // The three-arm shape is deliberate and mirrors the advisory's own proof: the SANITY arm shows
+    // The three-arm shape is deliberate and follows a sanity / control / attack pattern: the SANITY arm shows
     // the whitelist is loaded and permits what it should, the CONTROL arm shows it genuinely
     // refuses, and only then does the ATTACK arm mean anything. Without the first two, a passing
     // attack arm would be indistinguishable from a gate that blocks everything.
 
-    it('SEC-364 sanity — a whitelisted operation is permitted', () => {
+    it('parser gate sanity — a whitelisted operation is permitted', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('query { currentUser { name } }')
             .its('body.result.isError').should('eq', false);
     });
 
-    it('SEC-364 control — the same operation is genuinely refused when not whitelisted', () => {
+    it('parser gate control — the same operation is genuinely refused when not whitelisted', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('query { jcr { nodeByPath(path:"/") { name } } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
@@ -159,7 +158,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         });
     });
 
-    it('SEC-364 attack — one leading comma no longer escapes the whitelist', () => {
+    it('parser gate attack — one leading comma no longer escapes the whitelist', () => {
         setWhitelist(['currentUser']);
         // A comma is an ignored token in the GraphQL grammar; the parser skips it, so the jcr
         // selection is extracted and refused.
@@ -169,7 +168,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         });
     });
 
-    it('SEC-364 attack — a comma before the operation keyword is refused too', () => {
+    it('parser gate attack — a comma before the operation keyword is refused too', () => {
         setWhitelist(['currentUser']);
         // The comma is skipped by the parser, so the gate extracts the jcr selection and refuses it on
         // its own merits; a parse error would be a different reason.
@@ -181,7 +180,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         });
     });
 
-    it('SEC-364 attack — an unbalanced paren in a string argument no longer hides a sibling', () => {
+    it('parser gate attack — an unbalanced paren in a string argument no longer hides a sibling', () => {
         setWhitelist(['jcr.nodeByPath']);
         // The '(' is inside a string value, so the parser treats it as data: the gate extracts both
         // jcr.nodeByPath (whitelisted) and the `admin` sibling (not whitelisted), and refuses.
@@ -192,17 +191,19 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
             });
     });
 
-    it('SEC-364 fails closed on a document that cannot be parsed', () => {
+    it('parser gate fails closed on a document that cannot be parsed, and gives the position', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('{ jcr { ').then(response => {
             expect(response.body.result.isError).to.eq(true);
             expect(response.body.result.content[0].text).to.include('could not be parsed');
+            // The syntax error carries its position, so a client can fix the document.
+            expect(toolPayload(response).error.message).to.match(/line\D*\d+/i).and.to.match(/column\D*\d+/i);
         });
     });
 
     // False-positive guard: commas are ordinary GraphQL punctuation and must stay legal inside a
     // selection set. A fix that refused them would break every client that formats queries that way.
-    it('SEC-364 still permits commas used as ordinary separators', () => {
+    it('parser gate still permits commas used as ordinary separators', () => {
         setWhitelist(['currentUser']);
         executeGraphQL('{ currentUser { name, alias: name } }')
             .its('body.result.isError').should('eq', false);

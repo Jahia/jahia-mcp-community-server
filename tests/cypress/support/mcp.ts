@@ -2,6 +2,9 @@ import 'cypress-wait-until';
 /**
  * Helpers for calling the community tools through the mcp-server endpoint.
  * The community module no longer has its own endpoint: its tools are contributed to /modules/mcp.
+ *
+ * The suite needs a Jahia instance of its own: the whitelist is one server-wide configuration, and
+ * the token, skill and probe names are fixed. Two runs against the same instance interfere.
  */
 export const MCP_URL = '/modules/mcp';
 
@@ -47,6 +50,19 @@ export const callToolAs = (username: string, password: string, name: string, arg
         failOnStatusCode: false
     });
 
+/**
+ * POST a tools/call with no Authorization header: the request is authenticated only by the browser
+ * session cookie that cy.login() set (cy.request sends the browser cookies).
+ */
+export const callToolWithSessionCookie = (name: string, args: Record<string, unknown>): Cypress.Chainable<McpResponse> =>
+    cy.request({
+        method: 'POST',
+        url: MCP_URL,
+        headers: {'Content-Type': 'application/json'},
+        body: rpc('tools/call', {name, arguments: args}),
+        failOnStatusCode: false
+    });
+
 /** POST a tools/list as the API-token holder. */
 export const listTools = (apiToken: string): Cypress.Chainable<McpResponse> =>
     cy.request({
@@ -78,6 +94,7 @@ const deleteSkillDoc = require('graphql-tag/loader!../fixtures/graphql/mutation/
 const getSettingsDoc = require('graphql-tag/loader!../fixtures/graphql/query/getSettings.graphql');
 const getSkillsDoc = require('graphql-tag/loader!../fixtures/graphql/query/getSkills.graphql');
 const getStoredWhitelistDoc = require('graphql-tag/loader!../fixtures/graphql/query/getStoredWhitelist.graphql');
+const getClusteredDoc = require('graphql-tag/loader!../fixtures/graphql/query/getClustered.graphql');
 /* eslint-enable @typescript-eslint/no-var-requires */
 
 const sameEntries = (current: string[], expected: string[]) =>
@@ -86,6 +103,10 @@ const sameEntries = (current: string[], expected: string[]) =>
 /** The whitelist the module serves (its applied snapshot), as the logged-in administrator. */
 export const getWhitelist = (): Cypress.Chainable<string[]> =>
     cy.apollo({query: getSettingsDoc}).then(result => result.data.communityMcp.settings.whitelist as string[]);
+
+/** Whether the module reports that Jahia runs as a cluster (`communityMcp { settings { clustered } }`). */
+export const getClustered = (): Cypress.Chainable<boolean> =>
+    cy.apollo({query: getClusteredDoc}).then(result => result.data.communityMcp.settings.clustered as boolean);
 
 /**
  * The `whitelist` value stored in ConfigurationAdmin, read through Jahia's own configuration query.
@@ -125,6 +146,11 @@ export const expectWhitelistUnchanged = (expected: string[]) => {
     getStoredWhitelist().should('eq', expected.join(','));
     getWhitelist().should('deep.equal', expected);
 };
+
+/** The names of the personal API tokens that the logged-in administrator can see. */
+export const getApiTokenNames = (): Cypress.Chainable<string[]> =>
+    cy.apollo({query: listTokensDoc, fetchPolicy: 'no-cache'})
+        .then(result => result.data.admin.personalApiTokens.tokens.nodes.map((t: {name: string}) => t.name) as string[]);
 
 /** Create an API token under `name` (replacing a stale one of the same name) and return its value. */
 export const createApiToken = (name: string): Cypress.Chainable<string> => {
