@@ -8,3 +8,21 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # Shared by Jahia through module federation (@jahia/webpack-config): at runtime the
+      # module uses the copies Jahia ships, and package.json only declares the required
+      # version. Keep these aligned with the Jahia host; patch updates stay allowed.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "react-i18next"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "i18next"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@apollo/client"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@jahia/ui-extender"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@jahia/moonstone"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
