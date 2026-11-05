@@ -1,61 +1,36 @@
 import {DocumentNode} from 'graphql';
+import {TOOL, callTool, createApiToken, deleteApiToken, setWhitelist} from '../support/mcp';
 
 describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const saveSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/saveSettings.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const getSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/getSettings.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const createToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/createToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const deleteToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const listTokens: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/listTokens.graphql');
 
     const TOKEN_NAME = 'mcp-cypress-enforcement-token';
     let apiToken: string;
-    let tokenKey: string;
 
     before(() => {
         cy.login();
-        cy.apollo({query: listTokens}).then(result => {
-            const nodes: {key: string}[] = result.data.admin.personalApiTokens.tokens.nodes;
-            nodes.forEach(t => {
-                cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
-            });
-        });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
-            apiToken = result.data.admin.personalApiTokens.createToken;
-        });
-        cy.apollo({query: listTokens}).then(result => {
-            const found = result.data.admin.personalApiTokens.tokens.nodes.find(
-                (t: {key: string; name: string}) => t.name === TOKEN_NAME
-            );
-            tokenKey = found.key;
+        createApiToken(TOKEN_NAME).then(token => {
+            apiToken = token;
         });
     });
 
     after(() => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
-        cy.apollo({mutation: deleteToken, variables: {tokenKey}});
+        setWhitelist([]);
+        deleteApiToken(TOKEN_NAME);
     });
 
-    afterEach(() => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
+    beforeEach(() => {
+        setWhitelist([]);
     });
 
-    const executeGraphQL = (query: string) => cy.request({
-        method: 'POST',
-        url: '/modules/mcp',
-        headers: {'Content-Type': 'application/json', Authorization: `APIToken ${apiToken}`},
-        body: {jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name: 'community.graphql.execute', arguments: {query}}}
-    });
+    const executeGraphQL = (query: string) => callTool(apiToken, TOOL.execute, {query});
 
     // F8 (e2e) — named fragment spreads fail closed when a whitelist is active, proving the
     // containsNamedFragmentSpread block is wired into the live checkAccess path (unit tests
     // only cover the detector). Inline fragments remain allowed.
     it('blocks a named fragment spread when a whitelist is active', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL('{ currentUser { name } ...Extra } fragment Extra on Query { admin { jahia { isAlive } } }')
             .then(response => {
                 expect(response.body.result.isError).to.eq(true);
@@ -64,7 +39,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     });
 
     it('allows an inline fragment equivalent under the same whitelist', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         // Inline fragment on the root Query type — valid regardless of installed module types.
         executeGraphQL('{ ... on Query { currentUser { name } } }')
             .its('body.result.isError').should('eq', false);
@@ -73,10 +48,10 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     // F7(i) — a dangerous mutation that would rewrite the whitelist itself is blocked by the
     // whitelist gate, and the persisted whitelist is unchanged (the mutation never executed).
     it('blocks saveSettings whitelist-rewrite mutation and leaves the whitelist unchanged', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL('mutation { communityMcp { saveSettings(whitelist: ["admin"]) } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
-            expect(response.body.result.content[0].text).to.include('not in the whitelist');
+            expect(response.body.result.content[0].text).to.include('can never be run through community.graphql.execute');
         });
         cy.apollo({query: getSettings}).then(result => {
             expect(result.data.communityMcp.settings.whitelist).to.deep.eq(['currentUser']);
@@ -90,7 +65,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     // envelope). That was a load-bearing accident of the dispatch, not a decision by the gate.
     // The assertion therefore moved from "no operation executed" to "the gate said no".
     it('blocks the second operation of a multi-operation document', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL('query A { currentUser { name } } query B { admin { jahia { isAlive } } }')
             .then(response => {
                 expect(response.body.result.isError).to.eq(true);
@@ -110,13 +85,13 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     // attack arm would be indistinguishable from a gate that blocks everything.
 
     it('SEC-364 sanity — a whitelisted operation is permitted', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL('query { currentUser { name } }')
             .its('body.result.isError').should('eq', false);
     });
 
     it('SEC-364 control — the same operation is genuinely refused when not whitelisted', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL('query { jcr { nodeByPath(path:"/") { name } } }').then(response => {
             expect(response.body.result.isError).to.eq(true);
             expect(response.body.result.content[0].text).to.include('not in the whitelist');
@@ -124,7 +99,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     });
 
     it('SEC-364 attack — one leading comma no longer escapes the whitelist', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         // A comma is an ignored token in the GraphQL grammar; the old skipWS() stopped dead on it,
         // extractFieldPaths returned an empty set, and checkAccess read empty as "permit".
         executeGraphQL('query,{ jcr { nodeByPath(path:"/") { name } } }').then(response => {
@@ -134,13 +109,13 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     });
 
     it('SEC-364 attack — a comma before the operation keyword is refused too', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL(',query { jcr { nodeByPath(path:"/") { name } } }')
             .its('body.result.isError').should('eq', true);
     });
 
     it('SEC-364 attack — an unbalanced paren in a string argument no longer hides a sibling', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['jcr.nodeByPath']}});
+        setWhitelist(['jcr.nodeByPath']);
         // This is the arm that "treat an empty path set as deny" would NOT have caught: the old
         // scanner extracted {jcr, jcr.nodeByPath} — non-empty, and both whitelisted — because the
         // '(' inside the path argument unbalanced skipBalanced()'s counter, which then ran to
@@ -153,7 +128,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     });
 
     it('SEC-364 fails closed on a document that cannot be parsed', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL('{ jcr { ').then(response => {
             expect(response.body.result.isError).to.eq(true);
             expect(response.body.result.content[0].text).to.include('could not be parsed');
@@ -163,7 +138,7 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
     // False-positive guard: commas are ordinary GraphQL punctuation and must stay legal inside a
     // selection set. A fix that refused them would break every client that formats queries that way.
     it('SEC-364 still permits commas used as ordinary separators', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
         executeGraphQL('{ currentUser { name, alias: name } }')
             .its('body.result.isError').should('eq', false);
     });

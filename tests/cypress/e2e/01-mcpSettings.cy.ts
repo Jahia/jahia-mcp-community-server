@@ -1,4 +1,5 @@
 import {DocumentNode} from 'graphql';
+import {setWhitelist} from '../support/mcp';
 
 describe('MCP Server — Settings API', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -8,14 +9,18 @@ describe('MCP Server — Settings API', () => {
 
     before(() => {
         cy.login();
-        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
+    });
+
+    // Each test starts from, and leaves behind, the read-only default (empty whitelist).
+    beforeEach(() => {
+        setWhitelist([]);
     });
 
     after(() => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
+        setWhitelist([]);
     });
 
-    it('mcpSettings returns an empty whitelist by default', () => {
+    it('mcpSettings returns the empty (read-only default) whitelist after a reset', () => {
         cy.apollo({query: getSettings})
             .its('data.communityMcp.settings.whitelist')
             .should('deep.equal', []);
@@ -51,10 +56,25 @@ describe('MCP Server — Settings API', () => {
             .should('deep.equal', entries);
     });
 
-    it('mcpSaveSettings rejects a malformed entry and keeps the previous whitelist', () => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['query:currentUser']}});
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['subscription:jcr']}})
-            .its('data.communityMcp.saveSettings').should('eq', false);
+    it('mcpSaveSettings rejects a malformed entry with an error naming it and keeps the previous whitelist', () => {
+        setWhitelist(['query:currentUser']);
+        cy.apollo({mutation: saveSettings, variables: {whitelist: ['subscription:jcr']}, errorPolicy: 'all'}).then(result => {
+            expect(result.errors, 'GraphQL errors').to.have.length.greaterThan(0);
+            expect(result.errors[0].message).to.include('subscription:jcr');
+        });
+        cy.apollo({query: getSettings})
+            .its('data.communityMcp.settings.whitelist')
+            .should('deep.equal', ['query:currentUser']);
+    });
+
+    it('mcpSaveSettings refuses a mutation:communityMcp entry (and sub-paths) and keeps the previous whitelist', () => {
+        setWhitelist(['query:currentUser']);
+        ['mutation:communityMcp', 'mutation:communityMcp.saveSettings'].forEach(entry => {
+            cy.apollo({mutation: saveSettings, variables: {whitelist: [entry]}, errorPolicy: 'all'}).then(result => {
+                expect(result.errors, `errors for ${entry}`).to.have.length.greaterThan(0);
+                expect(result.errors[0].message).to.include(entry);
+            });
+        });
         cy.apollo({query: getSettings})
             .its('data.communityMcp.settings.whitelist')
             .should('deep.equal', ['query:currentUser']);

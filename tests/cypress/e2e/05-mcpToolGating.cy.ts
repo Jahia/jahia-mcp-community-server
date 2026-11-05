@@ -1,51 +1,32 @@
-import {DocumentNode} from 'graphql';
+import {createApiToken, deleteApiToken, callTool as callToolRaw, deleteSkill, saveSkill, setWhitelist} from '../support/mcp';
 
 describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const saveSettings: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/saveSettings.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const createToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/createToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const deleteToken: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/deleteToken.graphql');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const listTokens: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/query/listTokens.graphql');
-
     const TOKEN_NAME = 'mcp-cypress-gating-token';
+    const GATING_SKILL = 'cypress-gating-skill';
     let apiToken: string;
-    let tokenKey: string;
 
     before(() => {
         cy.login();
-        cy.apollo({query: listTokens}).then(result => {
-            const nodes: {key: string}[] = result.data.admin.personalApiTokens.tokens.nodes;
-            nodes.forEach(t => {
-                cy.apollo({mutation: deleteToken, variables: {tokenKey: t.key}});
-            });
+        createApiToken(TOKEN_NAME).then(token => {
+            apiToken = token;
         });
-        cy.apollo({mutation: createToken, variables: {tokenName: TOKEN_NAME}}).then(result => {
-            apiToken = result.data.admin.personalApiTokens.createToken;
-        });
-        cy.apollo({query: listTokens}).then(result => {
-            const found = result.data.admin.personalApiTokens.tokens.nodes.find(
-                (t: {key: string; name: string}) => t.name === TOKEN_NAME
-            );
-            tokenKey = found.key;
-        });
+        saveSkill(GATING_SKILL, 'gating skill body');
         // A narrow whitelist that covers neither introspection nor skills.
-        cy.apollo({mutation: saveSettings, variables: {whitelist: ['currentUser']}});
+        setWhitelist(['currentUser']);
+    });
+
+    // Another spec may have run in between: pin the whitelist this spec relies on.
+    beforeEach(() => {
+        setWhitelist(['currentUser']);
     });
 
     after(() => {
-        cy.apollo({mutation: saveSettings, variables: {whitelist: []}});
-        cy.apollo({mutation: deleteToken, variables: {tokenKey}});
+        deleteSkill(GATING_SKILL);
+        setWhitelist([]);
+        deleteApiToken(TOKEN_NAME);
     });
 
-    const callTool = (name: string, args: Record<string, unknown>) => cy.request({
-        method: 'POST',
-        url: '/modules/mcp',
-        headers: {'Content-Type': 'application/json', Authorization: `APIToken ${apiToken}`},
-        body: {jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name, arguments: args}}
-    });
+    const callTool = (name: string, args: Record<string, unknown>) => callToolRaw(apiToken, name, args);
 
     // U3 — only community.graphql.execute is whitelist-gated. The introspect and skill tools rely
     // solely on the administrator gate (see 04-mcpToolCatalogAndGate) and ignore the whitelist.
@@ -65,7 +46,7 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
     });
 
     it('community.skill.get is NOT whitelist-gated', () => {
-        callTool('community.skill.get', {name: 'default/hello-jahia'})
+        callTool('community.skill.get', {name: GATING_SKILL})
             .its('body.result.isError').should('eq', false);
     });
 
@@ -119,11 +100,11 @@ describe('MCP Server — Tool gating (whitelist scope per tool)', () => {
         callTool('community.skill.list', {}).then(response => {
             expect(response.body.result.isError).to.eq(false);
             const {skills} = JSON.parse(response.body.result.content[0].text);
-            expect(skills.map((s: {name: string}) => s.name)).to.include('default/hello-jahia');
+            expect(skills.map((s: {name: string}) => s.name)).to.include(GATING_SKILL);
         });
-        callTool('community.skill.get', {name: 'default/hello-jahia'}).then(response => {
+        callTool('community.skill.get', {name: GATING_SKILL}).then(response => {
             expect(response.body.result.isError).to.eq(false);
-            expect(response.body.result.content[0].text).to.include('Hello Jahian');
+            expect(response.body.result.content[0].text).to.include('gating skill body');
         });
     });
 });
