@@ -8,7 +8,8 @@ endpoint (`/modules/mcp`) through its public tool SPI: `community.graphql.execut
 endpoint and no MCP SDK: `mcp-server` handles transport, authentication, JSON-RPC and the tool catalog.
 
 Every community tool is administrator-only. `community.graphql.execute` is additionally gated by a
-whitelist that is read-only by default (queries allowed, mutations and subscriptions refused). Skills
+whitelist that is read-only by default (queries allowed except under `admin`, mutations and subscriptions
+refused). Skills
 (Markdown instruction documents) are stored in JCR.
 
 ## Source layout
@@ -126,7 +127,9 @@ state (`JCRSessionFactory` current user, locale) and cleans up after the call.
 - Reads, writes and seeding run in a system session (`doExecuteWithSystemSession`). The container
   `mcp-skills` has its ACL inheritance broken, so no ordinary role can write it through generic paths.
   Only the admin-gated GraphQL operations and the module's own seeding write skills. `ensureContainer` runs
-  on every activation and breaks the inheritance of an existing (1.x) container too; it is idempotent.
+  on every activation and breaks the inheritance of an existing (1.x) container too. It also removes the local
+  role grants (ACL entries) on the container and every node below it (1.x upgrade hardening); it is idempotent.
+  It never changes skill content: 1.x skills must be reviewed by an administrator (README upgrade notes).
 - Listing uses JCR-SQL2 `ISDESCENDANTNODE` under the skills root.
 - The `mcp:` CND prefix is generic. It is kept for compatibility (ARCH-18 deferred); a rename is a
   breaking JCR change.
@@ -178,8 +181,9 @@ Decision (`GraphQLWhitelistGate.check`):
 4. Drop paths with an `__`-prefixed segment (introspection passes).
 5. For each remaining path:
    - never-allowed: deny;
-   - read-only default: `query.*` passes; `mutation.*` denies with the read-only message; `subscription.*`
-     denies; anything else denies;
+   - read-only default: `query.admin` and everything under it denies (the reason names `admin` and
+     `query:admin`: the namespace exposes OSGi configuration values, secrets included); any other `query.*`
+     passes; `mutation.*` denies with the read-only message; `subscription.*` denies; anything else denies;
    - otherwise the path passes if an entry covers it (`pathCoveredBy`: equal or below) or is a container of
      a more specific entry (`pathIsContainerOf`). Otherwise deny with `is not in the whitelist`.
 6. Each denial logs WARN with path, reason, user and IP. Named-spread and parse denials log without a path.
@@ -235,6 +239,9 @@ Denial strings are client-safe and are returned as `forbidden` with `ToolError`.
 |---|---|---|
 | SEC-4 | Security-filter API scopes of graphql-dxm-provider are not applied to in-process calls | Accepted. Tools are admin-only; JCR ACLs and the admin gate are the boundary |
 | SEC-6 | A prefix entry grants everything below it (for example `mutation:jcr`) | Accepted and documented. Prefer exact paths |
+| SEC-6b | Self-protection is a deny list of two mutation paths; other state-changing mutations (module, bundle, provisioning, from any module) are guarded only by the admin's entries | Accepted and documented in the README security notes |
+| SEC-6c | A `root` caller with `mutation:jcr` whitelisted can rewrite skills through the generic JCR mutations (root bypasses the container ACL) | Accepted and documented. Policing it needs argument inspection |
+| RES-1 | The 5 MB response cap applies after the query ran and was serialized; no timeout or complexity limit | Accepted (admin-only) and documented |
 | ARCH-7 | Built against mcp-server 0.5.0-SNAPSHOT; the SPI version range is tight | Release only against a released mcp-server 0.5.x |
 | ARCH-18 | Generic `mcp:` CND prefix | Kept; renaming it is a breaking JCR change |
 

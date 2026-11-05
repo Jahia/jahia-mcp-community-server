@@ -17,8 +17,10 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   `forbidden`, `validation`, `not_found` and `internal`. The 1.x text format is gone.
 - **Authentication.** The token scopes `graphql` and `community-mcp` are gone. Any token accepted by
   `mcp-server` works, and the caller must hold `admin` on the repository root.
-- **Read-only default.** An empty whitelist no longer allows every operation. It allows every query and
-  refuses every mutation and subscription.
+- **Read-only default.** An empty whitelist no longer allows every operation. It allows every query except
+  the queries under the privileged `admin` namespace, and refuses every mutation and subscription. Queries
+  under `admin` need an explicit `query:admin…` entry. As soon as the list holds one entry, only the listed
+  operations run: adding one `mutation:` entry refuses every query that is not listed.
 - **Whitelist syntax.** Entries are `query:<path>` or `mutation:<path>`. An unprefixed entry is accepted as
   a legacy **query-only** entry and logged at WARN. Malformed entries grant nothing.
 - **Whitelist configuration.** `org.jahia.community.mcp` is a required (`REQUIRE`) configuration. Without it
@@ -44,6 +46,10 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
 - **Refused by design.** `mutation:communityMcp` and `mutation:admin.jahia.configuration` (each with everything
   under it) are always refused by the gate, and `saveSettings` refuses entries for them. The data plane cannot
   rewrite its own guard, or this module's configuration through the generic OSGi configuration mutation.
+- **`admin` queries need an explicit entry.** The read-only default refuses the queries under `admin`,
+  which expose server state such as the raw values of every OSGi configuration, secrets included. The
+  denial names `query:admin`. "Read-only" means no writes; it does not make the other query results
+  non-sensitive, and they are sent to the AI client.
 - **Unparseable documents** are refused in every state (SEC-364). **Named fragment spreads** are refused in every
   state, including the read-only default (SEC-2). Inline fragments are supported.
 - **Whole-document check.** Every operation in a document is checked, so a mutation cannot hide behind an
@@ -57,10 +63,16 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
 - **Skill container.** The skills container has its ACL inheritance broken. Skills are written only through the
   administrator-gated operations and the module's own seeding, which run as the system session. Skill node
   types are checked before reads, updates and deletes.
+- **1.x skills hardening.** On activation the module also removes the local role grants (ACL entries) on the
+  skills container and on every folder and skill below it, so grants made in 1.x no longer let editors write
+  skills. Existing skill content is not changed: review it (see Upgrade notes).
 - **Audit.** Each call records `tool.execute.ok` or `tool.execute.error`. `community.graphql.execute` records a
   SHA-256 `queryHash`, never the document text or the variables.
 - **Accepted risks** (documented, not fixed): API scopes are not applied to in-process calls (SEC-4); a prefix
-  entry grants everything below it (SEC-6).
+  entry grants everything below it (SEC-6); self-protection is a deny list of two mutation paths, so other
+  state-changing mutations are protected only by the entries you choose (SEC-6b); a `root` caller with
+  `mutation:jcr` whitelisted can rewrite skills through the generic JCR mutations; the 5 MB response cap
+  applies after the query has run, and there is no timeout.
 
 ### Added
 
@@ -80,9 +92,11 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   - Queries and mutations are separate groups, each with bulk actions.
   - Confirmation before clearing the list, clearing queries while mutations remain, and allowing all mutations.
   - The never-allowed paths, `mutation:communityMcp` and `mutation:admin.jahia.configuration`, are shown but locked.
-  - Entries that are unknown to the schema, or locked, are listed with a Remove action.
+  - Entries that are unknown to the schema, locked, or ignored by the server (malformed, or another operation
+    type such as `subscription:`) are listed with a Remove action. Locked and ignored entries block Save.
   - The filter matches all root operations and the fields already loaded.
-  - An unsaved-changes indicator and a Discard action.
+  - An unsaved-changes indicator and a Discard action. The browser warns when you reload or close the page
+    with unsaved changes; moving to another administration page does not warn.
   - Persistent, dismissible status messages, and the server's error reason is shown on a failed save.
   - The UI targets WCAG 2.2 Level AAA.
 - **Saving.** `saveSettings` fails with a GraphQL error that names the offending entry. An empty list saves the
@@ -101,7 +115,13 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
 - **Stale `.cfg` comments.** An installation upgraded from 1.x keeps its existing `org.jahia.community.mcp.cfg`
   (the shipped file is a default configuration and is not overwritten). Its 1.x comment "If empty, all operations
   are allowed" is stale. An empty whitelist is the read-only default: queries only. Unprefixed 1.x entries are
-  read as query-only, so add the `mutation:` entries you need.
+  read as query-only, so add the `mutation:` entries you need, and add `query:admin…` entries if an empty
+  list used to serve `admin` queries.
+- **Review the skills.** On the first activation of 2.0 the skills container's ACL inheritance is broken and
+  the local role grants on the container and below are removed. Any editor access to skills granted in 1.x
+  is gone; skills are written only through the administrator-gated `saveSkill` and `deleteSkill`. Skills
+  written in 1.x are kept unchanged: read every skill under `/sites/systemsite/contents/mcp-skills` and
+  delete or correct any you did not write, because every administrator's AI client reads them.
 - **Clusters.** `saveSettings` writes the OSGi configuration on the node that served the request only. Set the
   whitelist on every node, through the UI or `saveSettings` on each node, or through provisioning or the `.cfg`.
 
