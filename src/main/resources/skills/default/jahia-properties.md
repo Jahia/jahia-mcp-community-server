@@ -97,4 +97,4 @@ karaf.remoteShell.host = 127.0.0.1  # restrict to localhost in prod
 
 ## Full Property Reference
 
-Call getSkill("default/jahia-properties-ref") for all ~90 properties grouped by category with keys, defaults, and descriptions.
+Call the `community.skill.get` tool with `name` set to `default/jahia-properties-ref` for all ~90 properties grouped by category with keys, defaults, and descriptions.
