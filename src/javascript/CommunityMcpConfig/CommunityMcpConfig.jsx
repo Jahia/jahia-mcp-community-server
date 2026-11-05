@@ -130,6 +130,8 @@ export const CommunityMcpConfigAdmin = () => {
     };
 
     const settingsData = settingsResult.data;
+    // The allow list is stored per node: in a cluster, saving here changes this node only (UX-2).
+    const isClustered = Boolean(settingsData?.communityMcp?.settings?.clustered);
     // Read by the sync effect below without re-running it on every edit.
     const editState = useRef({isDirty: false, saved: EMPTY});
     // Sync server settings into local state via an effect rather than `onCompleted`, which
@@ -346,7 +348,7 @@ export const CommunityMcpConfigAdmin = () => {
             if (result.data?.communityMcp?.saveSettings) {
                 setSaved(toSave);
                 setMigrated(false);
-                setStatus({kind: 'success', message: t('label.saveSuccess')});
+                setStatus({kind: 'success', message: t(isClustered ? 'label.saveSuccessCluster' : 'label.saveSuccess')});
             } else {
                 setStatus({kind: 'error', message: t('label.saveError')});
             }
@@ -423,6 +425,7 @@ export const CommunityMcpConfigAdmin = () => {
                     </div>
                     {/* Not a live region: a change of policy is announced once by applyEdit. */}
                     <p className={`${styles.mcp_alert} ${styles[`mcp_alert--${policy.kind}`]}`}>{t(policy.key)}</p>
+                    {isClustered && <p className={`${styles.mcp_alert} ${styles['mcp_alert--warning']}`}>{t('label.clusterNote')}</p>}
                     {isMigrated && <p className={`${styles.mcp_alert} ${styles['mcp_alert--info']}`}>{t('label.migrated')}</p>}
                     <ProblemEntries problems={findProblemEntries(whitelist, operations)} t={t} onRemove={removeOne}/>
                     <div className={styles.mcp_filter}>

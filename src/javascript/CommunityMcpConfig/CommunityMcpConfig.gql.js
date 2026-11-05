@@ -11,6 +11,7 @@ export const GET_SETTINGS = gql`
         communityMcp {
             settings {
                 whitelist
+                clustered
             }
         }
     }

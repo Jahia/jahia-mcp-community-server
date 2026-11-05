@@ -71,6 +71,8 @@
     "saving": "Saving…",
     "noChanges": "No changes to save.",
     "saveSuccess": "Settings saved successfully.",
+    "saveSuccessCluster": "Settings saved on this node only. Jahia runs in a cluster and the allow list is not replicated: save the same list on every other node, or set it through provisioning.",
+    "clusterNote": "Jahia runs in a cluster. The allow list is stored on each node separately: saving here changes this node only. Set the same list on every node, by opening this page on each of them or through provisioning, or AI assistants get a different policy depending on the node that serves them.",
     "saveError": "The settings were not saved. Check the entries and try again.",
     "saveBlocked": "The settings were not saved. The server refuses these entries: {{entries}}. Remove them under “Entries that need your attention”, then save again.",
     "saveErrorServer": "The settings were not saved. The server said:",

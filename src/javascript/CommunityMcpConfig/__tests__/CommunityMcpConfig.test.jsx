@@ -20,7 +20,7 @@ const ADMIN_TYPE_FIELDS = [
 
 const ok = {data: {communityMcp: {saveSettings: true}}};
 
-function installApolloMock({whitelist = [], saveSpy, querySpy, errors = {}, loading = false, refetch} = {}) {
+function installApolloMock({whitelist = [], clustered = false, saveSpy, querySpy, errors = {}, loading = false, refetch} = {}) {
     // Stable result objects: the real @apollo/client returns referentially-stable results,
     // and the component's useEffect([settingsData]) would loop forever on fresh objects.
     const refetchSpy = refetch || jest.fn();
@@ -33,7 +33,7 @@ function installApolloMock({whitelist = [], saveSpy, querySpy, errors = {}, load
     const results = {
         queryFields: make({queryFields: {fields: QUERY_FIELDS}}, errors.queryFields),
         mutationFields: make({mutationFields: {fields: MUTATION_FIELDS}}, errors.mutationFields),
-        settings: make({communityMcp: {settings: {whitelist}}}, errors.settings)
+        settings: make({communityMcp: {settings: {whitelist, clustered}}}, errors.settings)
     };
 
     const useQuery = query => {
@@ -442,6 +442,35 @@ describe('save feedback', () => {
         const dirty = new Event('beforeunload', {cancelable: true});
         window.dispatchEvent(dirty);
         expect(dirty.defaultPrevented).toBe(true);
+    });
+});
+
+describe('cluster (UX-2)', () => {
+    test('on a single server, no cluster note and the plain success message', async () => {
+        installApolloMock();
+        render(<CommunityMcpConfigAdmin/>);
+
+        expect(screen.queryByText('label.clusterNote')).not.toBeInTheDocument();
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
+        fireEvent.click(saveButton());
+        expect(await screen.findByText('label.saveSuccess')).toBeInTheDocument();
+    });
+
+    test('in a cluster, the panel says the list is per node', () => {
+        installApolloMock({clustered: true});
+        render(<CommunityMcpConfigAdmin/>);
+
+        expect(screen.getByText('label.clusterNote')).toBeInTheDocument();
+    });
+
+    test('in a cluster, the success message says only this node was saved', async () => {
+        installApolloMock({clustered: true});
+        render(<CommunityMcpConfigAdmin/>);
+
+        fireEvent.keyDown(item(queriesTree(), 'currentUser'), {key: ' '});
+        fireEvent.click(saveButton());
+        expect(await screen.findByText('label.saveSuccessCluster')).toBeInTheDocument();
+        expect(screen.queryByText('label.saveSuccess')).not.toBeInTheDocument();
     });
 });
 

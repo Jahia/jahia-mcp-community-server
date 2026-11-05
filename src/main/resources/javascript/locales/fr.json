@@ -71,6 +71,8 @@
     "saving": "Enregistrement…",
     "noChanges": "Aucune modification à enregistrer.",
     "saveSuccess": "Paramètres enregistrés avec succès.",
+    "saveSuccessCluster": "Paramètres enregistrés sur ce nœud uniquement. Jahia fonctionne en cluster et la liste d'autorisation n'est pas répliquée : enregistrez la même liste sur chaque autre nœud, ou définissez-la par provisioning.",
+    "clusterNote": "Jahia fonctionne en cluster. La liste d'autorisation est stockée séparément sur chaque nœud : enregistrer ici ne modifie que ce nœud. Définissez la même liste sur tous les nœuds, en ouvrant cette page sur chacun d'eux ou par provisioning, sinon les assistants IA obtiennent une règle différente selon le nœud qui les sert.",
     "saveError": "Les paramètres n'ont pas été enregistrés. Vérifiez les entrées et réessayez.",
     "saveBlocked": "Les paramètres n'ont pas été enregistrés. Le serveur refuse ces entrées : {{entries}}. Supprimez-les dans « Entrées à vérifier », puis enregistrez de nouveau.",
     "saveErrorServer": "Les paramètres n'ont pas été enregistrés. Réponse du serveur :",
