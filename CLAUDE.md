@@ -17,9 +17,10 @@ src/main/java/org/jahia/community/mcp/
     McpSkillService.java                   # OSGi component — JCR CRUD for mcp:skill nodes
     access/
         CommunityMcpAccess.java            # Administrator gate shared by every tool (JCR 'admin' on /)
-        GraphQLWhitelistGate.java          # Dot-path whitelist gate (graphql-java AST)
+        GraphQLWhitelistGate.java          # Operation-qualified dot-path whitelist gate (graphql-java AST)
     config/
-        McpConfigService.java              # OSGi ManagedService — reads whitelist from .cfg
+        McpConfigService.java              # OSGi ManagedService — reads whitelist from .cfg (WARNs legacy entries)
+        WhitelistEntries.java              # Entry syntax: query:<path> / mutation:<path>; legacy = query-only
     tools/                                 # JahiaMcpTool DS components (mcp-server SPI)
         GraphQLExecuteTool.java            # community.graphql.execute   (DESTRUCTIVE)
         GraphQLIntrospectTool.java         # community.graphql.introspect (READ_ONLY)
@@ -81,11 +82,15 @@ Builds a synthetic JSON POST (`HttpServletRequestWrapper` over a no-op proxy) an
 stream and the writer into one UTF-8 byte buffer (1.x cast bytes to chars — garbling non-ASCII —
 and never saw the status).
 
-### introspect — multi-step workaround
+### introspect — bounded discovery
 
 Jahia's bad-faith introspection guard rejects any document with more than one `__Type.fields`
-selection. Step 1 fetches `__schema { types { name kind } }`; step 2 issues one `__type(name:)`
-request per non-scalar, non-`__` type.
+selection, so each type is fetched in its own request, with its name as a GraphQL **variable**
+(`query($name: String!) { __type(name: $name) … }` — never `String.format`, since `typeNames` is
+client input). No arguments → `__schema` summary (types reduced to `{name, kind}`) + root
+Query/Mutation details; `typeNames` (1–`MAX_TYPE_NAMES`=25, GraphQL-name pattern) → those types
+only, no schema step. Output budget `MAX_RESULT_CHARS`=100,000: once reached, remaining names go to
+`truncatedTypes` (the first type is always included); unknown/failed types go to `skippedTypes`.
 
 ### Skills mechanism
 
@@ -99,19 +104,27 @@ the key `getSkill` expects. Names are validated (`SKILL_NAME_PATTERN`, no `.`/`.
 
 ### Access control (GraphQLWhitelistGate)
 
-- Empty whitelist → allow-all (logged at WARN on every call). Intentional default; flipping it is a
-  breaking change.
+- Entry syntax (`config/WhitelistEntries`): `query:<path>` / `mutation:<path>`, `<path>` =
+  `name(.name)*`. **An unprefixed (legacy 1.x) entry is query-only** — mutations are always explicit.
+  Malformed entries and other operation types normalize to nothing (grant nothing);
+  `McpMutation.saveSettings` rejects them; `McpConfigService` WARNs legacy and malformed entries.
+- Internal form puts the operation type first: `query.jcr.nodeByPath`, `mutation.jcr.deleteNode`.
+  `extractOperationPaths` qualifies every extracted path the same way, for **every** operation of
+  the document — a mutation cannot hide behind an allowed query.
+- Allow-all is decided on the **raw** list: empty → allow-all (WARN on every call, intentional
+  default). A non-empty list of only malformed entries denies everything.
 - Non-empty: parse once with `graphql.parser.Parser`; unparseable → deny (SEC-364); named fragment
-  spread → deny (SEC-2); paths extracted up to the deepest whitelist entry, `__*` segments removed.
+  spread → deny (SEC-2); `__*` segments removed (introspection passes).
 - A path passes if `pathCoveredBy(P, E)` (`P == E || P.startsWith(E + ".")`) or
-  `pathIsContainerOf(P, E)` (`E.startsWith(P + ".")`) for some entry.
-- Known limitation: paths carry no operation type — Query/Mutation fields with the same name share
-  an entry.
+  `pathIsContainerOf(P, E)` (`E.startsWith(P + ".")`) for some normalized entry. Denial messages and
+  logs show the user-facing form (`mutation:jcr.deleteNode`).
 
 ### React admin UI
 
-`Administration → MCP Server`; lazy-loaded operation tree; saves through
-`communityMcp { saveSettings(whitelist) }`. Query and Mutation field lists are fetched in two
+`Administration → MCP Server`; lazy-loaded operation tree with Queries and Mutations as separate
+groups (paths `query:<name>…` / `mutation:<name>…`, see `operationTree.js`); legacy entries are
+shown as `query:` entries and the form starts dirty so they can be saved in the new form; saves
+through `communityMcp { saveSettings(whitelist) }`. Query and Mutation field lists are fetched in two
 documents (one `__Type.fields` each) because of the bad-faith guard.
 
 ## Key implementation constraints
