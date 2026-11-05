@@ -55,10 +55,11 @@ class GraphQLWhitelistGateHelpersTest {
     }
 
     @Test
-    @DisplayName("named fragment spread body is not expanded")
+    @DisplayName("named fragment spread body is not expanded (check() refuses the document before)")
     void named_fragment_spread_not_expanded() {
-        assertThat(paths("{ admin { ...F } } fragment F on AdminQueries { jahia { isAlive } }", 4))
-                .contains("query.admin").doesNotContain("query.admin.jahia");
+        assertThatThrownBy(() -> paths("{ admin { ...F } } fragment F on AdminQueries { jahia { isAlive } }", 4))
+                .as("a spread the gate cannot account for is never silently skipped")
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

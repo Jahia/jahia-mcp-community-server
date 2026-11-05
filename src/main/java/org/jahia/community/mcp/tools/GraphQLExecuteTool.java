@@ -42,12 +42,14 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
     static final String HINT_MUTATION = "Mutations are refused unless a 'mutation:<field>' entry is on the "
             + "whitelist. Do not retry; tell the user which mutation is needed so an administrator can add "
             + "it in Administration -> MCP Server, or use a read-only query instead.";
+    static final String HINT_NEVER = "This operation can never be run through community.graphql.execute, "
+            + "whatever the whitelist says. Do not retry; tell the user to use the Administration UI instead.";
     static final String HINT_NOT_WHITELISTED = "Do not retry this operation. Tell the user it must be added "
             + "to the whitelist in Administration -> MCP Server, or use a different, allowed operation.";
     static final String HINT_BAD_QUERY = "Fix the GraphQL document (check names with "
             + "community.graphql.introspect) and retry.";
-    static final String HINT_AUTH = "The caller's credentials were rejected by the GraphQL endpoint; do not "
-            + "retry, ask the user to check the token.";
+    static final String HINT_AUTH = "The caller lacks the permission required by a field of this GraphQL "
+            + "operation; do not retry, tell the user.";
     static final String HINT_SERVER = "Server error; retry once, then report the failure (see the Jahia logs).";
 
     private final InternalGraphQLClient graphQLClient;
@@ -134,7 +136,10 @@ public class GraphQLExecuteTool extends AbstractCommunityTool {
         if (reason.contains("named fragment")) {
             return HINT_FRAGMENT;
         }
-        if (reason.contains("read-only") || reason.contains("'mutation:") || reason.contains("'mutation.")) {
+        if (reason.contains("can never be run")) {
+            return HINT_NEVER;
+        }
+        if (reason.contains("read-only") || reason.contains("'mutation:")) {
             return HINT_MUTATION;
         }
         return HINT_NOT_WHITELISTED;

@@ -24,7 +24,20 @@ public final class WhitelistEntries {
     private static final String PREFIX_SEPARATOR = ":";
     /** Internal path of the namespace that must never be reachable through the data plane. */
     public static final String NEVER_ALLOWED = "mutation.communityMcp";
+    /**
+     * Internal path of the OSGi configuration mutation: it could rewrite this module's own
+     * whitelist PID, so it is denied too.
+     */
+    public static final String NEVER_ALLOWED_CONFIGURATION = "mutation.admin.jahia.configuration";
+    private static final java.util.List<String> NEVER_ALLOWED_ROOTS =
+            java.util.List.of(NEVER_ALLOWED, NEVER_ALLOWED_CONFIGURATION);
     // Possessive quantifiers: no backtracking, linear on any input (S5998).
+    /**
+     * Segments (operation type included) the gate must extract so that a never-allowed path is
+     * always reached, whatever the whitelist depth: a broad entry such as {@code mutation:admin}
+     * must not stop the extraction short of {@code mutation.admin.jahia.configuration}.
+     */
+    public static final int NEVER_ALLOWED_DEPTH = 4;
     private static final String GRAPHQL_NAME = "[_A-Za-z]\\w*+";
     private static final Pattern FIELD_PATH = Pattern.compile(GRAPHQL_NAME + "(?:\\." + GRAPHQL_NAME + ")*+");
 
@@ -33,7 +46,7 @@ public final class WhitelistEntries {
 
     /**
      * True if {@code entry} is well-formed but could never take effect because the gate always
-     * denies it ({@code mutation:communityMcp...}); such an entry is refused when saving.
+     * denies it ({@code mutation:communityMcp...}, {@code mutation:admin.jahia.configuration...}); such an entry is refused when saving.
      */
     public static boolean isNeverAllowedEntry(final String entry) {
         return isNeverAllowed(toInternal(entry));
@@ -69,10 +82,19 @@ public final class WhitelistEntries {
 
     /**
      * True if the internal {@code path} is, or lies under, the {@code communityMcp} mutation
-     * namespace: the data plane must not rewrite its own guard, whatever the whitelist says.
+     * namespace or the OSGi {@code admin.jahia.configuration} mutation: the data plane must not
+     * rewrite its own guard, whatever the whitelist says.
      */
     public static boolean isNeverAllowed(final String path) {
-        return path != null && (path.equals(NEVER_ALLOWED) || path.startsWith(NEVER_ALLOWED + "."));
+        if (path == null) {
+            return false;
+        }
+        for (final String root : NEVER_ALLOWED_ROOTS) {
+            if (path.equals(root) || path.startsWith(root + ".")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** User-facing form of an internal path: {@code mutation.jcr.x} → {@code mutation:jcr.x}. */

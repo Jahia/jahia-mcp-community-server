@@ -64,16 +64,16 @@ public class McpSkillService {
         }
         if (!SKILL_NAME_PATTERN.matcher(name).matches()) {
             throw new IllegalArgumentException(
-                    "Skill name contains illegal characters (only A-Za-z0-9_-/ allowed, no leading slash): " + name);
+                    "Skill name contains illegal characters (only A-Za-z0-9_-/ allowed, no leading slash): " + LogSupport.clean(name));
         }
         for (final String segment : name.split("/", -1)) {
             if (segment.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "Skill name must not contain empty path segments (leading, trailing, or double slash): " + name);
+                        "Skill name must not contain empty path segments (leading, trailing, or double slash): " + LogSupport.clean(name));
             }
             if ("..".equals(segment) || ".".equals(segment)) {
                 throw new IllegalArgumentException(
-                        "Skill name must not contain path-traversal segments: " + name);
+                        "Skill name must not contain path-traversal segments: " + LogSupport.clean(name));
             }
         }
         return name;
@@ -229,12 +229,13 @@ public class McpSkillService {
             LOGGER.warn("getSkill path-traversal attempt blocked: {}", ex.getMessage());
             return null;
         } catch (RepositoryException e) {
-            LOGGER.error("Error getting MCP skill: {}", name, e);
+            LOGGER.error("Error getting MCP skill: {}", LogSupport.clean(name), e);
             return null;
         }
     }
 
     public boolean saveSkill(final String name, final String mcpName, final String description, final String content) {
+        final String actingUser = LogSupport.actingUser();
         try {
             validateSkillName(name);
         } catch (IllegalArgumentException ex) {
@@ -250,7 +251,7 @@ public class McpSkillService {
                 if (session.nodeExists(path)) {
                     node = session.getNode(path);
                     if (!node.isNodeType(SKILL_NODE_TYPE)) {
-                        LOGGER.warn("saveSkill refused: '{}' exists and is not an {} node", name, SKILL_NODE_TYPE);
+                        LOGGER.warn("saveSkill refused: '{}' exists and is not an {} node", LogSupport.clean(name), SKILL_NODE_TYPE);
                         return false;
                     }
                 } else {
@@ -266,18 +267,21 @@ public class McpSkillService {
                 }
                 node.setProperty(PROP_CONTENT, content);
                 session.save();
+                // JCR records the system session as author: the audit trail is this line.
+                LOGGER.info("MCP skill '{}' saved by user '{}'", LogSupport.clean(name), actingUser);
                 return true;
             });
         } catch (SecurityException | IllegalArgumentException ex) {
             LOGGER.warn("saveSkill refused: {}", ex.getMessage());
             return false;
         } catch (RepositoryException e) {
-            LOGGER.error("Error saving MCP skill: {}", name, e);
+            LOGGER.error("Error saving MCP skill: {}", LogSupport.clean(name), e);
             return false;
         }
     }
 
     public boolean deleteSkill(final String name) {
+        final String actingUser = LogSupport.actingUser();
         try {
             validateSkillName(name);
         } catch (IllegalArgumentException ex) {
@@ -293,18 +297,19 @@ public class McpSkillService {
                 }
                 final JCRNodeWrapper node = session.getNode(path);
                 if (!node.isNodeType(SKILL_NODE_TYPE)) {
-                    LOGGER.warn("deleteSkill refused: '{}' is not an {} node", name, SKILL_NODE_TYPE);
+                    LOGGER.warn("deleteSkill refused: '{}' is not an {} node", LogSupport.clean(name), SKILL_NODE_TYPE);
                     return false;
                 }
                 node.remove();
                 session.save();
+                LOGGER.info("MCP skill '{}' deleted by user '{}'", LogSupport.clean(name), actingUser);
                 return true;
             });
         } catch (SecurityException ex) {
             LOGGER.warn("deleteSkill path-traversal attempt blocked: {}", ex.getMessage());
             return false;
         } catch (RepositoryException e) {
-            LOGGER.error("Error deleting MCP skill: {}", name, e);
+            LOGGER.error("Error deleting MCP skill: {}", LogSupport.clean(name), e);
             return false;
         }
     }
@@ -326,9 +331,17 @@ public class McpSkillService {
         }
         final JCRNodeWrapper container = session.getNode(SKILLS_PATH);
         if (!container.getAclInheritanceBreak()) {
-            container.setAclInheritanceBreak(true);
-            session.save();
-            LOGGER.info("Broke ACL inheritance on {}: only the system session may write skills", SKILLS_PATH);
+            try {
+                container.setAclInheritanceBreak(true);
+                session.save();
+                LOGGER.info("Broke ACL inheritance on {}: only the system session may write skills", SKILLS_PATH);
+            } catch (RepositoryException ex) {
+                // Cluster activation race: another node broke it first. Idempotent: the next
+                // activation checks again, so this is logged, never fatal for the skill import.
+                session.refresh(false);
+                LOGGER.warn("Could not break ACL inheritance on {} now ({}); it will be retried at the next "
+                        + "activation", SKILLS_PATH, ex.toString());
+            }
         }
     }
 

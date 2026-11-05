@@ -9,6 +9,7 @@ import graphql.language.OperationDefinition;
 import graphql.language.Selection;
 import graphql.language.SelectionSet;
 import graphql.parser.Parser;
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.community.mcp.config.McpConfigService;
 import org.jahia.community.mcp.config.WhitelistEntries;
 import org.jahia.community.mcp.config.WhitelistSnapshot;
@@ -36,6 +37,18 @@ import java.util.Set;
  * data plane must not rewrite its own guard. (Whitelisting broad mutation roots such as
  * {@code mutation:jcr} or {@code mutation:admin} is allowed but grants everything below them to
  * administrators — prefer exact paths.)</p>
+ *
+ * <p>Also never allowed: {@code mutation:admin.jahia.configuration} (OSGi configuration writes
+ * could rewrite this module's own whitelist PID) and every named fragment spread ({@code ...Name}),
+ * in every mode: spreads are not expanded, so the fields behind one would escape the path checks.
+ * Use inline fragments instead. Directives ({@code @include}, {@code @skip}) never hide a field:
+ * the gate walks every selection whatever its condition.</p>
+ *
+ * <p>Container rule (inherent, no behaviour change): a path is allowed when it is covered by an
+ * entry OR leads towards one. An entry such as {@code mutation:jcr.addNode.mutateProperty}
+ * therefore also lets the intermediate field {@code jcr.addNode} run, and an intermediate mutation
+ * field may act by itself (create a node, for instance) even when only a field below it was meant.
+ * Whitelist a mutation entry only if every segment of its path is acceptable to run on its own.</p>
  */
 @Component(service = GraphQLWhitelistGate.class)
 public class GraphQLWhitelistGate {
@@ -46,6 +59,9 @@ public class GraphQLWhitelistGate {
     private static final String MUTATION_PREFIX = "mutation.";
     private static final String SUBSCRIPTION_PREFIX = "subscription.";
     private static final String DENIED = "Operation not allowed: ";
+    /** Client-facing reason for a named fragment spread; the execute tool maps it to a hint. */
+    static final String NAMED_SPREAD_REASON =
+            "named fragment spreads are not permitted (use inline fragments '... on Type { ... }' instead)";
 
     private final McpConfigService mcpConfigService;
 
@@ -61,7 +77,8 @@ public class GraphQLWhitelistGate {
      *         (never echoes document content back)
      */
     public Optional<String> check(final String query, final String username, final String clientIp) {
-        final String who = username != null ? username : ANONYMOUS_USER;
+        final String who = LogSupport.clean(username != null ? username : ANONYMOUS_USER);
+        final String ip = LogSupport.clean(clientIp);
         final WhitelistSnapshot snapshot = mcpConfigService.snapshot();
 
         // SEC-364: parse ONCE with the real GraphQL grammar; a document the gate cannot parse is
@@ -70,33 +87,50 @@ public class GraphQLWhitelistGate {
         try {
             document = Parser.parse(query);
         } catch (RuntimeException ex) {
-            // The parser message can quote document content — keep it in the audit log only.
+            // The parser message can quote document content (inline secrets): log the position only.
             LOGGER.warn("MCP operation blocked: GraphQL document could not be parsed, "
-                    + "user='{}', ip='{}', reason='{}'", who, clientIp, ex.getMessage());
+                    + "user='{}', ip='{}', at={}", who, ip, position(ex));
             return Optional.of(DENIED + "the GraphQL document could not be parsed");
         }
 
-        // SEC-2: named fragment spreads cannot be resolved against whitelist entries without the
-        // fragment definitions — fail closed. In read-only mode only the operation type matters
-        // (a fragment cannot turn a query into a mutation), so spreads are harmless there.
-        if (!snapshot.isReadOnlyDefault() && containsNamedFragmentSpread(document)) {
-            LOGGER.warn("MCP operation blocked: named fragment spreads not permitted when "
-                    + "whitelist is active, user='{}', ip='{}'", who, clientIp);
-            return Optional.of(DENIED + "named fragment spreads are not permitted when a whitelist is active");
+        // PRB-1: named fragment spreads are never expanded, so the fields behind one would escape every
+        // path check (a mutation reduced to `mutation { ...F }` has no path at all). Refused in EVERY
+        // mode, queries included: inline fragments (... on Type { ... }) cover the same need.
+        if (containsNamedFragmentSpread(document)) {
+            LOGGER.warn("MCP operation blocked: named fragment spreads are not permitted, "
+                    + "user='{}', ip='{}'", who, ip);
+            return Optional.of(DENIED + NAMED_SPREAD_REASON);
         }
 
+        final Set<String> extracted;
+        try {
+            extracted = extractOperationPaths(document,
+                    Math.max(snapshot.maxDepth(), WhitelistEntries.NEVER_ALLOWED_DEPTH));
+        } catch (RuntimeException ex) {
+            // A selection the gate cannot account for must never be allowed.
+            LOGGER.warn("MCP operation blocked: selection could not be analysed, user='{}', ip='{}'", who, ip);
+            return Optional.of(DENIED + "the GraphQL document could not be analysed");
+        }
         // An empty set after a SUCCESSFUL parse means the document selects only introspection.
-        for (final String path : withoutIntrospectionPaths(extractOperationPaths(document, snapshot.maxDepth()))) {
+        for (final String path : withoutIntrospectionPaths(extracted)) {
             final Optional<String> denial = denialFor(path, snapshot);
             if (denial.isPresent()) {
                 if (LOGGER.isWarnEnabled()) {
                     LOGGER.warn("MCP operation blocked: path='{}', reason='{}', user='{}', ip='{}'",
-                            WhitelistEntries.display(path), denial.get(), who, clientIp);
+                            WhitelistEntries.display(path), denial.get(), who, ip);
                 }
                 return denial.map(reason -> DENIED + reason);
             }
         }
         return Optional.empty();
+    }
+
+    private static String position(final RuntimeException ex) {
+        if (ex instanceof graphql.parser.InvalidSyntaxException) {
+            final graphql.language.SourceLocation loc = ((graphql.parser.InvalidSyntaxException) ex).getLocation();
+            return loc == null ? "unknown" : "line " + loc.getLine() + ", column " + loc.getColumn();
+        }
+        return "unknown";
     }
 
     /** Denial reason (without the common prefix) for one operation-qualified path, if any. */
@@ -216,8 +250,10 @@ public class GraphQLWhitelistGate {
             } else if (selection instanceof InlineFragment) {
                 // A type condition, not a field: same prefix and depth as the parent.
                 collectPaths(((InlineFragment) selection).getSelectionSet(), prefix, depth, maxDepth, paths);
+            } else {
+                // A FragmentSpread is refused by check() before this point; anything else is unknown.
+                throw new IllegalArgumentException("Unsupported selection " + selection.getClass().getSimpleName());
             }
-            // FragmentSpread is deliberately NOT expanded — check() denies documents containing one.
         }
     }
 

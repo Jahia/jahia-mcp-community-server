@@ -48,6 +48,26 @@ class McpMutationSaveSettingsTest {
     }
 
     @Test
+    @DisplayName("a saved whitelist is audited at INFO with the acting administrator")
+    void save_is_audited() throws IOException {
+        final ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(McpMutation.class);
+        final ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try (org.jahia.community.mcp.access.CallerFixture caller =
+                org.jahia.community.mcp.access.CallerFixture.administrator()) {
+            new McpMutation().saveSettings(List.of("query:jcr"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).anySatisfy(e -> assertThat(e.getFormattedMessage())
+                .contains("'root'").contains("1 entries"));
+    }
+
+    @Test
     @DisplayName("a rejected entry surfaces as a GraphQL error carrying the reason")
     void rejected_entry_surfaces_reason() throws IOException {
         doThrow(new IllegalArgumentException("Malformed whitelist entry 'x y'")).when(config).saveWhitelist(List.of("x y"));

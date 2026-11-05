@@ -4,6 +4,7 @@ import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
+import org.jahia.community.mcp.LogSupport;
 import org.jahia.community.mcp.McpSkillService;
 import org.jahia.community.mcp.config.McpConfigService;
 import org.jahia.modules.graphql.provider.dxm.DataFetchingException;
@@ -40,6 +41,8 @@ public class McpMutation {
         }
         try {
             config.saveWhitelist(whitelist);
+            LOGGER.info("MCP whitelist updated by user '{}': {} entries", LogSupport.actingUser(),
+                    whitelist.size());
             return Boolean.TRUE;
         } catch (IllegalArgumentException e) {
             // McpConfigService already logged the rejection; its message is client-safe.

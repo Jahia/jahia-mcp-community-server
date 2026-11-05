@@ -122,10 +122,12 @@ public class InternalGraphQLClient {
         final byte[] requestBody = MAPPER.writeValueAsBytes(payload);
         final CapturingResponse response = new CapturingResponse();
         graphQLServlet.service(new SyntheticPostRequest(requestBody), response);
+        // body() flushes the writer: the cap can be crossed by that very flush, so check afterwards.
+        final String body = response.body();
         if (response.overflow) {
             throw new IOException("The GraphQL response exceeds " + MAX_RESPONSE_BYTES + " bytes");
         }
-        return new Response(response.status, response.body());
+        return new Response(response.status, body);
     }
 
     /** No-op delegate required by the servlet wrappers; every call returns a type default. */

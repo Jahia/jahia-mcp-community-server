@@ -47,9 +47,10 @@ class GraphQLExecuteToolMessagesTest {
     @ParameterizedTest(name = "{0}")
     @CsvSource(delimiter = '|', value = {
         "Operation not allowed: the GraphQL document could not be parsed|Fix the syntax",
-        "Operation not allowed: named fragment spreads are not permitted when a whitelist is active|inline fragments",
+        "Operation not allowed: named fragment spreads are not permitted (use inline fragments '... on Type { ... }' instead)|inline fragments",
         "Operation not allowed: 'mutation:jcr.deleteNode' is not in the whitelist|'mutation:<field>' entry",
         "Operation not allowed: mutations are refused by the read-only default|'mutation:<field>' entry",
+        "Operation not allowed: 'mutation:communityMcp.saveSettings' can never be run through community.graphql.execute|can never be run",
         "Operation not allowed: 'query:jcr' is not in the whitelist|added to the whitelist"})
     void should_give_a_distinct_hint_per_denial_cause(final String reason, final String hintPart) {
         when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.of(reason));
@@ -72,7 +73,7 @@ class GraphQLExecuteToolMessagesTest {
     }
 
     @ParameterizedTest(name = "HTTP {0}")
-    @CsvSource({"400, Fix the GraphQL document", "401, credentials were rejected", "403, credentials were rejected",
+    @CsvSource({"400, Fix the GraphQL document", "401, caller lacks the permission", "403, caller lacks the permission",
         "500, Server error", "503, Server error"})
     void should_choose_the_http_hint_from_the_status(final int status, final String hintPart) throws Exception {
         when(gate.check(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
