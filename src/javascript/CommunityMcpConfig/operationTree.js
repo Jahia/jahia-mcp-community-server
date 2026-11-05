@@ -104,6 +104,77 @@ const toggleWhitelistPath = (set, path) => {
     return next;
 };
 
+// The server always refuses 'mutation:communityMcp' and everything under it: the allow list
+// can never open write access to its own settings. The UI shows it, but it cannot be checked.
+const LOCKED_PATH = MUTATION_PREFIX + 'communityMcp';
+const isLockedPath = path => path === LOCKED_PATH || path.startsWith(LOCKED_PATH + '.');
+
+// 'query:jcr.nodeByPath' -> 'jcr.nodeByPath' (the form shown to people).
+const displayPath = path => {
+    const match = path.match(OPERATION_PREFIX);
+    return match ? path.slice(match[0].length) : path;
+};
+
+// True if a strictly deeper entry exists under `path` (drives the "mixed" checkbox state).
+const hasSelectedDescendant = (path, set) => [...set].some(e => e.startsWith(path + '.'));
+
+// The nearest ancestor entry that already allows `path`, or null.
+const findCoveringAncestor = (path, set) => {
+    const parts = path.split('.');
+    for (let i = parts.length - 1; i >= 1; i--) {
+        const prefix = parts.slice(0, i).join('.');
+        if (set.has(prefix)) {
+            return prefix;
+        }
+    }
+
+    return null;
+};
+
+const typePrefix = isQuery => (isQuery ? QUERY_PREFIX : MUTATION_PREFIX);
+
+const countEntriesOfType = (set, isQuery) =>
+    [...set].filter(e => e.startsWith(typePrefix(isQuery))).length;
+
+// Allow every root operation of one type (never a locked one). Returns a NEW Set.
+const allowAllOfType = (set, operations, isQuery) => {
+    const roots = operations
+        .filter(op => op.isQuery === isQuery && !isLockedPath(op.path))
+        .map(op => op.path);
+    const kept = [...set].filter(e => !roots.some(root => e.startsWith(root + '.')));
+    return new Set([...kept, ...roots]);
+};
+
+const clearAllOfType = (set, isQuery) =>
+    new Set([...set].filter(e => !e.startsWith(typePrefix(isQuery))));
+
+const removeEntry = (set, entry) => new Set([...set].filter(e => e !== entry));
+
+// Entries that the tree cannot show or that the server refuses: their root operation is
+// missing from the current schema, or they are locked. Sorted for a stable display.
+const findProblemEntries = (set, operations) => {
+    if (!operations || operations.length === 0) {
+        return [];
+    }
+
+    const roots = new Set(operations.map(op => op.path));
+    return [...set]
+        .sort()
+        .map(entry => {
+            if (isLockedPath(entry)) {
+                return {entry, reason: 'locked'};
+            }
+
+            return roots.has(entry.split('.')[0]) ? null : {entry, reason: 'unknown'};
+        })
+        .filter(Boolean);
+};
+
+const matchesFilter = (path, filter) =>
+    !filter || displayPath(path).toLowerCase().includes(filter.toLowerCase());
+
+const setsEqual = (a, b) => a.size === b.size && [...a].every(e => b.has(e));
+
 // Map the raw fields of an expanded named type into child node descriptors.
 const mapTypeFields = fields => (fields || []).map(f => {
     const named = getNamedType(f.type);
@@ -133,6 +204,18 @@ const buildChildNodes = (node, rawChildren) => {
 const isExpandableKind = (typeKind, depth) =>
     (typeKind === 'OBJECT' || typeKind === 'INTERFACE') && depth < MAX_TREE_DEPTH;
 
+// True if a descendant whose fields are already loaded matches the filter. Bounded by
+// MAX_TREE_DEPTH, so a recursive type (JCRNode.parent: JCRNode) cannot loop.
+const hasLoadedMatch = (node, typeFields, filter, depth) => {
+    if (!isExpandableKind(node.typeKind, depth)) {
+        return false;
+    }
+
+    const children = buildChildNodes(node, typeFields[node.typeName]) || [];
+    return children.some(child =>
+        matchesFilter(child.path, filter) || hasLoadedMatch(child, typeFields, filter, depth + 1));
+};
+
 export {
     MAX_TREE_DEPTH,
     getNamedType,
@@ -142,5 +225,17 @@ export {
     toggleWhitelistPath,
     mapTypeFields,
     buildChildNodes,
-    isExpandableKind
+    isExpandableKind,
+    isLockedPath,
+    displayPath,
+    hasSelectedDescendant,
+    findCoveringAncestor,
+    countEntriesOfType,
+    allowAllOfType,
+    clearAllOfType,
+    removeEntry,
+    findProblemEntries,
+    matchesFilter,
+    hasLoadedMatch,
+    setsEqual
 };
