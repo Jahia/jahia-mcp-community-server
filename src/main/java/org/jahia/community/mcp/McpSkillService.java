@@ -250,8 +250,8 @@ public class McpSkillService {
         }
     }
 
-    public boolean saveSkill(final String name, final String mcpName, final String description, final String content) {
-        final String actingUser = LogSupport.actingUser();
+    /** True when the name is a safe skill key and the content fits; otherwise logs the reason at WARN. */
+    private static boolean isAcceptedForSave(final String name, final String content) {
         try {
             validateSkillName(name);
         } catch (IllegalArgumentException ex) {
@@ -263,6 +263,14 @@ public class McpSkillService {
                 LOGGER.warn("saveSkill rejected: content of '{}' exceeds {} characters", LogSupport.clean(name),
                         MAX_CONTENT_CHARS);
             }
+            return false;
+        }
+        return true;
+    }
+
+    public boolean saveSkill(final String name, final String mcpName, final String description, final String content) {
+        final String actingUser = LogSupport.actingUser();
+        if (!isAcceptedForSave(name, content)) {
             return false;
         }
         try {
