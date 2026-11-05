@@ -306,8 +306,9 @@ Add tests with the code, never lower a threshold to pass.
 
 Requires `org.jahia.modules:mcp-server:0.5.0-SNAPSHOT` in a reachable Maven repository (Jahia public or
 snapshot Nexus, or `mvn install` of mcp-server locally). The `jahia-depends` value is
-`default,graphql-dxm-provider,mcp-server=[0.5,0.6)`. graphql-dxm-provider is compiled against 3.4.0 and
-imported as `[3.4,4)`.
+`default,graphql-dxm-provider=[3.9,4),mcp-server=[0.5,0.6)`. graphql-dxm-provider is compiled against 3.9.1 and
+imported as `[3.9,4)`: the version built against sets the import range, so bump it together with the
+minimum supported provider version.
 
 ## Tests
 

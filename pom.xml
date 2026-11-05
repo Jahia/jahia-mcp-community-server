@@ -24,7 +24,7 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <yarn.arguments>build:production</yarn.arguments>
-        <jahia-depends>default,graphql-dxm-provider,mcp-server=[0.5,0.6)</jahia-depends>
+        <jahia-depends>default,graphql-dxm-provider=[3.9,4),mcp-server=[0.5,0.6)</jahia-depends>
         <mcp-server.version>0.5.0-SNAPSHOT</mcp-server.version>
         <require-capability>
             osgi.ee;filter:="(&amp;(osgi.ee=JavaSE)(version&gt;=17))"
@@ -61,7 +61,7 @@
         <dependency>
             <groupId>org.jahia.modules</groupId>
             <artifactId>graphql-dxm-provider</artifactId>
-            <version>3.4.0</version>
+            <version>3.9.1</version>
             <scope>provided</scope>
         </dependency>
 

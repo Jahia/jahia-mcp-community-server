@@ -53,7 +53,7 @@ administrator who called the tool, so JCR ACLs apply normally.
 | Component | Version | Notes |
 |---|---|---|
 | Jahia | 8.2+ | Built against the Jahia 8.2.2.1 parent POM |
-| `graphql-dxm-provider` | **3.4.0 or later**, below 4.0 (`[3.4,4)`) | Built against 3.4.0 and declared in `jahia-depends`. The tools bind its servlet component by name (`graphql.kickstart.servlet.OsgiGraphQLHttpServlet`). If it is missing (the provider is stopped, or a later version renames it), `community.graphql.execute` and `community.graphql.introspect` stay listed but refuse every call with an `unavailable` error, and the module logs a WARN naming the component |
+| `graphql-dxm-provider` | **3.9.0 or later**, below 4.0 (`[3.9,4)`) | Built against 3.9.1; the build version sets the bundle's `Import-Package` range, and `jahia-depends` declares the same range. The tools bind its servlet component by name (`graphql.kickstart.servlet.OsgiGraphQLHttpServlet`). If it is missing (the provider is stopped, or a later version renames it), `community.graphql.execute` and `community.graphql.introspect` stay listed but refuse every call with an `unavailable` error, and the module logs a WARN naming the component |
 | `mcp-server` | **0.5.x** (`[0.5,0.6)`) | Provides the tool SPI. The SPI is pre-1.0, so the import range is kept tight |
 | Declarative Services | 1.4 (Felix SCR 2.1 or later) | Required for the configuration-driven components |
 | `personal-api-tokens` | optional | Only needed for API-token authentication |

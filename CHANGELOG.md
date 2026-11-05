@@ -38,7 +38,7 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   characters). They fail with a GraphQL error whose message gives the reason, and return `true` on success.
 - **Removed.** The `GET /modules/community-mcp` health check, the 2 MB request cap of the 1.x endpoint, and
   the `community-mcp` API scope.
-- **Dependencies.** Requires `mcp-server` 0.5.x (`[0.5,0.6)`), `graphql-dxm-provider` 3.4.0 or later (below
+- **Dependencies.** Requires `mcp-server` 0.5.x (`[0.5,0.6)`), `graphql-dxm-provider` 3.9.0 or later (below
   4.0) and Declarative Services 1.4 (Felix SCR 2.1 or later).
 - **Exports.** Only `org.jahia.community.mcp.graphql` is exported. The initial-content import
   (`src/main/import`) is removed.
