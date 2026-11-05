@@ -3,12 +3,12 @@ package org.jahia.community.mcp.tools;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.jahia.community.mcp.access.CommunityMcpAccess;
 import org.jahia.modules.mcp.spi.tool.JahiaMcpTool;
 import org.jahia.modules.mcp.spi.tool.ToolContext;
 import org.jahia.modules.mcp.spi.tool.ToolError;
 import org.jahia.modules.mcp.spi.tool.ToolResult;
 import org.jahia.modules.mcp.spi.tool.ToolSafety;
+import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
@@ -38,13 +38,13 @@ import java.util.regex.Pattern;
  * are returned in {@code truncatedTypes} so the caller can ask for them in a later call.</p>
  */
 @Component(service = JahiaMcpTool.class, immediate = true)
-public class GraphQLIntrospectTool implements JahiaMcpTool {
+public class GraphQLIntrospectTool extends AbstractCommunityTool {
 
     static final String NAME = "community.graphql.introspect";
     static final int MAX_TYPE_NAMES = 25;
     static final int MAX_RESULT_CHARS = 100_000;
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphQLIntrospectTool.class);
-    private static final JsonNode SCHEMA = ToolSupport.loadSchema(NAME);
+    private static final String TYPES = "types";
     private static final Pattern GRAPHQL_NAME = Pattern.compile("[_A-Za-z][_0-9A-Za-z]*");
 
     // Type list + root type names — zero __Type.fields selections.
@@ -60,16 +60,12 @@ public class GraphQLIntrospectTool implements JahiaMcpTool {
             + "enumValues(includeDeprecated: false) { name description } "
             + "interfaces { name kind } possibleTypes { name kind } } }";
 
-    private volatile InternalGraphQLClient graphQLClient;
+    private final InternalGraphQLClient graphQLClient;
 
-    @Reference
-    public void setGraphQLClient(final InternalGraphQLClient graphQLClient) {
+    @Activate
+    public GraphQLIntrospectTool(@Reference final InternalGraphQLClient graphQLClient) {
+        super(NAME);
         this.graphQLClient = graphQLClient;
-    }
-
-    @Override
-    public String name() {
-        return NAME;
     }
 
     @Override
@@ -77,12 +73,10 @@ public class GraphQLIntrospectTool implements JahiaMcpTool {
         return "Discover Jahia's GraphQL schema before calling community.graphql.execute. Without arguments, "
                 + "returns every type name and kind plus the fields of the root Query and Mutation types. "
                 + "Pass typeNames (at most " + MAX_TYPE_NAMES + ") to get the fields, arguments and enum values "
-                + "of specific types; names left in truncatedTypes can be requested in a further call.";
-    }
-
-    @Override
-    public JsonNode inputSchema() {
-        return SCHEMA;
+                + "of specific types; names left in truncatedTypes can be requested in a further call. "
+                + "The schema lists every operation Jahia offers, including ones the administrator's "
+                + "whitelist may refuse (mutations are refused unless explicitly whitelisted): a listed "
+                + "operation is not necessarily allowed in community.graphql.execute.";
     }
 
     @Override
@@ -91,20 +85,7 @@ public class GraphQLIntrospectTool implements JahiaMcpTool {
     }
 
     @Override
-    public Set<String> tags() {
-        return Set.of("community");
-    }
-
-    @Override
-    public ToolResult execute(final JsonNode input, final ToolContext ctx) {
-        return ToolSupport.audited(ctx, NAME, run(input, ctx));
-    }
-
-    private ToolResult run(final JsonNode input, final ToolContext ctx) {
-        final Optional<ToolResult> denied = CommunityMcpAccess.requireAdministrator(ctx);
-        if (denied.isPresent()) {
-            return denied.get();
-        }
+    protected ToolResult doExecute(final JsonNode input, final ToolContext ctx) {
         final JsonNode typeNamesNode = input.path("typeNames");
         final boolean explicit = !typeNamesNode.isMissingNode() && !typeNamesNode.isNull();
         final Optional<ToolResult> invalid = explicit ? validateTypeNames(typeNamesNode) : Optional.empty();
@@ -162,8 +143,8 @@ public class GraphQLIntrospectTool implements JahiaMcpTool {
             return null;
         }
         final ObjectNode summary = ((ObjectNode) schema).deepCopy();
-        final ArrayNode types = summary.putArray("types");
-        for (final JsonNode t : schema.path("types")) {
+        final ArrayNode types = summary.putArray(TYPES);
+        for (final JsonNode t : schema.path(TYPES)) {
             final String name = t.path("name").asText("");
             if (!name.isEmpty() && !name.startsWith("__")) {
                 types.addObject().put("name", name).put("kind", t.path("kind").asText(""));
@@ -187,34 +168,40 @@ public class GraphQLIntrospectTool implements JahiaMcpTool {
      */
     private void fetchTypeDetails(final List<String> names, final String auth, final ObjectNode result)
             throws IOException, ServletException {
-        final ObjectNode details = result.putObject("types");
+        final ObjectNode details = result.putObject(TYPES);
         final ArrayNode skipped = result.putArray("skippedTypes");
         final ArrayNode truncated = result.putArray("truncatedTypes");
         int used = 0;
         for (int i = 0; i < names.size(); i++) {
-            final String name = names.get(i);
-            if (used >= MAX_RESULT_CHARS && !details.isEmpty()) {
+            final boolean budgetSpent = used >= MAX_RESULT_CHARS && !details.isEmpty();
+            final JsonNode type = budgetSpent ? null : fetchType(names.get(i), auth);
+            final int size = type == null ? 0 : type.toString().length();
+            if (budgetSpent || exceedsBudget(used, size, details)) {
                 names.subList(i, names.size()).forEach(truncated::add);
                 break;
             }
-            final InternalGraphQLClient.Response response = graphQLClient.execute(TYPE_QUERY, Map.of("name", name), auth);
-            final JsonNode json = response.isHttpError() ? null : ToolSupport.parseJsonOrNull(response.body());
-            final JsonNode type = json == null ? null : json.path("data").path("__type");
-            if (type == null || !type.isObject()) {
-                skipped.add(name);
-                continue;
+            if (type == null) {
+                skipped.add(names.get(i));
+            } else {
+                details.set(names.get(i), type);
+                used += size;
             }
-            final int size = type.toString().length();
-            if (used + size > MAX_RESULT_CHARS && !details.isEmpty()) {
-                names.subList(i, names.size()).forEach(truncated::add);
-                break;
-            }
-            details.set(name, type);
-            used += size;
         }
         if (!skipped.isEmpty() || !truncated.isEmpty()) {
             LOGGER.info("{}: skipped={}, truncated={}", NAME, skipped, truncated);
         }
+    }
+
+    private static boolean exceedsBudget(final int used, final int size, final ObjectNode details) {
+        return used + size > MAX_RESULT_CHARS && !details.isEmpty();
+    }
+
+    /** One type's details, or null when the server does not know it or fails. */
+    private JsonNode fetchType(final String name, final String auth) throws IOException, ServletException {
+        final InternalGraphQLClient.Response response = graphQLClient.execute(TYPE_QUERY, Map.of("name", name), auth);
+        final JsonNode json = response.isHttpError() ? null : ToolSupport.parseJsonOrNull(response.body());
+        final JsonNode type = json == null ? null : json.path("data").path("__type");
+        return type != null && type.isObject() ? type : null;
     }
 
     private static ToolResult internalError() {

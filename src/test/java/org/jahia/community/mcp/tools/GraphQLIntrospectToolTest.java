@@ -38,8 +38,7 @@ class GraphQLIntrospectToolTest {
     @BeforeEach
     void setUp() {
         client = mock(InternalGraphQLClient.class);
-        tool = new GraphQLIntrospectTool();
-        tool.setGraphQLClient(client);
+        tool = new GraphQLIntrospectTool(client);
     }
 
     private static InternalGraphQLClient.Response typeResponse(final String name, final int descriptionChars) {
