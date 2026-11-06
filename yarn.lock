@@ -1200,18 +1200,6 @@
     ajv-formats-draft2019 "^1.6.1"
     libxmljs2 "^0.35 || ^0.37"
 
-"@date-fns/tz@^1.4.1":
-  version "1.5.0"
-  resolved "https://registry.yarnpkg.com/@date-fns/tz/-/tz-1.5.0.tgz#e9e79b7583f0b1322c53db884a0112551095e3f3"
-  integrity sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg==
-
-"@daypicker/react@^10.0.1":
-  version "10.0.2"
-  resolved "https://registry.yarnpkg.com/@daypicker/react/-/react-10.0.2.tgz#263513f0b76538f1a6d6fa8bdc9667d4fec420d9"
-  integrity sha512-Z/gvGXnc/xjRr5Z6l9OhIey00C7kwbIyJ85Pff9B9EWDkjTlkTQztB3qeylmGJDQ9xmxRJUV1W+02rskqarUBw==
-  dependencies:
-    react-day-picker "10.0.2"
-
 "@discoveryjs/json-ext@^0.6.3":
   version "0.6.3"
   resolved "https://registry.yarnpkg.com/@discoveryjs/json-ext/-/json-ext-0.6.3.tgz#f13c7c205915eb91ae54c557f5e92bddd8be0e83"
@@ -1283,7 +1271,7 @@
   dependencies:
     "@floating-ui/dom" "^1.8.0"
 
-"@floating-ui/react@^0.27.20":
+"@floating-ui/react@^0.27.16":
   version "0.27.20"
   resolved "https://registry.yarnpkg.com/@floating-ui/react/-/react-0.27.20.tgz#353664b4a2b329e9f91f8d9150f7992b5ace20f4"
   integrity sha512-CMqMy7OaXl9W0eq1Uy7L7i2Y/anPvHmFmESd2CEw0t5YvZhcVCeo4MBevAmswRllX7Y2dEidA4ozGPunLSTQpw==
@@ -1374,17 +1362,15 @@
     eslint-plugin-react "^7.32.2"
     eslint-plugin-react-hooks "^4.6.0"
 
-"@jahia/moonstone@^2.18.2":
-  version "2.21.1"
-  resolved "https://registry.yarnpkg.com/@jahia/moonstone/-/moonstone-2.21.1.tgz#dc653e71fe4cb4dbad539e86536a6b012c54becb"
-  integrity sha512-CTh8kTSP5HeV9MvGdq9V15QWYOU1nuSYId0IsK4C0E3Hp9X8Y2BDrwL1Jr71QSotzsjqV/GnjMX5ip1tdlUyPg==
+"@jahia/moonstone@^2.16.2":
+  version "2.18.2"
+  resolved "https://registry.yarnpkg.com/@jahia/moonstone/-/moonstone-2.18.2.tgz#36827f6bd5404a57fe4a753fadbd26ed302d8f5b"
+  integrity sha512-wcnEU6z39sTKtG1gda1EgXR+7jntZ3n4NKngcDEvPMYnhOxp5odn1oi8mRSsr2GQ+hutEBlN+G8+N39neXWH1Q==
   dependencies:
-    "@daypicker/react" "^10.0.1"
-    "@floating-ui/react" "^0.27.20"
+    "@floating-ui/react" "^0.27.16"
     "@tanstack/react-table" "^8.21.3"
     clsx "^2.1.1"
     re-resizable "^6.11.2"
-    temporal-polyfill "^1.0.4"
     to-px "^1.1.0"
 
 "@jahia/ui-extender@^1.1.0":
@@ -3252,11 +3238,6 @@ data-view-byte-offset@^1.0.1:
     call-bound "^1.0.2"
     es-errors "^1.3.0"
     is-data-view "^1.0.1"
-
-date-fns@^4.1.0:
-  version "4.4.0"
-  resolved "https://registry.yarnpkg.com/date-fns/-/date-fns-4.4.0.tgz#806539edf45c616b2b76b5f78b88c56ed3c7e036"
-  integrity sha512-+1UMbeh68lH1SegH83CGWwpb6OHHbpSgr3+s5Eww5M4CAgswBpoWS0AjTOfEJ33HiYKz1hdj/KTFprzXHmq/6w==
 
 debug@4, debug@^4.1.0, debug@^4.1.1, debug@^4.3.1, debug@^4.3.2, debug@^4.3.4, debug@^4.4.3:
   version "4.4.3"
@@ -6147,14 +6128,6 @@ re-resizable@^6.11.2:
   resolved "https://registry.yarnpkg.com/re-resizable/-/re-resizable-6.11.2.tgz#2e8f7119ca3881d5b5aea0ffa014a80e5c1252b3"
   integrity sha512-2xI2P3OHs5qw7K0Ud1aLILK6MQxW50TcO+DetD9eIV58j84TqYeHoZcL9H4GXFXXIh7afhH8mv5iUCXII7OW7A==
 
-react-day-picker@10.0.2:
-  version "10.0.2"
-  resolved "https://registry.yarnpkg.com/react-day-picker/-/react-day-picker-10.0.2.tgz#0bc95cb1ff49c31a65aefe2e3aa5ed44dba4fa4a"
-  integrity sha512-QetiKtZWE9Uaw/pM/SYNv6WPYOTRnSJ2puL0GgwkmUFMIwiY0dtjH1W4B7DOVXVNQM0ZOClGpH/heOfBSzWeiA==
-  dependencies:
-    "@date-fns/tz" "^1.4.1"
-    date-fns "^4.1.0"
-
 react-dom@^18.3.1:
   version "18.3.1"
   resolved "https://registry.yarnpkg.com/react-dom/-/react-dom-18.3.1.tgz#c2265d79511b57d479b3dd3fdfa51536494c5cb4"
@@ -7002,24 +6975,6 @@ tar@^7.4.3:
     minipass "^7.1.2"
     minizlib "^3.1.0"
     yallist "^5.0.0"
-
-temporal-polyfill@^1.0.4:
-  version "1.0.8"
-  resolved "https://registry.yarnpkg.com/temporal-polyfill/-/temporal-polyfill-1.0.8.tgz#3ca22db5bec2d44b80027a87eda94deed8fd123d"
-  integrity sha512-RCCGa0GddT099XG49ijdD0tDf86L8vfuZun1+JyJiO4Y2NP9PACQsG0OnvNPXwVLisdvhr/zqL2nhKQmXXx08A==
-  dependencies:
-    temporal-spec "1.0.1"
-    temporal-utils "1.0.4"
-
-temporal-spec@1.0.1:
-  version "1.0.1"
-  resolved "https://registry.yarnpkg.com/temporal-spec/-/temporal-spec-1.0.1.tgz#5679ce2dd0089865afe80e0a8bd22a9033c16717"
-  integrity sha512-wxVoanmDeavXie1vu2JaQ3WIc3JZnWAOYFBsJyATaVsXsycKYUflGsyBmrRSnoCpZJpwPyr38VpgSUlQ8CbFxg==
-
-temporal-utils@1.0.4:
-  version "1.0.4"
-  resolved "https://registry.yarnpkg.com/temporal-utils/-/temporal-utils-1.0.4.tgz#ad95eddf1f8a260f33766f09af99f11c90a06b0a"
-  integrity sha512-4mAcgbWlaxe+gn23gk8g0iHxCVGVOhKzSCfF5HM3lfvH8BdT+/pBmH/R/E4CrIse+koUgs8ThkPzCLnui6Fi8w==
 
 terser@^5.51.0:
   version "5.51.2"
