@@ -4395,7 +4395,7 @@ const RAW_RUNTIME_STATE =
           ["@istanbuljs/schema", "npm:0.1.6"],\
           ["babel-plugin-istanbul", "npm:6.1.1"],\
           ["istanbul-lib-instrument", "npm:5.2.1"],\
-          ["test-exclude", "npm:6.0.0"]\
+          ["test-exclude", "npm:8.0.0"]\
         ],\
         "linkType": "HARD"\
       }]\
@@ -8003,7 +8003,7 @@ const RAW_RUNTIME_STATE =
           ["istanbul-lib-coverage", "npm:3.2.2"],\
           ["istanbul-lib-processinfo", "npm:3.0.0"],\
           ["p-map", "npm:3.0.0"],\
-          ["rimraf", "npm:6.1.3"],\
+          ["rimraf", "npm:6.1.4"],\
           ["uuid", "npm:11.1.1"]\
         ],\
         "linkType": "HARD"\
@@ -9037,7 +9037,7 @@ const RAW_RUNTIME_STATE =
           ["p-map", "npm:3.0.0"],\
           ["process-on-spawn", "npm:1.1.0"],\
           ["resolve-from", "npm:5.0.0"],\
-          ["rimraf", "npm:6.1.3"],\
+          ["rimraf", "npm:6.1.4"],\
           ["signal-exit", "npm:3.0.7"],\
           ["spawn-wrap", "npm:3.0.0"],\
           ["test-exclude", "npm:8.0.0"],\
@@ -9974,12 +9974,12 @@ const RAW_RUNTIME_STATE =
         ],\
         "linkType": "HARD"\
       }],\
-      ["npm:6.1.3", {\
-        "packageLocation": "../../../../../../.yarn/berry/cache/rimraf-npm-6.1.3-409ea7254f-10c0.zip/node_modules/rimraf/",\
+      ["npm:6.1.4", {\
+        "packageLocation": "../../../../../../.yarn/berry/cache/rimraf-npm-6.1.4-9805c86c63-10c0.zip/node_modules/rimraf/",\
         "packageDependencies": [\
           ["glob", "npm:14.0.4"],\
           ["package-json-from-dist", "npm:1.0.1"],\
-          ["rimraf", "npm:6.1.3"]\
+          ["rimraf", "npm:6.1.4"]\
         ],\
         "linkType": "HARD"\
       }]\
@@ -10318,7 +10318,7 @@ const RAW_RUNTIME_STATE =
           ["foreground-child", "npm:2.0.0"],\
           ["is-windows", "npm:1.0.2"],\
           ["make-dir", "npm:3.1.0"],\
-          ["rimraf", "npm:6.1.3"],\
+          ["rimraf", "npm:6.1.4"],\
           ["signal-exit", "npm:3.0.7"],\
           ["spawn-wrap", "npm:3.0.0"],\
           ["which", "npm:2.0.2"]\
@@ -10710,16 +10710,6 @@ const RAW_RUNTIME_STATE =
       }]\
     ]],\
     ["test-exclude", [\
-      ["npm:6.0.0", {\
-        "packageLocation": "../../../../../../.yarn/berry/cache/test-exclude-npm-6.0.0-3fb03d69df-10c0.zip/node_modules/test-exclude/",\
-        "packageDependencies": [\
-          ["@istanbuljs/schema", "npm:0.1.6"],\
-          ["glob", "npm:7.2.3"],\
-          ["minimatch", "npm:3.1.5"],\
-          ["test-exclude", "npm:6.0.0"]\
-        ],\
-        "linkType": "HARD"\
-      }],\
       ["npm:8.0.0", {\
         "packageLocation": "../../../../../../.yarn/berry/cache/test-exclude-npm-8.0.0-20b5f8ac32-10c0.zip/node_modules/test-exclude/",\
         "packageDependencies": [\
