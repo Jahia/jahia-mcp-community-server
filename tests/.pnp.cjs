@@ -33,7 +33,7 @@ const RAW_RUNTIME_STATE =
           ["@babel/preset-env", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.29.7"],\
           ["@cypress/code-coverage", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:4.1.3"],\
           ["@cypress/webpack-preprocessor", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:8.0.0"],\
-          ["@eslint/eslintrc", "npm:2.1.4"],\
+          ["@eslint/eslintrc", "npm:3.3.7"],\
           ["@faker-js/faker", "npm:10.6.0"],\
           ["@jahia/cypress", "npm:7.4.0"],\
           ["@jahia/eslint-config", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:2.2.0"],\
@@ -47,7 +47,7 @@ const RAW_RUNTIME_STATE =
           ["cypress-multi-reporters", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:2.1.0"],\
           ["cypress-terminal-report", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.4.0"],\
           ["cypress-wait-until", "npm:3.0.2"],\
-          ["dotenv", "npm:18.0.9"],\
+          ["dotenv", "npm:18.0.10"],\
           ["eslint", "npm:8.57.1"],\
           ["eslint-config-prettier", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:10.1.8"],\
           ["eslint-plugin-chai-friendly", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:1.2.1"],\
@@ -59,7 +59,7 @@ const RAW_RUNTIME_STATE =
           ["eslint-plugin-promise", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.3.0"],\
           ["eslint-plugin-react", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.37.5"],\
           ["eslint-plugin-react-hooks", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.1.1"],\
-          ["graphql", "npm:15.10.3"],\
+          ["graphql", "npm:15.11.0"],\
           ["graphql-tag", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:2.12.7"],\
           ["jahia-mcp-community-server-cypress", "workspace:."],\
           ["jahia-reporter", "npm:0.4.2"],\
@@ -140,7 +140,7 @@ const RAW_RUNTIME_STATE =
           ["@wry/caches", "npm:1.0.1"],\
           ["@wry/equality", "npm:0.5.7"],\
           ["@wry/trie", "npm:0.5.0"],\
-          ["graphql", "npm:15.10.3"],\
+          ["graphql", "npm:15.11.0"],\
           ["graphql-tag", "virtual:15e8d3640c01556763cdbc091b65815c057c221da42789a04d5f37ec1d11830e4c574600ff6af5dc694b6c857871c1df5ea92cfecc355ba2ff6d0ceff252ea82#npm:2.12.6"],\
           ["graphql-ws", null],\
           ["hoist-non-react-statics", "npm:3.3.2"],\
@@ -4335,6 +4335,22 @@ const RAW_RUNTIME_STATE =
           ["strip-json-comments", "npm:3.1.1"]\
         ],\
         "linkType": "HARD"\
+      }],\
+      ["npm:3.3.7", {\
+        "packageLocation": "../../../.yarn/berry/cache/@eslint-eslintrc-npm-3.3.7-53b0368519-10c0.zip/node_modules/@eslint/eslintrc/",\
+        "packageDependencies": [\
+          ["@eslint/eslintrc", "npm:3.3.7"],\
+          ["ajv", "npm:6.15.0"],\
+          ["debug", "virtual:a17547fa1c611380b85303d4795af731fba568361b3113a7420e65ec2d421cc823dd3ff76b6f4731e907bc464fdbac705cbb10ce355fb0a9936243d0c1e62972#npm:4.4.3"],\
+          ["espree", "npm:10.4.0"],\
+          ["globals", "npm:14.0.0"],\
+          ["ignore", "npm:5.3.2"],\
+          ["import-fresh", "npm:3.3.1"],\
+          ["js-yaml", "npm:4.3.2"],\
+          ["minimatch", "npm:3.1.5"],\
+          ["strip-json-comments", "npm:3.1.1"]\
+        ],\
+        "linkType": "HARD"\
       }]\
     ]],\
     ["@eslint/js", [\
@@ -4368,7 +4384,7 @@ const RAW_RUNTIME_STATE =
         "packageDependencies": [\
           ["@graphql-typed-document-node/core", "virtual:15e8d3640c01556763cdbc091b65815c057c221da42789a04d5f37ec1d11830e4c574600ff6af5dc694b6c857871c1df5ea92cfecc355ba2ff6d0ceff252ea82#npm:3.2.0"],\
           ["@types/graphql", null],\
-          ["graphql", "npm:15.10.3"]\
+          ["graphql", "npm:15.11.0"]\
         ],\
         "packagePeers": [\
           "@types/graphql",\
@@ -5527,12 +5543,12 @@ const RAW_RUNTIME_STATE =
         ],\
         "linkType": "SOFT"\
       }],\
-      ["virtual:a50722a5a9326b6a5f12350c494c4db3aa0f4caeac45e3e9e5fe071da20014ecfe738fe2ebe2c9c98abae81a4ea86b42f56d776b3bd5ec37f9ad3670c242b242#npm:5.3.2", {\
-        "packageLocation": "./.yarn/__virtual__/acorn-jsx-virtual-834321b202/4/.yarn/berry/cache/acorn-jsx-npm-5.3.2-d7594599ea-10c0.zip/node_modules/acorn-jsx/",\
+      ["virtual:9633b00e55c5aebf81b0127f50addd44705c175a47a287258963782da8f9f4e66c2da6640a60ed2826e19f024f73cd554a58729ee1644f93800bbd0d7b7ddd79#npm:5.3.2", {\
+        "packageLocation": "./.yarn/__virtual__/acorn-jsx-virtual-642bf0c873/4/.yarn/berry/cache/acorn-jsx-npm-5.3.2-d7594599ea-10c0.zip/node_modules/acorn-jsx/",\
         "packageDependencies": [\
           ["@types/acorn", null],\
           ["acorn", "npm:8.16.0"],\
-          ["acorn-jsx", "virtual:a50722a5a9326b6a5f12350c494c4db3aa0f4caeac45e3e9e5fe071da20014ecfe738fe2ebe2c9c98abae81a4ea86b42f56d776b3bd5ec37f9ad3670c242b242#npm:5.3.2"]\
+          ["acorn-jsx", "virtual:9633b00e55c5aebf81b0127f50addd44705c175a47a287258963782da8f9f4e66c2da6640a60ed2826e19f024f73cd554a58729ee1644f93800bbd0d7b7ddd79#npm:5.3.2"]\
         ],\
         "packagePeers": [\
           "@types/acorn",\
@@ -6789,7 +6805,7 @@ const RAW_RUNTIME_STATE =
     ]],\
     ["cypress", [\
       ["npm:15.21.1", {\
-        "packageLocation": "./.yarn/unplugged/cypress-npm-15.21.1-3e580dc679/node_modules/cypress/",\
+        "packageLocation": "../../../.yarn/berry/cache/cypress-npm-15.21.1-3e580dc679-10c0.zip/node_modules/cypress/",\
         "packageDependencies": [\
           ["@cypress/request", "npm:4.0.1"],\
           ["@cypress/xvfb", "npm:1.2.4"],\
@@ -7180,10 +7196,10 @@ const RAW_RUNTIME_STATE =
       }]\
     ]],\
     ["dotenv", [\
-      ["npm:18.0.9", {\
-        "packageLocation": "../../../.yarn/berry/cache/dotenv-npm-18.0.9-3adef7edd9-10c0.zip/node_modules/dotenv/",\
+      ["npm:18.0.10", {\
+        "packageLocation": "../../../.yarn/berry/cache/dotenv-npm-18.0.10-5ac920bb3e-10c0.zip/node_modules/dotenv/",\
         "packageDependencies": [\
-          ["dotenv", "npm:18.0.9"]\
+          ["dotenv", "npm:18.0.10"]\
         ],\
         "linkType": "HARD"\
       }]\
@@ -8016,6 +8032,13 @@ const RAW_RUNTIME_STATE =
         ],\
         "linkType": "HARD"\
       }],\
+      ["npm:4.2.1", {\
+        "packageLocation": "../../../.yarn/berry/cache/eslint-visitor-keys-npm-4.2.1-435d5be22a-10c0.zip/node_modules/eslint-visitor-keys/",\
+        "packageDependencies": [\
+          ["eslint-visitor-keys", "npm:4.2.1"]\
+        ],\
+        "linkType": "HARD"\
+      }],\
       ["npm:5.0.1", {\
         "packageLocation": "../../../.yarn/berry/cache/eslint-visitor-keys-npm-5.0.1-30a44b062b-10c0.zip/node_modules/eslint-visitor-keys/",\
         "packageDependencies": [\
@@ -8025,11 +8048,21 @@ const RAW_RUNTIME_STATE =
       }]\
     ]],\
     ["espree", [\
+      ["npm:10.4.0", {\
+        "packageLocation": "../../../.yarn/berry/cache/espree-npm-10.4.0-9633b00e55-10c0.zip/node_modules/espree/",\
+        "packageDependencies": [\
+          ["acorn", "npm:8.16.0"],\
+          ["acorn-jsx", "virtual:9633b00e55c5aebf81b0127f50addd44705c175a47a287258963782da8f9f4e66c2da6640a60ed2826e19f024f73cd554a58729ee1644f93800bbd0d7b7ddd79#npm:5.3.2"],\
+          ["eslint-visitor-keys", "npm:4.2.1"],\
+          ["espree", "npm:10.4.0"]\
+        ],\
+        "linkType": "HARD"\
+      }],\
       ["npm:9.6.1", {\
         "packageLocation": "../../../.yarn/berry/cache/espree-npm-9.6.1-a50722a5a9-10c0.zip/node_modules/espree/",\
         "packageDependencies": [\
           ["acorn", "npm:8.16.0"],\
-          ["acorn-jsx", "virtual:a50722a5a9326b6a5f12350c494c4db3aa0f4caeac45e3e9e5fe071da20014ecfe738fe2ebe2c9c98abae81a4ea86b42f56d776b3bd5ec37f9ad3670c242b242#npm:5.3.2"],\
+          ["acorn-jsx", "virtual:9633b00e55c5aebf81b0127f50addd44705c175a47a287258963782da8f9f4e66c2da6640a60ed2826e19f024f73cd554a58729ee1644f93800bbd0d7b7ddd79#npm:5.3.2"],\
           ["eslint-visitor-keys", "npm:3.4.3"],\
           ["espree", "npm:9.6.1"]\
         ],\
@@ -8800,6 +8833,13 @@ const RAW_RUNTIME_STATE =
         ],\
         "linkType": "HARD"\
       }],\
+      ["npm:14.0.0", {\
+        "packageLocation": "../../../.yarn/berry/cache/globals-npm-14.0.0-5fc3d8d5da-10c0.zip/node_modules/globals/",\
+        "packageDependencies": [\
+          ["globals", "npm:14.0.0"]\
+        ],\
+        "linkType": "HARD"\
+      }],\
       ["npm:15.15.0", {\
         "packageLocation": "../../../.yarn/berry/cache/globals-npm-15.15.0-5ddcb6c553-10c0.zip/node_modules/globals/",\
         "packageDependencies": [\
@@ -8885,10 +8925,10 @@ const RAW_RUNTIME_STATE =
         ],\
         "linkType": "HARD"\
       }],\
-      ["npm:15.10.3", {\
-        "packageLocation": "../../../.yarn/berry/cache/graphql-npm-15.10.3-7d10dd016b-10c0.zip/node_modules/graphql/",\
+      ["npm:15.11.0", {\
+        "packageLocation": "../../../.yarn/berry/cache/graphql-npm-15.11.0-ff8efc95a6-10c0.zip/node_modules/graphql/",\
         "packageDependencies": [\
-          ["graphql", "npm:15.10.3"]\
+          ["graphql", "npm:15.11.0"]\
         ],\
         "linkType": "HARD"\
       }]\
@@ -8912,7 +8952,7 @@ const RAW_RUNTIME_STATE =
         "packageLocation": "./.yarn/__virtual__/graphql-tag-virtual-509bcaa297/4/.yarn/berry/cache/graphql-tag-npm-2.12.6-99a5a7f6de-10c0.zip/node_modules/graphql-tag/",\
         "packageDependencies": [\
           ["@types/graphql", null],\
-          ["graphql", "npm:15.10.3"],\
+          ["graphql", "npm:15.11.0"],\
           ["graphql-tag", "virtual:15e8d3640c01556763cdbc091b65815c057c221da42789a04d5f37ec1d11830e4c574600ff6af5dc694b6c857871c1df5ea92cfecc355ba2ff6d0ceff252ea82#npm:2.12.6"],\
           ["tslib", "npm:2.8.1"]\
         ],\
@@ -8940,7 +8980,7 @@ const RAW_RUNTIME_STATE =
         "packageLocation": "./.yarn/__virtual__/graphql-tag-virtual-ede782d2bd/4/.yarn/berry/cache/graphql-tag-npm-2.12.7-fb9d05b992-10c0.zip/node_modules/graphql-tag/",\
         "packageDependencies": [\
           ["@types/graphql", null],\
-          ["graphql", "npm:15.10.3"],\
+          ["graphql", "npm:15.11.0"],\
           ["graphql-tag", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:2.12.7"],\
           ["tslib", "npm:2.8.1"]\
         ],\
@@ -9792,7 +9832,7 @@ const RAW_RUNTIME_STATE =
           ["@babel/preset-env", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.29.7"],\
           ["@cypress/code-coverage", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:4.1.3"],\
           ["@cypress/webpack-preprocessor", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:8.0.0"],\
-          ["@eslint/eslintrc", "npm:2.1.4"],\
+          ["@eslint/eslintrc", "npm:3.3.7"],\
           ["@faker-js/faker", "npm:10.6.0"],\
           ["@jahia/cypress", "npm:7.4.0"],\
           ["@jahia/eslint-config", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:2.2.0"],\
@@ -9806,7 +9846,7 @@ const RAW_RUNTIME_STATE =
           ["cypress-multi-reporters", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:2.1.0"],\
           ["cypress-terminal-report", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.4.0"],\
           ["cypress-wait-until", "npm:3.0.2"],\
-          ["dotenv", "npm:18.0.9"],\
+          ["dotenv", "npm:18.0.10"],\
           ["eslint", "npm:8.57.1"],\
           ["eslint-config-prettier", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:10.1.8"],\
           ["eslint-plugin-chai-friendly", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:1.2.1"],\
@@ -9818,7 +9858,7 @@ const RAW_RUNTIME_STATE =
           ["eslint-plugin-promise", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.3.0"],\
           ["eslint-plugin-react", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.37.5"],\
           ["eslint-plugin-react-hooks", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:7.1.1"],\
-          ["graphql", "npm:15.10.3"],\
+          ["graphql", "npm:15.11.0"],\
           ["graphql-tag", "virtual:f8921eda9073368487f687137ff4c78ced7b4d32021f0e11f33757ae36e1065c97a9b990bb4d8abd0de4a338b248051906f7cce4642037d054450d9ab647875b#npm:2.12.7"],\
           ["jahia-mcp-community-server-cypress", "workspace:."],\
           ["jahia-reporter", "npm:0.4.2"],\
