@@ -209,14 +209,15 @@ Decision (`GraphQLWhitelistGate.check`):
      passes; `mutation.*` denies with the read-only message; `subscription.*` denies; anything else denies;
    - otherwise the path passes if an entry covers it (`pathCoveredBy`: equal or below) or is a container of
      a more specific entry (`pathIsContainerOf`). Otherwise deny with `is not in the whitelist`.
-6. Each denial logs WARN with path, reason, user and IP. Named-spread and parse denials log without a path.
+6. Explicit whitelist only: a field carrying a `FIELD_NAMING_ARGUMENTS` argument (`fieldFilter`, `fieldSorter`,
+   `fieldGrouping`, literal or variable) must be covered by an entry (`isPathCovered`); the container rule is not
+   enough, because the field names inside the argument are strings the walk cannot see. Deny `NOT_WHITELISTED`.
+7. Each denial logs WARN with path, reason, user and IP. Named-spread and parse denials log without a path.
 
-Denial strings are client-safe and are returned with `ToolError`. The hint is chosen by
-`GraphQLExecuteTool.hintForDenial` from the denial text, in this order: `could not be parsed`,
-`named fragment`, `can never be run`, `subscriptions are not supported` or `'subscription:`,
-`mutations require an explicit` or `'mutation:`; anything else (the `admin` query denial included) gets the
-generic whitelist hint. The never-allowed check must come before `'mutation:`. Keep these substrings in sync
-with the denial texts of `GraphQLWhitelistGate`, or the hints go wrong.
+Denials are typed (`Denial`: a `Kind` plus a client-safe message) and are returned with `ToolError`
+(`validation` for `PARSE`, `forbidden` otherwise). The hint is chosen by `GraphQLExecuteTool.hintFor(Kind)`,
+never from the wording: `PROTECTED_QUERY` and `NOT_WHITELISTED` (the field-naming denial included) get the
+generic whitelist hint. A new `Kind` needs its own case there.
 
 ### React admin UI
 
@@ -285,6 +286,7 @@ with the denial texts of `GraphQLWhitelistGate`, or the hints go wrong.
 | Prefix entries | A prefix entry grants everything below it (for example `mutation:jcr`) | Accepted and documented. Prefer exact paths |
 | Deny list | Self-protection is a deny list (two mutation paths and the privilege-granting mutations); other state-changing mutations (module, bundle, provisioning, from any module) are guarded only by the admin's entries | Accepted and documented in the README security notes |
 | Skills under `mutation:jcr` | A `root` caller with `mutation:jcr` whitelisted can rewrite skills through the generic JCR mutations (root bypasses the container ACL) | Accepted and documented. Policing it needs argument inspection |
+| Query-string arguments | The arguments of an allowed field are not inspected: the JCR-SQL2 `query` of `nodesByQuery` can test property values that the selection never lists. `fieldFilter`/`fieldSorter`/`fieldGrouping` are handled (the carrying field must be covered) | Accepted and documented; closing it needs a JCR-SQL2 parser |
 | Response cost | The 5 MB response cap applies after the query ran and was serialized; no timeout or complexity limit | Accepted (admin-only) and documented |
 | Read-only exposure | The read-only default lets every query outside `admin` run, JCR-stored settings and user data included, and sends the result to the AI client | Kept as the default; README, `.cfg` and CHANGELOG recommend an explicit allow list in production |
 | Caller binding (upstream) | The admin gate and the GraphQL call rely on mcp-server binding the caller on the worker thread, which the SPI does not guarantee | Documented upstream dependency; fails closed if it changes |

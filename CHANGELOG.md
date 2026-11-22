@@ -71,6 +71,9 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   refused in every state, including the read-only default. Inline fragments are supported.
 - **Whole-document check.** Every operation in a document is checked, so a mutation cannot hide behind an
   allowed query.
+- **Field-naming arguments.** With an explicit whitelist, a field that takes `fieldFilter`, `fieldSorter` or
+  `fieldGrouping` must be covered by an entry. These arguments name fields as strings, so under a narrower entry
+  they could read fields that the whitelist never listed.
 - **Intermediate mutation fields run.** A deeper mutation entry (for example `mutation:jcr.addNode.mutateProperty`)
   also runs the mutation fields above it, because GraphQL cannot run the deeper field without them. Choose entries
   accordingly and prefer leaf paths.
@@ -93,7 +96,9 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   entry grants everything below it; self-protection is a deny list, so other
   state-changing mutations are protected only by the entries you choose; a `root` caller with
   `mutation:jcr` whitelisted can rewrite skills through the generic JCR mutations; the 5 MB response cap
-  applies after the query has run, and there is no timeout.
+  applies after the query has run, and there is no timeout; the free query string of an allowed field (the
+  JCR-SQL2 `query` of `nodesByQuery`) is not inspected, so it can test the value of properties the selection does
+  not list.
 
 ### Added
 

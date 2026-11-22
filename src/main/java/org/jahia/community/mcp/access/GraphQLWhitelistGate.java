@@ -56,11 +56,14 @@ import java.util.Set;
  * field may act by itself (create a node, for instance) even when only a field below it was meant.
  * Whitelist a mutation entry only if every segment of its path is acceptable to run on its own.</p>
  *
- * <p>Known limits (documented, not closed): graphql-dxm-provider's {@code fieldFilter},
- * {@code fieldSorter} and {@code fieldGrouping} arguments name fields that need not appear in the
- * document and are resolved without the permission instrumentation, so they can probe fields that a
- * narrow query entry did not list (query side only). And a mutation container field with only
- * {@code __typename} selected beneath it runs on its own under the container rule above.</p>
+ * <p>Field-naming arguments: graphql-dxm-provider's {@code fieldFilter}, {@code fieldSorter} and
+ * {@code fieldGrouping} arguments name fields as strings, which the path walk cannot see. With an explicit
+ * whitelist, a field that carries one of them must be COVERED by an entry (the entry equals the field's
+ * path or is above it, so every field it can name is covered too); leading towards a deeper entry is not
+ * enough. The read-only default needs no extra check: it already allows every query outside {@code admin}.</p>
+ *
+ * <p>Known limit (documented, not closed): a mutation container field with only {@code __typename}
+ * selected beneath it runs on its own under the container rule above.</p>
  */
 @Component(service = GraphQLWhitelistGate.class)
 public class GraphQLWhitelistGate {
@@ -85,6 +88,15 @@ public class GraphQLWhitelistGate {
     /** Client-facing reason for a named fragment spread. */
     static final String NAMED_SPREAD_REASON =
             "named fragment spreads are not permitted (use inline fragments '... on Type { ... }' instead)";
+    /**
+     * graphql-dxm-provider arguments that name fields as strings. The gate cannot check those names, so
+     * the field that carries one must be covered by a whitelist entry.
+     */
+    static final Set<String> FIELD_NAMING_ARGUMENTS = Set.of("fieldFilter", "fieldSorter", "fieldGrouping");
+    /** End of the denial for a field-naming argument under a field the whitelist does not cover. */
+    private static final String FIELD_NAMING_REASON_SUFFIX = "' uses fieldFilter, fieldSorter or fieldGrouping, "
+            + "which name fields the whitelist cannot check: it needs an entry that covers this field itself, "
+            + "not only a field below it";
 
     private final McpConfigService mcpConfigService;
 
@@ -146,10 +158,11 @@ public class GraphQLWhitelistGate {
             return Optional.of(new Denial(Denial.Kind.NAMED_SPREAD, DENIED + NAMED_SPREAD_REASON));
         }
 
-        final Set<String> extracted;
+        final Set<String> extracted = new LinkedHashSet<>();
+        final Set<String> fieldNamingPaths = new LinkedHashSet<>();
         try {
             // No depth cut-off: a never-allowed segment (grantRoles...) can sit at any depth.
-            extracted = extractOperationPaths(document, Integer.MAX_VALUE);
+            collectOperationPaths(document, Integer.MAX_VALUE, extracted, fieldNamingPaths);
         } catch (RuntimeException ex) {
             // A selection the gate cannot account for must never be allowed.
             LOGGER.warn("MCP operation blocked: selection could not be analysed, user='{}', ip='{}'", who, ip);
@@ -170,6 +183,27 @@ public class GraphQLWhitelistGate {
                             WhitelistEntries.display(path), denial.get().message(), who, ip);
                 }
                 return denial.map(d -> new Denial(d.kind(), DENIED + d.message()));
+            }
+        }
+        // Introspection paths are dropped here too, as for the path check above.
+        return fieldNamingDenial(withoutIntrospectionPaths(fieldNamingPaths), snapshot, who, ip);
+    }
+
+    /**
+     * With an explicit whitelist, refuses a field-naming argument on a field that is only a container of
+     * a deeper entry: the names it carries would reach fields that no entry lists.
+     */
+    private static Optional<Denial> fieldNamingDenial(final Set<String> fieldNamingPaths,
+            final WhitelistSnapshot snapshot, final String who, final String ip) {
+        if (snapshot.isReadOnlyDefault()) {
+            return Optional.empty();
+        }
+        for (final String path : fieldNamingPaths) {
+            if (!isPathCovered(path, snapshot.normalized())) {
+                final String shown = WhitelistEntries.display(path);
+                LOGGER.warn("MCP operation blocked: path='{}', reason='field-naming argument under a field "
+                        + "the whitelist does not cover', user='{}', ip='{}'", shown, who, ip);
+                return denial(Denial.Kind.NOT_WHITELISTED, DENIED + "'" + shown + FIELD_NAMING_REASON_SUFFIX);
             }
         }
         return Optional.empty();
@@ -229,14 +263,34 @@ public class GraphQLWhitelistGate {
      */
     static Set<String> extractOperationPaths(final Document doc, final int maxDepth) {
         final Set<String> paths = new LinkedHashSet<>();
+        collectOperationPaths(doc, maxDepth, paths, new LinkedHashSet<>());
+        return paths;
+    }
+
+    /**
+     * Adds every operation-qualified field path to {@code paths}, and the paths of the fields that carry
+     * a {@link #FIELD_NAMING_ARGUMENTS field-naming argument} to {@code fieldNamingPaths}.
+     */
+    private static void collectOperationPaths(final Document doc, final int maxDepth, final Set<String> paths,
+            final Set<String> fieldNamingPaths) {
         for (final Definition<?> def : doc.getDefinitions()) {
             if (def instanceof OperationDefinition) {
                 final OperationDefinition op = (OperationDefinition) def;
                 final String type = op.getOperation().name().toLowerCase(java.util.Locale.ROOT);
-                collectPaths(op.getSelectionSet(), type, 1, maxDepth, paths);
+                collectPaths(op.getSelectionSet(), type, 1, maxDepth, new PathSink(paths, fieldNamingPaths));
             }
         }
-        return paths;
+    }
+
+    /** The two sets one walk fills. */
+    private static final class PathSink {
+        private final Set<String> paths;
+        private final Set<String> fieldNamingPaths;
+
+        PathSink(final Set<String> paths, final Set<String> fieldNamingPaths) {
+            this.paths = paths;
+            this.fieldNamingPaths = fieldNamingPaths;
+        }
     }
 
     private static Set<String> withoutIntrospectionPaths(final Set<String> extracted) {
@@ -255,6 +309,16 @@ public class GraphQLWhitelistGate {
     static boolean isPathAllowed(final String path, final Set<String> whitelist) {
         for (final String entry : whitelist) {
             if (pathCoveredBy(path, entry) || pathIsContainerOf(path, entry)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True if an entry equals path or is above it (the container rule does not apply). */
+    static boolean isPathCovered(final String path, final Set<String> whitelist) {
+        for (final String entry : whitelist) {
+            if (pathCoveredBy(path, entry)) {
                 return true;
             }
         }
@@ -305,16 +369,16 @@ public class GraphQLWhitelistGate {
     }
 
     private static void collectPaths(final SelectionSet selectionSet, final String prefix,
-            final int depth, final int maxDepth, final Set<String> paths) {
+            final int depth, final int maxDepth, final PathSink sink) {
         if (selectionSet == null) {
             return;
         }
         for (final Selection<?> selection : selectionSet.getSelections()) {
             if (selection instanceof Field) {
-                collectFieldPath((Field) selection, prefix, depth, maxDepth, paths);
+                collectFieldPath((Field) selection, prefix, depth, maxDepth, sink);
             } else if (selection instanceof InlineFragment) {
                 // A type condition, not a field: same prefix and depth as the parent.
-                collectPaths(((InlineFragment) selection).getSelectionSet(), prefix, depth, maxDepth, paths);
+                collectPaths(((InlineFragment) selection).getSelectionSet(), prefix, depth, maxDepth, sink);
             } else {
                 // A FragmentSpread is refused by check() before this point; anything else is unknown.
                 throw new IllegalArgumentException("Unsupported selection " + selection.getClass().getSimpleName());
@@ -323,12 +387,16 @@ public class GraphQLWhitelistGate {
     }
 
     private static void collectFieldPath(final Field field, final String prefix,
-            final int depth, final int maxDepth, final Set<String> paths) {
+            final int depth, final int maxDepth, final PathSink sink) {
         final String path = prefix.isEmpty() ? field.getName() : prefix + "." + field.getName();
-        paths.add(path);
+        sink.paths.add(path);
+        // Presence decides, whatever the value (literal or variable): the names cannot be checked.
+        if (field.getArguments().stream().anyMatch(a -> FIELD_NAMING_ARGUMENTS.contains(a.getName()))) {
+            sink.fieldNamingPaths.add(path);
+        }
         // Deeper paths are decided by the same entry that covers this one (see pathCoveredBy).
         if (depth + 1 < maxDepth) {
-            collectPaths(field.getSelectionSet(), path, depth + 1, maxDepth, paths);
+            collectPaths(field.getSelectionSet(), path, depth + 1, maxDepth, sink);
         }
     }
 }
