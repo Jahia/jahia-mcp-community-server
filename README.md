@@ -59,8 +59,8 @@ administrator who called the tool, so JCR ACLs apply normally.
 | `personal-api-tokens` | optional | Only needed for API-token authentication |
 | Java | 17 | |
 
-`mcp-server` must be deployed first. The 2.0.0 build targets `mcp-server` 0.5.0-SNAPSHOT; a release
-of this module must be built against a released `mcp-server` 0.5.x.
+`mcp-server` must be deployed first. The 2.0.0 build targets the released `mcp-server` 0.5.0, available
+from the Jahia Store.
 
 ## Installation
 
@@ -621,7 +621,7 @@ Coverage is enforced. `mvn verify` (and so `install`) fails when JaCoCo line cov
 below 90%. `yarn test` fails below the Jest thresholds set in `jest.config.js` (95% of statements, lines
 and functions, 90% of branches).
 
-Docker-based Cypress integration tests live in `tests/`. They provision `mcp-server` 0.5.0-SNAPSHOT. The
+Docker-based Cypress integration tests live in `tests/`. They provision the released `mcp-server` 0.5.0. The
 suite needs a Jahia instance of its own: the whitelist is one server-wide configuration, and the token,
 skill and probe names are fixed, so two runs against the same instance interfere. Every spec starts from
 the read-only default.
