@@ -208,4 +208,36 @@ describe('MCP Server — Whitelist enforcement guards (fail-closed)', () => {
         executeGraphQL('{ currentUser { name, alias: name } }')
             .its('body.result.isError').should('eq', false);
     });
+
+    // ── Field-naming arguments: fieldFilter / fieldSorter / fieldGrouping ─────────────────────
+    // These arguments name fields as strings, outside the selection the gate walks. Under a narrow
+    // entry, the field that carries one must itself be covered, or the names could read fields that
+    // the whitelist never listed. The control arm shows that the narrow entry does allow the same
+    // query without the argument, so the refusal comes from the argument and not from the path.
+    const SITES_QUERY = 'SELECT * FROM [jnt:virtualsite]';
+    const sortedSites = (sorter: string) =>
+        `{ jcr { nodesByQuery(query: "${SITES_QUERY}"${sorter}) { nodes { uuid } } } }`;
+    const SORT_BY_NAME = ', fieldSorter: {fieldName: "name", sortType: ASC}';
+
+    it('allows the narrow entry without a field-naming argument (control)', () => {
+        setWhitelist(['query:jcr.nodesByQuery.nodes.uuid']);
+        executeGraphQL(sortedSites('')).its('body.result.isError').should('eq', false);
+    });
+
+    it('refuses fieldSorter on a field that only leads towards a narrow entry', () => {
+        setWhitelist(['query:jcr.nodesByQuery.nodes.uuid']);
+        executeGraphQL(sortedSites(SORT_BY_NAME)).then(response => {
+            expect(response.body.result.isError).to.eq(true);
+            expect(toolPayload(response).error.code).to.eq('forbidden');
+            expect(toolPayload(response).error.message).to.include('\'query:jcr.nodesByQuery\' uses fieldFilter, fieldSorter or fieldGrouping');
+        });
+    });
+
+    it('allows fieldSorter when an entry covers the field itself', () => {
+        setWhitelist(['query:jcr.nodesByQuery']);
+        executeGraphQL(sortedSites(SORT_BY_NAME)).then(response => {
+            expect(response.body.result.isError).to.eq(false);
+            expect(toolPayload(response).data.jcr.nodesByQuery.nodes).to.have.length.greaterThan(0);
+        });
+    });
 });

@@ -341,6 +341,11 @@ selection hierarchy:
   `mutation:jcr.addNode.mutateProperty` also lets `addNode` create a node. Intermediate fields are not
   checked on their own. Choose entries whose intermediate fields may run, and prefer the leaf
   operations you need.
+- A field that takes a `fieldFilter`, `fieldSorter` or `fieldGrouping` argument needs an entry that
+  covers the field itself. These arguments name fields as strings, which the gate cannot check, so leading
+  towards a deeper entry is not enough. With `query:jcr.nodesByQuery.nodes.uuid`, a `nodesByQuery` that
+  sorts or filters is refused; `query:jcr.nodesByQuery` allows it. The read-only default allows these
+  arguments on every query outside `admin`.
 - Other operation types (for example `subscription:`) and malformed paths grant nothing.
 - `mutation:communityMcp` and `mutation:admin.jahia.configuration` (each with everything under it) are
   **always refused**, whatever the whitelist says, including under a broader entry such as `mutation:admin`.
@@ -500,6 +505,12 @@ through `communityMcp { saveSettings }`.
   administrators or deny ACLs are added to skill nodes.
 - **Named fragment spreads** and **unparseable documents** are refused in every state, including the
   read-only default. Inline fragments are supported.
+- **Field-naming arguments.** `fieldFilter`, `fieldSorter` and `fieldGrouping` name fields as strings. With an
+  explicit whitelist, the field that carries one must be covered by an entry, so these arguments cannot reach
+  fields that no entry lists (see [Entry syntax](#entry-syntax)). The other arguments of an allowed field are
+  not inspected: the JCR-SQL2 `query` of an allowed `nodesByQuery`, for example, can still test the value of a
+  property that the selection does not list. Whitelist query fields that take a free query string only for
+  callers who may read what that query can reach.
 - **Never-allowed paths.** `mutation:communityMcp`, `mutation:admin.jahia.configuration` and the
   privilege-granting mutations are refused whatever the whitelist says. Intermediate mutation fields of a deeper entry do run (see
   [Entry syntax](#entry-syntax)), so keep mutation entries as narrow as the task allows.
@@ -531,6 +542,7 @@ through `communityMcp { saveSettings }`.
 | A `forbidden` error saying that an `Authorization` header is required | The call was authenticated only by a session cookie (for example sent from a browser) | Send `Authorization: APIToken <token>` or HTTP Basic credentials |
 | `Operation not allowed: mutations require an explicit mutation:<path> whitelist entry …` | Read-only default: the whitelist is empty and the call is a mutation | Add the mutation as `mutation:<path>` in Administration → MCP Server, or use a query |
 | `Operation not allowed: queries under 'admin' require an explicit query:admin<.path> whitelist entry …; '<path>' is not allowed` | Read-only default: the whitelist is empty, and the `admin` query namespace is not part of it | Add an explicit entry, for example `query:admin.jahia.isAlive`, or `query:admin` for the whole namespace |
+| `Operation not allowed: '<path>' uses fieldFilter, fieldSorter or fieldGrouping, …` | The field sorts, filters or groups by field name, and the whitelist only leads towards a deeper entry under it | Add an entry that covers the field itself, for example `query:jcr.nodesByQuery`, or drop the argument |
 | `Operation not allowed: '<path>' is not in the whitelist` | The operation is not covered by an entry | Add an exact `query:<path>` or `mutation:<path>` entry |
 | Every query refused after adding one `mutation:` entry | The list is no longer empty, so the read-only default no longer applies: only listed operations run | Add `query:` entries for the queries you need |
 | A denial saying the operation can never be run through `community.graphql.execute` | The operation is a never-allowed path: `mutation:communityMcp`, `mutation:admin.jahia.configuration`, a role grant or revocation, or personal API token management, or anything under them | Not allowed; by design. Make the change yourself in Jahia (the UI, the OSGi configuration or provisioning) |
