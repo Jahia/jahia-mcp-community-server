@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-11-22
 
 2.0.0 moves the module from its own MCP endpoint to a set of tools inside Jahia's `mcp-server`. It is
 a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
@@ -169,7 +169,7 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
 
 ### Notes
 
-- Until 2.0.0 is released, 1.x remains the supported line (see [SECURITY.md](SECURITY.md)).
+- From 2.0.0, 2.x is the supported line and 1.x no longer receives security fixes (see [SECURITY.md](SECURITY.md)).
 - Two behaviours of `mcp-server` are relied on but not guaranteed by its tool SPI: the caller bound on the
   worker thread, and the SPI package version, which follows the bundle version. A later `mcp-server` that
   changes the first makes the community tools refuse every call; `mcp-server` 0.6 leaves this bundle
