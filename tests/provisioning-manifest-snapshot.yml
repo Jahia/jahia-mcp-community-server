@@ -3,10 +3,10 @@
 - karafCommand: "log:log 'START - provisioning'"
 
 - karafCommand: "log:log 'START - Install jahia-mcp-community-server dependencies'"
-- addMavenRepository: 'https://devtools.jahia.com/nexus/content/groups/public/@snapshots@noreleases@id=JahiaSnapshot'
+- addMavenRepository: 'https://devtools.jahia.com/nexus/content/groups/public/@id=JahiaPublic'
 - installBundle:
       # The community module is an extension of mcp-server: it contributes tools to /modules/mcp.
-      - 'mvn:org.jahia.modules/mcp-server/0.5.0-SNAPSHOT'
+      - 'mvn:org.jahia.modules/mcp-server/0.5.0'
   autoStart: true
   uninstallPreviousVersion: false
 - karafCommand: "log:log 'END - Install jahia-mcp-community-server dependencies'"

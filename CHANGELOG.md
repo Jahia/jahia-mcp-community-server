@@ -144,7 +144,7 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
   created by 1.x, so an upgrade needs no content migration. Editing is restricted by the container's ACL:
   its inheritance is broken on activation, including on a container that a 1.x install created, so only the
   system session (the administrator-gated GraphQL operations and the module's seeding) writes skills.
-- **Build.** Built against `mcp-server` 0.5.0-SNAPSHOT. The `graphql-java-servlet` dependency is removed.
+- **Build.** Built against the released `mcp-server` 0.5.0. The `graphql-java-servlet` dependency is removed.
 - **Bundled skill.** The production recipe of `default/jahia-properties` sets
   `repositoryDirectoryListingDisabled = true` (it wrongly set `false`). Bundled skills are seeded only when
   absent: on an existing installation, update the skill with `saveSkill` or delete it before the upgrade.
@@ -169,7 +169,6 @@ a breaking release. See [Migrating from 1.x](README.md#migrating-from-1x).
 
 ### Notes
 
-- The 2.0.0 build targets `mcp-server` 0.5.0-SNAPSHOT. Release only against a released `mcp-server` 0.5.x.
 - Until 2.0.0 is released, 1.x remains the supported line (see [SECURITY.md](SECURITY.md)).
 - Two behaviours of `mcp-server` are relied on but not guaranteed by its tool SPI: the caller bound on the
   worker thread, and the SPI package version, which follows the bundle version. A later `mcp-server` that

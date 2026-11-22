@@ -287,7 +287,6 @@ with the denial texts of `GraphQLWhitelistGate`, or the hints go wrong.
 | Skills under `mutation:jcr` | A `root` caller with `mutation:jcr` whitelisted can rewrite skills through the generic JCR mutations (root bypasses the container ACL) | Accepted and documented. Policing it needs argument inspection |
 | Response cost | The 5 MB response cap applies after the query ran and was serialized; no timeout or complexity limit | Accepted (admin-only) and documented |
 | Read-only exposure | The read-only default lets every query outside `admin` run, JCR-stored settings and user data included, and sends the result to the AI client | Kept as the default; README, `.cfg` and CHANGELOG recommend an explicit allow list in production |
-| Snapshot build | Built against mcp-server 0.5.0-SNAPSHOT; the SPI version range is tight | Release only against a released mcp-server 0.5.x |
 | Caller binding (upstream) | The admin gate and the GraphQL call rely on mcp-server binding the caller on the worker thread, which the SPI does not guarantee | Documented upstream dependency; fails closed if it changes |
 | SPI versioning (upstream) | mcp-server exports the SPI package at its bundle version, so `[0.5,0.6)` leaves the whole bundle unresolved on mcp-server 0.6 even with an unchanged SPI | Documented upstream dependency; release a new version per mcp-server minor |
 | Upstream cross-site requests | mcp-server's own tools may accept cookie-authenticated calls | Outside this module; the community tools require an `Authorization` header |
@@ -304,8 +303,7 @@ Coverage gates: JaCoCo `check` is bound to `verify` and fails below 90% line cov
 Jest fails below the `coverageThreshold` of `jest.config.js` (95% statements, lines, functions; 90% branches).
 Add tests with the code, never lower a threshold to pass.
 
-Requires `org.jahia.modules:mcp-server:0.5.0-SNAPSHOT` in a reachable Maven repository (Jahia public or
-snapshot Nexus, or `mvn install` of mcp-server locally). The `jahia-depends` value is
+Requires the released `org.jahia.modules:mcp-server:0.5.0`, served by the Jahia public Nexus. The `jahia-depends` value is
 `default,graphql-dxm-provider=[3.9,4),mcp-server=[0.5,0.6)`. graphql-dxm-provider is compiled against 3.9.1 and
 imported as `[3.9,4)`: the version built against sets the import range, so bump it together with the
 minimum supported provider version.
